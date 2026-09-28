@@ -16,6 +16,6 @@ struct Event {
 	OrderId order_id{0};
 	Side side{Side::Buy};
 	Price price{};
-	Quantity quantity{};
+	Quantity quantity{0};
 };
 } // namespace simulator

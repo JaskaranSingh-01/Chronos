@@ -43,6 +43,7 @@ add_executable(simulator_tests
     tests/event_test.cpp
     tests/timestamp_test.cpp
     tests/enums_test.cpp
+    tests/order_test.cpp
 )
 
 target_link_libraries(simulator_tests

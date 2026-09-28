@@ -21,7 +21,7 @@ int main(){
     std::cout << "Timestamp: " << event.timestamp << '\n';
     std::cout << "Order ID: " << event.order_id << '\n';
     std::cout << "Price ticks: " << event.price.ticks << '\n';
-    std::cout << "Quantity: " << event.quantity.value << '\n';
+    std::cout << "Quantity: " << event.quantity.value() << '\n';
 
     return 0;
 

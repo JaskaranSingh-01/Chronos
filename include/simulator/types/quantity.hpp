@@ -4,14 +4,33 @@
 
 namespace simulator
 {
-    struct Quantity
+    class Quantity
     {
-        std::uint32_t value{0};
+    private:
+        std::uint32_t value_{0};
 
-        constexpr bool operator==(const Quantity&) const = default;
+    public:
+        constexpr explicit Quantity(std::uint32_t value) noexcept
+            : value_(value) {};
 
-        constexpr auto operator<=>(const Quantity&) const = default;
+        constexpr std::uint32_t value() const noexcept
+        {
+            return value_;
+        }
+
+        constexpr bool is_zero() const noexcept
+        {
+            return value_ == 0;
+        }
+
+        constexpr bool operator==(const Quantity &) const = default;
+        constexpr auto operator<=>(const Quantity &) const = default;
+        constexpr Quantity operator-(const Quantity& other) const noexcept {
+            return Quantity{value_ - other.value_};
+        }
+        // constexpr Quantity subtract(Quantity other) const noexcept {
+        //     return Quantity{value_ - other.value_};
+        // }
 
     };
-    
 } // namespace simulator

@@ -19,7 +19,7 @@ TEST(EventTest, DefaultValuesAreCorrect)
     EXPECT_EQ(event.order_id, OrderId{0});
     EXPECT_EQ(event.side, Side::Buy);
     EXPECT_EQ(event.price, Price{});
-    EXPECT_EQ(event.quantity, Quantity{});
+    EXPECT_EQ(event.quantity, Quantity{0});
 }
 
 TEST(EventTest, StoresTimestamp)

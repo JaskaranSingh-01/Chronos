@@ -7,16 +7,16 @@ using simulator::Quantity;
 
 TEST(QuantityTest, DefaultValueIsZero)
 {
-    constexpr Quantity quantity{};
+    constexpr Quantity quantity{0};
 
-    EXPECT_EQ(quantity.value, 0);
+    EXPECT_EQ(quantity.value(), 0);
 }
 
 TEST(QuantityTest, StoresValue)
 {
     constexpr Quantity quantity{100};
 
-    EXPECT_EQ(quantity.value, 100);
+    EXPECT_EQ(quantity.value(), 100);
 }
 
 TEST(QuantityTest, EqualityWorks)
@@ -56,7 +56,7 @@ TEST(QuantityTest, SupportsMaximumValue)
     };
 
     EXPECT_EQ(
-        quantity.value,
+        quantity.value(),
         std::numeric_limits<std::uint32_t>::max()
     );
 }
