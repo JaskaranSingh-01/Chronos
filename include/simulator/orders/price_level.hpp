@@ -20,13 +20,10 @@ public:
     explicit PriceLevel(Price price) noexcept
         : price_(price) {}
 
-    // Add an order to the back of the FIFO queue.
     bool add(Order& order) noexcept;
 
-    // Remove an order from anywhere in the FIFO queue.
     bool remove(Order& order) noexcept;
 
-    // First order in time priority.
     Order* front() noexcept {
         return head_;
     }
