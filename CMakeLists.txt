@@ -11,15 +11,37 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
-add_executable(simulator
-    app/main.cpp
+
+# -------------------------
+# Simulator library
+# -------------------------
+
+add_library(simulator_lib
+
     src/clock/clock.cpp
+    src/orders/price_level.cpp
 )
 
-target_include_directories(simulator
-    PRIVATE
+target_include_directories(simulator_lib
+    PUBLIC
         ${PROJECT_SOURCE_DIR}/include
 )
+
+
+# -------------------------
+# Application
+# -------------------------
+
+add_executable(simulator
+
+    app/main.cpp
+)
+
+target_link_libraries(simulator
+    PRIVATE
+        simulator_lib
+)
+
 
 # -------------------------
 # Tests
@@ -37,6 +59,7 @@ FetchContent_MakeAvailable(googletest)
 enable_testing()
 
 add_executable(simulator_tests
+
     tests/price_test.cpp
     tests/quantity_test.cpp
     tests/clock_test.cpp
@@ -44,10 +67,12 @@ add_executable(simulator_tests
     tests/timestamp_test.cpp
     tests/enums_test.cpp
     tests/order_test.cpp
+    tests/price_level_test.cpp
 )
 
 target_link_libraries(simulator_tests
     PRIVATE
+        simulator_lib
         GTest::gtest_main
 )
 

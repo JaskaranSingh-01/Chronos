@@ -10,6 +10,7 @@
 
 namespace simulator {
 
+class PriceLevel;
 using OrderId = std::uint64_t;
 
 class Order
@@ -22,6 +23,10 @@ private:
     Quantity remaining_quantity_{0};
     OrderState state_{OrderState::New};
     Timestamp timestamp_{0};
+    Order* prev_{nullptr};
+    Order* next_{nullptr};
+    PriceLevel* level_{nullptr};
+    friend class PriceLevel;
 public:
     constexpr Order(
         OrderId id,
