@@ -20,7 +20,7 @@ add_library(simulator_lib
 
     src/orders/price_level.cpp
     src/orders/order_book.cpp
-
+    src/matching/matching_engine.cpp
 )
 
 target_include_directories(simulator_lib
@@ -70,6 +70,7 @@ add_executable(simulator_tests
     tests/order_test.cpp
     tests/price_level_test.cpp
     tests/order_book_test.cpp
+    tests/matching_engine_test.cpp
 )
 
 target_link_libraries(simulator_tests

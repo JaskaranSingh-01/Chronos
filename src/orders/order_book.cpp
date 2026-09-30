@@ -59,6 +59,67 @@ bool OrderBook::add(Order& order) noexcept
     return true;
 }
 
+bool OrderBook::remove(OrderId id) noexcept{
+    auto it = orders_.find(id);
+
+    if(it == orders_.end()){
+        return false;
+    }
+
+    Order* order = it->second;
+    if(order == nullptr){
+        return false;
+    }
+    
+    if (order->state() != OrderState::Filled){
+        return false;
+    }
+    
+    const Price price = order->price();
+
+    if (order->side() == Side::Buy) {
+
+        auto level_it = bids_.find(price);
+
+        if (level_it == bids_.end()) {
+            return false;
+        }
+
+        PriceLevel& level = level_it->second;
+
+        if (!level.remove(*order)) {
+            return false;
+        }
+
+        if (level.empty()) {
+            bids_.erase(level_it);
+        }
+
+    } else {
+
+        auto level_it = asks_.find(price);
+
+        if (level_it == asks_.end()) {
+            return false;
+        }
+
+        PriceLevel& level = level_it->second;
+
+        if (!level.remove(*order)) {
+            return false;
+        }
+
+        if (level.empty()) {
+            asks_.erase(level_it);
+        }
+    }
+
+    orders_.erase(it);
+
+    return true;
+
+}
+
 bool OrderBook::cancel(OrderId id) noexcept
 {
     auto it = orders_.find(id);

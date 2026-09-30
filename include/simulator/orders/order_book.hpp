@@ -18,6 +18,8 @@ namespace simulator
 
     public:
         bool add(Order &order) noexcept;
+        
+        bool remove(OrderId id) noexcept;
 
         bool cancel(OrderId id) noexcept;
 
