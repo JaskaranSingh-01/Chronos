@@ -811,4 +811,43 @@ TEST(MatchingEngineTest, PreservesFIFOBetweenBidsAtSamePrice)
     EXPECT_EQ(book.best_bid()->id(), buy2.id());
 }
 
+TEST(MatchingEngineTest, RejectsNewOrder)
+{
+    OrderBook book;
+    MatchingEngine engine{book};
+
+    auto buy = make_buy_order(
+        1,
+        Price{100},
+        Quantity{100},
+        10
+    );
+
+    auto trades = engine.submit(buy);
+
+    EXPECT_TRUE(trades.empty());
+    EXPECT_EQ(buy.state(), OrderState::New);
+    EXPECT_TRUE(book.empty());
+}
+
+TEST(MatchingEngineTest, DoesNotTradeZeroQuantity)
+{
+    OrderBook book;
+    MatchingEngine engine{book};
+
+    auto buy = make_buy_order(
+        1,
+        Price{100},
+        Quantity{0},
+        10
+    );
+
+    activate(buy);
+
+    auto trades = engine.submit(buy);
+
+    EXPECT_TRUE(trades.empty());
+    EXPECT_TRUE(book.empty());
+}
+
 } // namespace simulator
