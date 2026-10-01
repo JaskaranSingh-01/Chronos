@@ -7,37 +7,66 @@ namespace simulator
 
     std::vector<Trade> MatchingEngine::submit(Order &order)
     {
-
         std::vector<Trade> trades;
 
-        if (order.state() != OrderState::Active)
+        if (order.state() != OrderState::Active &&
+            order.state() != OrderState::PartiallyFilled)
         {
             return trades;
         }
 
-        if (order.side() == Side::Buy)
+        while (!order.remaining_quantity().is_zero())
         {
-            Order *resting = book_.best_ask();
-            if (resting == nullptr)
+            Order *resting = nullptr;
+
+            if (order.side() == Side::Buy)
             {
-                book_.add(order);
-                return trades;
+                resting = book_.best_ask();
+
+                if (resting == nullptr)
+                {
+                    break;
+                }
+
+                if (order.price() < resting->price())
+                {
+                    break;
+                }
             }
 
-            if (order.price() < resting->price())
+            else
             {
-                book_.add(order);
-                return trades;
+                resting = book_.best_bid();
+
+                if (resting == nullptr)
+                {
+                    break;
+                }
+
+                if (order.price() > resting->price())
+                {
+                    break;
+                }
             }
 
-            const Quantity executed = std::min(order.remaining_quantity(), resting->remaining_quantity());
+            const Quantity executed =
+                std::min(
+                    order.remaining_quantity(),
+                    resting->remaining_quantity());
 
             order.execute(executed);
             resting->execute(executed);
+
             trades.push_back(
                 Trade{
-                    order.id(),
-                    resting->id(),
+                    order.side() == Side::Buy
+                        ? order.id()
+                        : resting->id(),
+
+                    order.side() == Side::Buy
+                        ? resting->id()
+                        : order.id(),
+
                     resting->price(),
                     executed,
                     order.timestamp()});
@@ -47,50 +76,13 @@ namespace simulator
                 book_.remove(resting->id());
             }
 
-            if (order.state() != OrderState::Filled)
+            if (order.remaining_quantity().is_zero())
             {
-                book_.add(order);
+                break;
             }
-
-            return trades;
-        }
-        Order *resting = book_.best_bid();
-
-        if (resting == nullptr)
-        {
-            book_.add(order);
-            return trades;
         }
 
-        if (order.price() > resting->price())
-        {
-            book_.add(order);
-            return trades;
-        }
-
-        const Quantity executed =
-            std::min(
-                order.remaining_quantity(),
-                resting->remaining_quantity());
-
-        order.execute(executed);
-        resting->execute(executed);
-
-        trades.push_back(
-            Trade{
-                resting->id(),
-                order.id(),
-                resting->price(),
-                executed,
-                order.timestamp()});
-
-
-        if (resting->state() == OrderState::Filled)
-        {
-            book_.remove(resting->id());
-        }
-
-        if (order.state() != OrderState::Filled)
+        if (!order.remaining_quantity().is_zero())
         {
             book_.add(order);
         }

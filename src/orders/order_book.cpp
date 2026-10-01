@@ -4,8 +4,9 @@ namespace simulator {
 
 bool OrderBook::add(Order& order) noexcept
 {
-    // Only active orders can enter the book.
-    if (order.state() != OrderState::Active) {
+
+    if (order.state() != OrderState::Active &&
+        order.state() != OrderState::PartiallyFilled) {
         return false;
     }
 
