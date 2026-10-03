@@ -20,6 +20,8 @@ add_library(simulator_lib
 
     src/orders/price_level.cpp
     src/orders/order_book.cpp
+    src/orders/order.cpp
+    src/orders/order_pool.cpp
     src/matching/matching_engine.cpp
 )
 
@@ -71,6 +73,7 @@ add_executable(simulator_tests
     tests/price_level_test.cpp
     tests/order_book_test.cpp
     tests/matching_engine_test.cpp
+    tests/order_pool_test.cpp
 )
 
 target_link_libraries(simulator_tests
