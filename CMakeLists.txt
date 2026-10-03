@@ -74,6 +74,7 @@ add_executable(simulator_tests
     tests/order_book_test.cpp
     tests/matching_engine_test.cpp
     tests/order_pool_test.cpp
+    tests/order_pool_integration_test.cpp
 )
 
 target_link_libraries(simulator_tests

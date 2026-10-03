@@ -5,14 +5,13 @@
 namespace simulator
 {
 
-    std::vector<Trade> MatchingEngine::submit(Order &order)
+    std::size_t MatchingEngine::submit(Order &order,std::vector<Trade>& trades)
     {
-        std::vector<Trade> trades;
-
+        trades.clear();
         if (order.state() != OrderState::Active &&
             order.state() != OrderState::PartiallyFilled)
         {
-            return trades;
+            return 0;
         }
 
         while (!order.remaining_quantity().is_zero())
@@ -87,7 +86,7 @@ namespace simulator
             book_.add(order);
         }
 
-        return trades;
+        return trades.size();
     }
 
 } // namespace simulator

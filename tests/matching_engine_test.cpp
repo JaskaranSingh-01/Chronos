@@ -1,8 +1,11 @@
 #include <gtest/gtest.h>
 
+#include <vector>
+
 #include "simulator/matching/matching_engine.hpp"
 
 namespace simulator {
+
 namespace {
 
 Order make_buy_order(
@@ -63,7 +66,10 @@ TEST(MatchingEngineTest, ExactBuySellMatch)
     ASSERT_NE(book.best_ask(), nullptr);
     ASSERT_EQ(book.best_ask()->id(), sell.id());
     ASSERT_EQ(book.best_ask()->price(), Price{100});
-    ASSERT_EQ(book.best_ask()->remaining_quantity(), Quantity{100});
+    ASSERT_EQ(
+        book.best_ask()->remaining_quantity(),
+        Quantity{100}
+    );
 
     // Incoming buy order.
     auto buy = make_buy_order(
@@ -75,8 +81,12 @@ TEST(MatchingEngineTest, ExactBuySellMatch)
 
     activate(buy);
 
-    auto trades = engine.submit(buy);
+    std::vector<Trade> trades;
 
+    const auto trade_count =
+        engine.submit(buy, trades);
+
+    ASSERT_EQ(trade_count, 1);
     ASSERT_EQ(trades.size(), 1);
 
     const Trade& trade = trades[0];
@@ -109,6 +119,7 @@ TEST(MatchingEngineTest, ExactBuySellMatch)
     EXPECT_TRUE(book.empty());
 }
 
+
 TEST(MatchingEngineTest, PartialFillIncomingOrderLarger)
 {
     OrderBook book;
@@ -122,6 +133,7 @@ TEST(MatchingEngineTest, PartialFillIncomingOrderLarger)
     );
 
     activate(sell);
+
     ASSERT_TRUE(book.add(sell));
 
     auto buy = make_buy_order(
@@ -133,8 +145,12 @@ TEST(MatchingEngineTest, PartialFillIncomingOrderLarger)
 
     activate(buy);
 
-    auto trades = engine.submit(buy);
+    std::vector<Trade> trades;
 
+    const auto trade_count =
+        engine.submit(buy, trades);
+
+    ASSERT_EQ(trade_count, 1);
     ASSERT_EQ(trades.size(), 1);
 
     const Trade& trade = trades[0];
@@ -152,12 +168,18 @@ TEST(MatchingEngineTest, PartialFillIncomingOrderLarger)
     EXPECT_EQ(buy.remaining_quantity(), Quantity{50});
 
     EXPECT_EQ(book.find(sell.id()), nullptr);
+
     ASSERT_NE(book.find(buy.id()), nullptr);
-    EXPECT_EQ(book.find(buy.id())->remaining_quantity(), Quantity{50});
+
+    EXPECT_EQ(
+        book.find(buy.id())->remaining_quantity(),
+        Quantity{50}
+    );
 
     EXPECT_EQ(book.best_bid()->id(), buy.id());
     EXPECT_EQ(book.best_ask(), nullptr);
 }
+
 
 TEST(MatchingEngineTest, PartialFillRestingOrderLarger)
 {
@@ -172,6 +194,7 @@ TEST(MatchingEngineTest, PartialFillRestingOrderLarger)
     );
 
     activate(sell);
+
     ASSERT_TRUE(book.add(sell));
 
     auto buy = make_buy_order(
@@ -183,8 +206,12 @@ TEST(MatchingEngineTest, PartialFillRestingOrderLarger)
 
     activate(buy);
 
-    auto trades = engine.submit(buy);
+    std::vector<Trade> trades;
 
+    const auto trade_count =
+        engine.submit(buy, trades);
+
+    ASSERT_EQ(trade_count, 1);
     ASSERT_EQ(trades.size(), 1);
 
     const Trade& trade = trades[0];
@@ -204,11 +231,16 @@ TEST(MatchingEngineTest, PartialFillRestingOrderLarger)
     EXPECT_EQ(book.find(buy.id()), nullptr);
 
     ASSERT_NE(book.find(sell.id()), nullptr);
-    EXPECT_EQ(book.find(sell.id())->remaining_quantity(), Quantity{50});
+
+    EXPECT_EQ(
+        book.find(sell.id())->remaining_quantity(),
+        Quantity{50}
+    );
 
     EXPECT_EQ(book.best_bid(), nullptr);
     EXPECT_EQ(book.best_ask()->id(), sell.id());
 }
+
 
 TEST(MatchingEngineTest, DoesNotMatchWhenPricesDoNotCross)
 {
@@ -223,6 +255,7 @@ TEST(MatchingEngineTest, DoesNotMatchWhenPricesDoNotCross)
     );
 
     activate(sell);
+
     ASSERT_TRUE(book.add(sell));
 
     auto buy = make_buy_order(
@@ -234,8 +267,12 @@ TEST(MatchingEngineTest, DoesNotMatchWhenPricesDoNotCross)
 
     activate(buy);
 
-    auto trades = engine.submit(buy);
+    std::vector<Trade> trades;
 
+    const auto trade_count =
+        engine.submit(buy, trades);
+
+    EXPECT_EQ(trade_count, 0);
     EXPECT_TRUE(trades.empty());
 
     EXPECT_EQ(sell.state(), OrderState::Active);
@@ -250,6 +287,7 @@ TEST(MatchingEngineTest, DoesNotMatchWhenPricesDoNotCross)
     EXPECT_EQ(book.best_ask()->id(), sell.id());
     EXPECT_EQ(book.best_bid()->id(), buy.id());
 }
+
 
 TEST(MatchingEngineTest, MatchesAcrossMultiplePriceLevels)
 {
@@ -294,8 +332,12 @@ TEST(MatchingEngineTest, MatchesAcrossMultiplePriceLevels)
 
     activate(buy);
 
-    auto trades = engine.submit(buy);
+    std::vector<Trade> trades;
 
+    const auto trade_count =
+        engine.submit(buy, trades);
+
+    ASSERT_EQ(trade_count, 3);
     ASSERT_EQ(trades.size(), 3);
 
     EXPECT_EQ(trades[0].buy_order_id, buy.id());
@@ -326,14 +368,20 @@ TEST(MatchingEngineTest, MatchesAcrossMultiplePriceLevels)
     EXPECT_EQ(book.find(sell2.id()), nullptr);
 
     ASSERT_NE(book.find(sell3.id()), nullptr);
-    EXPECT_EQ(book.find(sell3.id())->remaining_quantity(), Quantity{30});
+
+    EXPECT_EQ(
+        book.find(sell3.id())->remaining_quantity(),
+        Quantity{30}
+    );
 
     EXPECT_EQ(book.find(buy.id()), nullptr);
 
     EXPECT_EQ(book.best_bid(), nullptr);
+
     ASSERT_NE(book.best_ask(), nullptr);
     EXPECT_EQ(book.best_ask()->id(), sell3.id());
 }
+
 
 TEST(MatchingEngineTest, PreservesFIFOAtSamePrice)
 {
@@ -369,8 +417,12 @@ TEST(MatchingEngineTest, PreservesFIFOAtSamePrice)
 
     activate(buy);
 
-    auto trades = engine.submit(buy);
+    std::vector<Trade> trades;
 
+    const auto trade_count =
+        engine.submit(buy, trades);
+
+    ASSERT_EQ(trade_count, 2);
     ASSERT_EQ(trades.size(), 2);
 
     EXPECT_EQ(trades[0].buy_order_id, buy.id());
@@ -395,14 +447,20 @@ TEST(MatchingEngineTest, PreservesFIFOAtSamePrice)
     EXPECT_EQ(book.find(sell1.id()), nullptr);
 
     ASSERT_NE(book.find(sell2.id()), nullptr);
-    EXPECT_EQ(book.find(sell2.id())->remaining_quantity(), Quantity{50});
+
+    EXPECT_EQ(
+        book.find(sell2.id())->remaining_quantity(),
+        Quantity{50}
+    );
 
     EXPECT_EQ(book.find(buy.id()), nullptr);
 
     EXPECT_EQ(book.best_bid(), nullptr);
+
     ASSERT_NE(book.best_ask(), nullptr);
     EXPECT_EQ(book.best_ask()->id(), sell2.id());
 }
+
 
 TEST(MatchingEngineTest, ExactSellBuyMatch)
 {
@@ -417,6 +475,7 @@ TEST(MatchingEngineTest, ExactSellBuyMatch)
     );
 
     activate(buy);
+
     ASSERT_TRUE(book.add(buy));
 
     auto sell = make_sell_order(
@@ -428,8 +487,12 @@ TEST(MatchingEngineTest, ExactSellBuyMatch)
 
     activate(sell);
 
-    auto trades = engine.submit(sell);
+    std::vector<Trade> trades;
 
+    const auto trade_count =
+        engine.submit(sell, trades);
+
+    ASSERT_EQ(trade_count, 1);
     ASSERT_EQ(trades.size(), 1);
 
     const Trade& trade = trades[0];
@@ -455,6 +518,7 @@ TEST(MatchingEngineTest, ExactSellBuyMatch)
     EXPECT_TRUE(book.empty());
 }
 
+
 TEST(MatchingEngineTest, PartialFillIncomingSellOrderLarger)
 {
     OrderBook book;
@@ -468,6 +532,7 @@ TEST(MatchingEngineTest, PartialFillIncomingSellOrderLarger)
     );
 
     activate(buy);
+
     ASSERT_TRUE(book.add(buy));
 
     auto sell = make_sell_order(
@@ -479,8 +544,12 @@ TEST(MatchingEngineTest, PartialFillIncomingSellOrderLarger)
 
     activate(sell);
 
-    auto trades = engine.submit(sell);
+    std::vector<Trade> trades;
 
+    const auto trade_count =
+        engine.submit(sell, trades);
+
+    ASSERT_EQ(trade_count, 1);
     ASSERT_EQ(trades.size(), 1);
 
     const Trade& trade = trades[0];
@@ -500,11 +569,16 @@ TEST(MatchingEngineTest, PartialFillIncomingSellOrderLarger)
     EXPECT_EQ(book.find(buy.id()), nullptr);
 
     ASSERT_NE(book.find(sell.id()), nullptr);
-    EXPECT_EQ(book.find(sell.id())->remaining_quantity(), Quantity{50});
+
+    EXPECT_EQ(
+        book.find(sell.id())->remaining_quantity(),
+        Quantity{50}
+    );
 
     EXPECT_EQ(book.best_bid(), nullptr);
     EXPECT_EQ(book.best_ask()->id(), sell.id());
 }
+
 
 TEST(MatchingEngineTest, PartialFillRestingBuyOrderLarger)
 {
@@ -519,6 +593,7 @@ TEST(MatchingEngineTest, PartialFillRestingBuyOrderLarger)
     );
 
     activate(buy);
+
     ASSERT_TRUE(book.add(buy));
 
     auto sell = make_sell_order(
@@ -530,8 +605,12 @@ TEST(MatchingEngineTest, PartialFillRestingBuyOrderLarger)
 
     activate(sell);
 
-    auto trades = engine.submit(sell);
+    std::vector<Trade> trades;
 
+    const auto trade_count =
+        engine.submit(sell, trades);
+
+    ASSERT_EQ(trade_count, 1);
     ASSERT_EQ(trades.size(), 1);
 
     const Trade& trade = trades[0];
@@ -551,11 +630,16 @@ TEST(MatchingEngineTest, PartialFillRestingBuyOrderLarger)
     EXPECT_EQ(book.find(sell.id()), nullptr);
 
     ASSERT_NE(book.find(buy.id()), nullptr);
-    EXPECT_EQ(book.find(buy.id())->remaining_quantity(), Quantity{50});
+
+    EXPECT_EQ(
+        book.find(buy.id())->remaining_quantity(),
+        Quantity{50}
+    );
 
     EXPECT_EQ(book.best_ask(), nullptr);
     EXPECT_EQ(book.best_bid()->id(), buy.id());
 }
+
 
 TEST(MatchingEngineTest, SellMatchesAcrossMultipleBidLevels)
 {
@@ -600,8 +684,12 @@ TEST(MatchingEngineTest, SellMatchesAcrossMultipleBidLevels)
 
     activate(sell);
 
-    auto trades = engine.submit(sell);
+    std::vector<Trade> trades;
 
+    const auto trade_count =
+        engine.submit(sell, trades);
+
+    ASSERT_EQ(trade_count, 3);
     ASSERT_EQ(trades.size(), 3);
 
     EXPECT_EQ(trades[0].buy_order_id, buy1.id());
@@ -632,14 +720,20 @@ TEST(MatchingEngineTest, SellMatchesAcrossMultipleBidLevels)
     EXPECT_EQ(book.find(buy2.id()), nullptr);
 
     ASSERT_NE(book.find(buy3.id()), nullptr);
-    EXPECT_EQ(book.find(buy3.id())->remaining_quantity(), Quantity{30});
+
+    EXPECT_EQ(
+        book.find(buy3.id())->remaining_quantity(),
+        Quantity{30}
+    );
 
     EXPECT_EQ(book.find(sell.id()), nullptr);
 
     EXPECT_EQ(book.best_ask(), nullptr);
+
     ASSERT_NE(book.best_bid(), nullptr);
     EXPECT_EQ(book.best_bid()->id(), buy3.id());
 }
+
 
 TEST(MatchingEngineTest, BuyWithNoOpposingLiquidityBecomesRestingOrder)
 {
@@ -655,8 +749,12 @@ TEST(MatchingEngineTest, BuyWithNoOpposingLiquidityBecomesRestingOrder)
 
     activate(buy);
 
-    auto trades = engine.submit(buy);
+    std::vector<Trade> trades;
 
+    const auto trade_count =
+        engine.submit(buy, trades);
+
+    EXPECT_EQ(trade_count, 0);
     EXPECT_TRUE(trades.empty());
 
     EXPECT_EQ(buy.state(), OrderState::Active);
@@ -670,6 +768,7 @@ TEST(MatchingEngineTest, BuyWithNoOpposingLiquidityBecomesRestingOrder)
 
     EXPECT_EQ(book.best_ask(), nullptr);
 }
+
 
 TEST(MatchingEngineTest, SellWithNoOpposingLiquidityBecomesRestingOrder)
 {
@@ -685,8 +784,12 @@ TEST(MatchingEngineTest, SellWithNoOpposingLiquidityBecomesRestingOrder)
 
     activate(sell);
 
-    auto trades = engine.submit(sell);
+    std::vector<Trade> trades;
 
+    const auto trade_count =
+        engine.submit(sell, trades);
+
+    EXPECT_EQ(trade_count, 0);
     EXPECT_TRUE(trades.empty());
 
     EXPECT_EQ(sell.state(), OrderState::Active);
@@ -701,6 +804,7 @@ TEST(MatchingEngineTest, SellWithNoOpposingLiquidityBecomesRestingOrder)
     EXPECT_EQ(book.best_ask()->id(), sell.id());
 }
 
+
 TEST(MatchingEngineTest, SellDoesNotMatchWhenPriceIsAboveBestBid)
 {
     OrderBook book;
@@ -714,6 +818,7 @@ TEST(MatchingEngineTest, SellDoesNotMatchWhenPriceIsAboveBestBid)
     );
 
     activate(buy);
+
     ASSERT_TRUE(book.add(buy));
 
     auto sell = make_sell_order(
@@ -725,8 +830,12 @@ TEST(MatchingEngineTest, SellDoesNotMatchWhenPriceIsAboveBestBid)
 
     activate(sell);
 
-    auto trades = engine.submit(sell);
+    std::vector<Trade> trades;
 
+    const auto trade_count =
+        engine.submit(sell, trades);
+
+    EXPECT_EQ(trade_count, 0);
     EXPECT_TRUE(trades.empty());
 
     EXPECT_EQ(buy.state(), OrderState::Active);
@@ -741,6 +850,7 @@ TEST(MatchingEngineTest, SellDoesNotMatchWhenPriceIsAboveBestBid)
     EXPECT_EQ(book.best_bid()->id(), buy.id());
     EXPECT_EQ(book.best_ask()->id(), sell.id());
 }
+
 
 TEST(MatchingEngineTest, PreservesFIFOBetweenBidsAtSamePrice)
 {
@@ -776,8 +886,12 @@ TEST(MatchingEngineTest, PreservesFIFOBetweenBidsAtSamePrice)
 
     activate(sell);
 
-    auto trades = engine.submit(sell);
+    std::vector<Trade> trades;
 
+    const auto trade_count =
+        engine.submit(sell, trades);
+
+    ASSERT_EQ(trade_count, 2);
     ASSERT_EQ(trades.size(), 2);
 
     EXPECT_EQ(trades[0].buy_order_id, buy1.id());
@@ -802,14 +916,20 @@ TEST(MatchingEngineTest, PreservesFIFOBetweenBidsAtSamePrice)
     EXPECT_EQ(book.find(buy1.id()), nullptr);
 
     ASSERT_NE(book.find(buy2.id()), nullptr);
-    EXPECT_EQ(book.find(buy2.id())->remaining_quantity(), Quantity{50});
+
+    EXPECT_EQ(
+        book.find(buy2.id())->remaining_quantity(),
+        Quantity{50}
+    );
 
     EXPECT_EQ(book.find(sell.id()), nullptr);
 
     EXPECT_EQ(book.best_ask(), nullptr);
+
     ASSERT_NE(book.best_bid(), nullptr);
     EXPECT_EQ(book.best_bid()->id(), buy2.id());
 }
+
 
 TEST(MatchingEngineTest, RejectsNewOrder)
 {
@@ -823,12 +943,18 @@ TEST(MatchingEngineTest, RejectsNewOrder)
         10
     );
 
-    auto trades = engine.submit(buy);
+    std::vector<Trade> trades;
 
+    const auto trade_count =
+        engine.submit(buy, trades);
+
+    EXPECT_EQ(trade_count, 0);
     EXPECT_TRUE(trades.empty());
+
     EXPECT_EQ(buy.state(), OrderState::New);
     EXPECT_TRUE(book.empty());
 }
+
 
 TEST(MatchingEngineTest, DoesNotTradeZeroQuantity)
 {
@@ -844,9 +970,14 @@ TEST(MatchingEngineTest, DoesNotTradeZeroQuantity)
 
     activate(buy);
 
-    auto trades = engine.submit(buy);
+    std::vector<Trade> trades;
 
+    const auto trade_count =
+        engine.submit(buy, trades);
+
+    EXPECT_EQ(trade_count, 0);
     EXPECT_TRUE(trades.empty());
+
     EXPECT_TRUE(book.empty());
 }
 

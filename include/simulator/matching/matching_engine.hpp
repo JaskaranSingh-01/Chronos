@@ -17,7 +17,7 @@ public:
         : book_(book)
     {}
 
-    std::vector<Trade> submit(Order& order);
+    std::size_t submit(Order& order,std::vector<Trade>& trades);
 };
 
 } // namespace simulator
