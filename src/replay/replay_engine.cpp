@@ -35,6 +35,17 @@ ReplayEngine::ProcessResult ReplayEngine::process_event(
         return ProcessResult::Processed;
     }
 
+    case ReplayEventType::Execute:
+    {
+        // Not implemented yet.
+        //
+        // ITCH-1 only expands the normalized event model.
+        // Execution semantics will be implemented after
+        // the ITCH decoder/normalizer is in place.
+
+        return ProcessResult::Rejected;
+    }
+
     case ReplayEventType::Cancel:
     {
         if (!simulator_.cancel_order(event.order_id)) {
@@ -43,6 +54,27 @@ ReplayEngine::ProcessResult ReplayEngine::process_event(
 
         ++statistics.cancel_events;
         return ProcessResult::Processed;
+    }
+
+    case ReplayEventType::Delete:
+    {
+        // Not implemented yet.
+        //
+        // Delete is intentionally different from Cancel.
+        // We will add explicit Simulator/OrderBook semantics
+        // for it when implementing ITCH order lifecycle events.
+
+        return ProcessResult::Rejected;
+    }
+
+    case ReplayEventType::Replace:
+    {
+        // Not implemented yet.
+        //
+        // Replace semantics will be added after the normalized
+        // event model and ITCH message definitions are established.
+
+        return ProcessResult::Rejected;
     }
     }
 

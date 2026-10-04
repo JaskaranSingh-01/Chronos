@@ -26,6 +26,10 @@ add_library(simulator_lib
     src/simulator/simulator.cpp
     src/replay/replay_engine.cpp
     src/replay/replay_event_reader.cpp
+    src/itch/byte_reader.cpp
+    src/itch/itch_message_reader.cpp
+    src/itch/itch_decoder.cpp
+    src/itch/itch_normalizer.cpp
 )
 
 target_include_directories(simulator_lib
@@ -81,6 +85,9 @@ add_executable(simulator_tests
     tests/simulator_test.cpp
     tests/replay_engine_test.cpp
     tests/replay_event_reader_test.cpp
+    tests/itch/byte_reader_test.cpp
+    tests/itch/itch_message_reader_test.cpp
+    tests/itch/itch_decoder_test.cpp
 )
 
 target_compile_definitions(simulator_tests

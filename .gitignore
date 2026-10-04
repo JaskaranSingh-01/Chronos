@@ -4,3 +4,4 @@ build
 *.crdownload
 compile_commands.json
 .DS_Store
+data
