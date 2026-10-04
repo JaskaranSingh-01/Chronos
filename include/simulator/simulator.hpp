@@ -32,6 +32,7 @@ public:
         Quantity quantity,
         Timestamp timestamp
     );
+    bool cancel_order(OrderId id) noexcept;
     void advance_to(Timestamp timestamp) noexcept;
     bool release_order(Order& order) noexcept;
 

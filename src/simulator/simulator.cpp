@@ -50,6 +50,21 @@ void Simulator::advance_to(Timestamp timestamp) noexcept
     clock_.advance_to(timestamp);
 }
 
+bool Simulator::cancel_order(OrderId id) noexcept
+{
+    Order* order = order_book_.find(id);
+
+    if (order == nullptr) {
+        return false;
+    }
+
+    if (!order_book_.cancel(id)) {
+        return false;
+    }
+
+    return order_pool_.release(*order);
+}
+
 bool Simulator::release_order(Order& order) noexcept
 {
     if (order.state() != OrderState::Filled &&

@@ -107,7 +107,57 @@ TEST(ReplayEngineTest, ReplaysOrdersThatMatch)
     );
 }
 
+TEST(ReplayEngineTest, ReplaysCancellation)
+{
+    Simulator simulator{10};
 
+    ReplayEngine replay{simulator};
+
+    const std::vector<ReplayEvent> events{
+        ReplayEvent{
+            Timestamp{100},
+            ReplayEventType::Add,
+            1,
+            Side::Buy,
+            Price{100},
+            Quantity{100}
+        },
+
+        ReplayEvent{
+            Timestamp{200},
+            ReplayEventType::Cancel,
+            1,
+            Side::Buy,
+            Price{100},
+            Quantity{100}
+        }
+    };
+
+    ASSERT_EQ(
+        replay.replay(events),
+        2
+    );
+
+    EXPECT_EQ(
+        simulator.clock().now(),
+        Timestamp{200}
+    );
+
+    EXPECT_EQ(
+        simulator.order_book().find(1),
+        nullptr
+    );
+
+    EXPECT_EQ(
+        simulator.orders_in_use(),
+        0
+    );
+
+    EXPECT_EQ(
+        simulator.orders_available(),
+        10
+    );
+}
 
 } // namespace
 } // namespace simulator

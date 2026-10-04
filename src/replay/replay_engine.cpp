@@ -29,7 +29,7 @@ std::size_t ReplayEngine::replay(
 
         case ReplayEventType::Cancel:
         {
-            // Cancellation API will be added next.
+            simulator_.cancel_order(event.order_id);
             break;
         }
         }

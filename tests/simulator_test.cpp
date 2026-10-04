@@ -233,5 +233,97 @@ TEST(SimulatorTest, ActiveOrderCannotBeReleased)
     EXPECT_EQ(simulator.orders_in_use(), 1);
 }
 
+TEST(SimulatorTest, CancelsRestingOrder)
+{
+    Simulator simulator{10};
+
+    Order* order = simulator.submit_order(
+        1,
+        Side::Buy,
+        Price{100},
+        Quantity{100},
+        Timestamp{10}
+    );
+
+    ASSERT_NE(order, nullptr);
+
+    EXPECT_EQ(
+        simulator.orders_in_use(),
+        1
+    );
+
+    ASSERT_TRUE(
+        simulator.cancel_order(1)
+    );
+
+    EXPECT_EQ(
+        order->state(),
+        OrderState::Cancelled
+    );
+
+    EXPECT_EQ(
+        simulator.order_book().find(1),
+        nullptr
+    );
+
+    EXPECT_EQ(
+        simulator.orders_in_use(),
+        0
+    );
+
+    EXPECT_EQ(
+        simulator.orders_available(),
+        10
+    );
+}
+
+TEST(SimulatorTest, CancellingUnknownOrderFails)
+{
+    Simulator simulator{10};
+
+    EXPECT_FALSE(
+        simulator.cancel_order(999)
+    );
+
+    EXPECT_EQ(
+        simulator.orders_in_use(),
+        0
+    );
+}
+
+TEST(SimulatorTest, FilledOrderCannotBeCancelled)
+{
+    Simulator simulator{10};
+
+    Order* sell = simulator.submit_order(
+        1,
+        Side::Sell,
+        Price{100},
+        Quantity{100},
+        Timestamp{10}
+    );
+
+    ASSERT_NE(sell, nullptr);
+
+    Order* buy = simulator.submit_order(
+        2,
+        Side::Buy,
+        Price{101},
+        Quantity{100},
+        Timestamp{20}
+    );
+
+    ASSERT_NE(buy, nullptr);
+
+    EXPECT_EQ(
+        sell->state(),
+        OrderState::Filled
+    );
+
+    EXPECT_FALSE(
+        simulator.cancel_order(1)
+    );
+}
+
 } // namespace
 } // namespace simulator
