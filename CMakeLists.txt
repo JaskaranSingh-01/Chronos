@@ -23,6 +23,7 @@ add_library(simulator_lib
     src/orders/order.cpp
     src/orders/order_pool.cpp
     src/matching/matching_engine.cpp
+    src/simulator/simulator.cpp
 )
 
 target_include_directories(simulator_lib
@@ -75,6 +76,8 @@ add_executable(simulator_tests
     tests/matching_engine_test.cpp
     tests/order_pool_test.cpp
     tests/order_pool_integration_test.cpp
+    tests/simulator_test.cpp
+
 )
 
 target_link_libraries(simulator_tests
