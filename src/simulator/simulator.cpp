@@ -45,6 +45,11 @@ Order* Simulator::submit_order(
     return order;
 }
 
+void Simulator::advance_to(Timestamp timestamp) noexcept
+{
+    clock_.advance_to(timestamp);
+}
+
 bool Simulator::release_order(Order& order) noexcept
 {
     if (order.state() != OrderState::Filled &&

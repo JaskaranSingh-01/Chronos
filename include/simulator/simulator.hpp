@@ -32,6 +32,7 @@ public:
         Quantity quantity,
         Timestamp timestamp
     );
+    void advance_to(Timestamp timestamp) noexcept;
     bool release_order(Order& order) noexcept;
 
     const std::vector<Trade>& trades() const noexcept;
