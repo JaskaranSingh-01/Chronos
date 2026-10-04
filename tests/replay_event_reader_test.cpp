@@ -121,5 +121,30 @@ TEST(ReplayEventReaderTest, RejectsMissingFile)
     EXPECT_FALSE(reader.error().empty());
 }
 
+TEST(ReplayEventReaderTest, RejectsMalformedRow)
+{
+    ReplayEventReader reader{
+        std::string{CHRONOS_TEST_DATA_DIR} +
+        "/malformed_replay.csv"
+    };
+
+    ASSERT_TRUE(reader.is_open());
+
+    ReplayEvent event;
+
+    EXPECT_EQ(
+        reader.next(event),
+        ReplayReadResult::Event
+    );
+
+    EXPECT_EQ(
+        reader.next(event),
+        ReplayReadResult::Error
+    );
+
+    EXPECT_EQ(reader.line_number(), 3);
+    EXPECT_FALSE(reader.error().empty());
+}
+
 } // namespace
 } // namespace simulator

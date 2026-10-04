@@ -2,17 +2,19 @@
 
 namespace simulator {
 
-std::size_t ReplayEngine::process_event(
-    const ReplayEvent& event
+ReplayEngine::ProcessResult ReplayEngine::process_event(
+    const ReplayEvent& event,
+    ReplayStatistics& statistics
 )
 {
-    simulator_.advance_to(event.timestamp);
-
     switch (event.type)
     {
     case ReplayEventType::Add:
     {
-        simulator_.submit_order(
+        const std::size_t trades_before =
+            simulator_.trades().size();
+
+        Order* order = simulator_.submit_order(
             event.order_id,
             event.side,
             event.price,
@@ -20,60 +22,135 @@ std::size_t ReplayEngine::process_event(
             event.timestamp
         );
 
+        if (order == nullptr) {
+            return ProcessResult::Rejected;
+        }
+
         simulator_.release_filled_orders();
-        break;
+
+        ++statistics.add_events;
+        statistics.trades +=
+            simulator_.trades().size() - trades_before;
+
+        return ProcessResult::Processed;
     }
 
     case ReplayEventType::Cancel:
     {
-        simulator_.cancel_order(
-            event.order_id
-        );
+        if (!simulator_.cancel_order(event.order_id)) {
+            return ProcessResult::Rejected;
+        }
 
-        break;
+        ++statistics.cancel_events;
+        return ProcessResult::Processed;
     }
     }
 
-    return 1;
+    return ProcessResult::Rejected;
 }
 
-std::size_t ReplayEngine::replay(
+ReplayResult ReplayEngine::replay(
     const std::vector<ReplayEvent>& events
 )
 {
-    std::size_t processed = 0;
+    ReplayResult result;
 
-    for (const ReplayEvent& event : events) {
-        processed += process_event(event);
+    bool has_previous_timestamp = false;
+    Timestamp previous_timestamp{0};
+
+    for (std::size_t index = 0; index < events.size(); ++index)
+    {
+        const ReplayEvent& event = events[index];
+
+        ++result.statistics.received_events;
+
+        if (has_previous_timestamp &&
+            event.timestamp < previous_timestamp)
+        {
+            result.failure =
+                ReplayFailure::OutOfOrderTimestamp;
+
+            result.failed_event_index = index + 1;
+            return result;
+        }
+
+        has_previous_timestamp = true;
+        previous_timestamp = event.timestamp;
+
+        if (process_event(event, result.statistics) ==
+            ProcessResult::Rejected)
+        {
+            ++result.statistics.rejected_events;
+            continue;
+        }
+
+        simulator_.advance_to(event.timestamp);
+        ++result.statistics.processed_events;
     }
 
-    return processed;
+    return result;
 }
 
-std::size_t ReplayEngine::replay(
+ReplayResult ReplayEngine::replay(
     ReplayEventReader& reader
 )
 {
-    std::size_t processed = 0;
+    ReplayResult result;
+
+    bool has_previous_timestamp = false;
+    Timestamp previous_timestamp{0};
 
     ReplayEvent event;
 
-    while (true) {
-        const ReplayReadResult result =
+    while (true)
+    {
+        const ReplayReadResult read_result =
             reader.next(event);
 
-        if (result == ReplayReadResult::EndOfFile) {
-            break;
+        if (read_result == ReplayReadResult::EndOfFile) {
+            return result;
         }
 
-        if (result == ReplayReadResult::Error) {
-            break;
+        if (read_result == ReplayReadResult::Error)
+        {
+            result.failure = ReplayFailure::ReaderError;
+            result.failed_event_index =
+                result.statistics.received_events + 1;
+            result.failed_source_line = reader.line_number();
+
+            return result;
         }
 
-        processed += process_event(event);
+        ++result.statistics.received_events;
+
+        if (has_previous_timestamp &&
+            event.timestamp < previous_timestamp)
+        {
+            result.failure =
+                ReplayFailure::OutOfOrderTimestamp;
+
+            result.failed_event_index =
+                result.statistics.received_events;
+
+            result.failed_source_line =
+                reader.line_number();
+
+            return result;
+        }
+
+        has_previous_timestamp = true;
+        previous_timestamp = event.timestamp;
+
+        if (process_event(event, result.statistics) ==
+            ProcessResult::Rejected)
+        {
+            ++result.statistics.rejected_events;
+            continue;
+        }
+
+        simulator_.advance_to(event.timestamp);
+        ++result.statistics.processed_events;
     }
-
-    return processed;
 }
 
 } // namespace simulator

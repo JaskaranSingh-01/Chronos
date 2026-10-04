@@ -59,13 +59,20 @@ ReplayReadResult ReplayEventReader::next(
     ReplayEvent& event
 )
 {
+    if (!error_.empty()) {
+        return ReplayReadResult::Error;
+    }
+
     if (!file_.is_open()) {
+        error_ = "Replay file is not open";
         return ReplayReadResult::Error;
     }
 
     std::string line;
 
     while (std::getline(file_, line)) {
+        ++line_number_;
+
         // Handle Windows CRLF files.
         if (!line.empty() && line.back() == '\r') {
             line.pop_back();
@@ -94,6 +101,11 @@ ReplayReadResult ReplayEventReader::next(
             return ReplayReadResult::Event;
         }
 
+        return ReplayReadResult::Error;
+    }
+
+    if (!header_read_) {
+        error_ = "Missing CSV header";
         return ReplayReadResult::Error;
     }
 

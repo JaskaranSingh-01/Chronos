@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstddef>
 #include <fstream>
 #include <string>
 
@@ -20,6 +21,7 @@ private:
     std::string error_;
 
     bool header_read_{false};
+    std::size_t line_number_{0};
 
     bool parse_event(
         const std::string& line,
@@ -41,6 +43,10 @@ public:
 
     const std::string& error() const noexcept {
         return error_;
+    }
+
+    std::size_t line_number() const noexcept {
+        return line_number_;
     }
 };
 
