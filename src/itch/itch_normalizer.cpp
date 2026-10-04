@@ -8,23 +8,56 @@ ReplayEvent ItchNormalizer::normalize(
 {
     ReplayEvent event;
 
-    event.timestamp =
-        order.timestamp;
+    event.timestamp = order.timestamp;
+    event.type = ReplayEventType::Add;
+    event.order_id = order.order_id;
+    event.side = order.side;
+    event.price = order.price;
+    event.quantity = order.quantity;
 
-    event.type =
-        ReplayEventType::Add;
+    return event;
+}
 
-    event.order_id =
-        order.order_id;
 
-    event.side =
-        order.side;
+ReplayEvent ItchNormalizer::normalize(
+    const ItchOrderExecuted& order
+) const noexcept
+{
+    ReplayEvent event;
 
-    event.price =
-        order.price;
+    event.timestamp = order.timestamp;
+    event.type = ReplayEventType::Execute;
+    event.order_id = order.order_id;
+    event.quantity = order.quantity;
 
-    event.quantity =
-        order.quantity;
+    return event;
+}
+
+
+ReplayEvent ItchNormalizer::normalize(
+    const ItchOrderCancel& order
+) const noexcept
+{
+    ReplayEvent event;
+
+    event.timestamp = order.timestamp;
+    event.type = ReplayEventType::Cancel;
+    event.order_id = order.order_id;
+    event.quantity = order.quantity;
+
+    return event;
+}
+
+
+ReplayEvent ItchNormalizer::normalize(
+    const ItchOrderDelete& order
+) const noexcept
+{
+    ReplayEvent event;
+
+    event.timestamp = order.timestamp;
+    event.type = ReplayEventType::Delete;
+    event.order_id = order.order_id;
 
     return event;
 }

@@ -88,6 +88,7 @@ add_executable(simulator_tests
     tests/itch/byte_reader_test.cpp
     tests/itch/itch_message_reader_test.cpp
     tests/itch/itch_decoder_test.cpp
+    tests/itch/itch_normalizer_test.cpp
 )
 
 target_compile_definitions(simulator_tests

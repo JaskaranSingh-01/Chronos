@@ -34,6 +34,21 @@ public:
         ItchAddOrder& order
     ) noexcept;
 
+    ItchDecodeResult decode_order_executed(
+        const ItchMessage& message,
+        ItchOrderExecuted& order
+    ) noexcept;
+
+    ItchDecodeResult decode_order_cancel(
+        const ItchMessage& message,
+        ItchOrderCancel& order
+    ) noexcept;
+
+    ItchDecodeResult decode_order_delete(
+        const ItchMessage& message,
+        ItchOrderDelete& order
+    ) noexcept;
+    
     constexpr ItchDecodeError error() const noexcept
     {
         return error_;

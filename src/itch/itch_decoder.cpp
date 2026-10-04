@@ -10,6 +10,13 @@ namespace simulator {
 namespace {
 
 constexpr std::uint8_t AddOrderMessageType = 0x41; // 'A'
+constexpr std::uint8_t OrderExecutedMessageType = 0x45; // 'E'
+constexpr std::uint8_t OrderCancelMessageType = 0x58;   // 'X'
+constexpr std::uint8_t OrderDeleteMessageType = 0x44;   // 'D'
+
+constexpr std::size_t OrderExecutedPayloadSize = 26;
+constexpr std::size_t OrderCancelPayloadSize = 18;
+constexpr std::size_t OrderDeletePayloadSize = 14;
 
 constexpr std::size_t AddOrderPayloadSize = 31;
 
@@ -133,6 +140,150 @@ ItchDecodeResult ItchDecoder::decode_add_order(
     order.price = Price{
         static_cast<std::int64_t>(price)
     };
+
+    return ItchDecodeResult::Success;
+}
+
+ItchDecodeResult ItchDecoder::decode_order_executed(
+    const ItchMessage& message,
+    ItchOrderExecuted& order
+) noexcept
+{
+    error_ = ItchDecodeError::None;
+    order = ItchOrderExecuted{};
+
+    if (message.type != OrderExecutedMessageType) {
+        error_ = ItchDecodeError::InvalidMessageType;
+        return ItchDecodeResult::UnsupportedMessage;
+    }
+
+    if (message.payload.size() != OrderExecutedPayloadSize) {
+        error_ = ItchDecodeError::InvalidPayloadLength;
+        return ItchDecodeResult::InvalidMessage;
+    }
+
+    ByteReader reader{message.payload};
+
+    std::uint64_t timestamp{0};
+
+    if (!reader.read_u48_be(timestamp)) {
+        error_ = ItchDecodeError::TruncatedPayload;
+        return ItchDecodeResult::InvalidMessage;
+    }
+
+    std::uint64_t order_id{0};
+
+    if (!reader.read_u64_be(order_id)) {
+        error_ = ItchDecodeError::TruncatedPayload;
+        return ItchDecodeResult::InvalidMessage;
+    }
+
+    std::uint32_t executed_shares{0};
+
+    if (!reader.read_u32_be(executed_shares)) {
+        error_ = ItchDecodeError::TruncatedPayload;
+        return ItchDecodeResult::InvalidMessage;
+    }
+
+    std::uint64_t match_number{0};
+
+    if (!reader.read_u64_be(match_number)) {
+        error_ = ItchDecodeError::TruncatedPayload;
+        return ItchDecodeResult::InvalidMessage;
+    }
+
+    order.timestamp = static_cast<Timestamp>(timestamp);
+    order.order_id = OrderId{order_id};
+    order.quantity = Quantity{executed_shares};
+    order.match_number = match_number;
+
+    return ItchDecodeResult::Success;
+}
+
+ItchDecodeResult ItchDecoder::decode_order_cancel(
+    const ItchMessage& message,
+    ItchOrderCancel& order
+) noexcept
+{
+    error_ = ItchDecodeError::None;
+    order = ItchOrderCancel{};
+
+    if (message.type != OrderCancelMessageType) {
+        error_ = ItchDecodeError::InvalidMessageType;
+        return ItchDecodeResult::UnsupportedMessage;
+    }
+
+    if (message.payload.size() != OrderCancelPayloadSize) {
+        error_ = ItchDecodeError::InvalidPayloadLength;
+        return ItchDecodeResult::InvalidMessage;
+    }
+
+    ByteReader reader{message.payload};
+
+    std::uint64_t timestamp{0};
+
+    if (!reader.read_u48_be(timestamp)) {
+        error_ = ItchDecodeError::TruncatedPayload;
+        return ItchDecodeResult::InvalidMessage;
+    }
+
+    std::uint64_t order_id{0};
+
+    if (!reader.read_u64_be(order_id)) {
+        error_ = ItchDecodeError::TruncatedPayload;
+        return ItchDecodeResult::InvalidMessage;
+    }
+
+    std::uint32_t cancelled_shares{0};
+
+    if (!reader.read_u32_be(cancelled_shares)) {
+        error_ = ItchDecodeError::TruncatedPayload;
+        return ItchDecodeResult::InvalidMessage;
+    }
+
+    order.timestamp = static_cast<Timestamp>(timestamp);
+    order.order_id = OrderId{order_id};
+    order.quantity = Quantity{cancelled_shares};
+
+    return ItchDecodeResult::Success;
+}
+
+ItchDecodeResult ItchDecoder::decode_order_delete(
+    const ItchMessage& message,
+    ItchOrderDelete& order
+) noexcept
+{
+    error_ = ItchDecodeError::None;
+    order = ItchOrderDelete{};
+
+    if (message.type != OrderDeleteMessageType) {
+        error_ = ItchDecodeError::InvalidMessageType;
+        return ItchDecodeResult::UnsupportedMessage;
+    }
+
+    if (message.payload.size() != OrderDeletePayloadSize) {
+        error_ = ItchDecodeError::InvalidPayloadLength;
+        return ItchDecodeResult::InvalidMessage;
+    }
+
+    ByteReader reader{message.payload};
+
+    std::uint64_t timestamp{0};
+
+    if (!reader.read_u48_be(timestamp)) {
+        error_ = ItchDecodeError::TruncatedPayload;
+        return ItchDecodeResult::InvalidMessage;
+    }
+
+    std::uint64_t order_id{0};
+
+    if (!reader.read_u64_be(order_id)) {
+        error_ = ItchDecodeError::TruncatedPayload;
+        return ItchDecodeResult::InvalidMessage;
+    }
+
+    order.timestamp = static_cast<Timestamp>(timestamp);
+    order.order_id = OrderId{order_id};
 
     return ItchDecodeResult::Success;
 }

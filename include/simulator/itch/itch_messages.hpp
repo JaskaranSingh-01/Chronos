@@ -23,4 +23,31 @@ struct ItchAddOrder
     Price price{0};
 };
 
+struct ItchOrderExecuted
+{
+    Timestamp timestamp{0};
+
+    OrderId order_id{0};
+
+    Quantity quantity{0};
+
+    std::uint64_t match_number{0};
+};
+
+struct ItchOrderCancel
+{
+    Timestamp timestamp{0};
+
+    OrderId order_id{0};
+
+    Quantity quantity{0};
+};
+
+struct ItchOrderDelete
+{
+    Timestamp timestamp{0};
+
+    OrderId order_id{0};
+};
+
 } // namespace simulator
