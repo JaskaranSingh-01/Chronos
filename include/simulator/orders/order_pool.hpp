@@ -14,6 +14,7 @@ private:
     {
         Order order;
         Slot* next{nullptr};
+        bool is_available{true};
     };
 
     std::unique_ptr<Slot[]> storage_;

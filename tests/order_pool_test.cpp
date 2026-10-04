@@ -159,6 +159,26 @@ TEST(OrderPoolTest, ReleaseMakesSlotAvailable)
     EXPECT_EQ(pool.in_use(), 0);
 }
 
+TEST(OrderPoolTest, RejectsDuplicateRelease)
+{
+    OrderPool pool{1};
+
+    Order* order = pool.acquire(
+        1,
+        Side::Buy,
+        Price{100},
+        Quantity{50},
+        Timestamp{10}
+    );
+
+    ASSERT_NE(order, nullptr);
+    ASSERT_TRUE(pool.release(*order));
+
+    EXPECT_FALSE(pool.release(*order));
+    EXPECT_EQ(pool.available(), 1);
+    EXPECT_EQ(pool.in_use(), 0);
+}
+
 
 // ------------------------------------------------------------
 // Released slot can be reused

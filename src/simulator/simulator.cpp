@@ -1,5 +1,7 @@
 #include "simulator/simulator.hpp"
 
+#include <algorithm>
+
 namespace simulator {
 
 Simulator::Simulator(std::size_t order_capacity)
@@ -11,6 +13,8 @@ Simulator::Simulator(std::size_t order_capacity)
     // Initial reusable trade-buffer capacity.
     // This avoids allocations for normal small matches.
     trades_.reserve(64);
+    filled_orders_.reserve(64);
+
 }
 
 Order* Simulator::submit_order(
@@ -39,10 +43,39 @@ Order* Simulator::submit_order(
 
     matching_engine_.submit(
         *order,
-        trades_
+        trades_,
+        filled_orders_
     );
 
     return order;
+}
+
+std::size_t Simulator::release_filled_orders() noexcept
+{
+    std::size_t released = 0;
+
+    for (Order* order : filled_orders_)
+    {
+        if (order == nullptr) {
+            continue;
+        }
+
+        if (order->state() != OrderState::Filled) {
+            continue;
+        }
+
+        if (order_book_.find(order->id()) != nullptr) {
+            continue;
+        }
+
+        if (order_pool_.release(*order)) {
+            ++released;
+        }
+    }
+
+    filled_orders_.clear();
+
+    return released;
 }
 
 void Simulator::advance_to(Timestamp timestamp) noexcept
@@ -78,7 +111,13 @@ bool Simulator::release_order(Order& order) noexcept
         return false;
     }
 
-    return order_pool_.release(order);
+    if (!order_pool_.release(order)) {
+        return false;
+    }
+
+    std::erase(filled_orders_, &order);
+
+    return true;
 }
 
 const std::vector<Trade>& Simulator::trades() const noexcept {

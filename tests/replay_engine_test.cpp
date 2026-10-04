@@ -159,5 +159,69 @@ TEST(ReplayEngineTest, ReplaysCancellation)
     );
 }
 
+TEST(ReplayEngineTest, ReplaysEventsDirectlyFromCsv)
+{
+    Simulator simulator{10};
+
+    ReplayEngine replay{
+        simulator
+    };
+
+    ReplayEventReader reader{
+    std::string{CHRONOS_TEST_DATA_DIR} + "/basic_replay.csv"
+};
+
+    ASSERT_TRUE(reader.is_open());
+
+    const std::size_t processed =
+        replay.replay(reader);
+
+    EXPECT_EQ(processed, 4);
+
+    EXPECT_EQ(
+        simulator.clock().now(),
+        Timestamp{400}
+    );
+
+    ASSERT_EQ(
+        simulator.trades().size(),
+        1
+    );
+
+    const Trade& trade =
+        simulator.trades()[0];
+
+    EXPECT_EQ(
+        trade.buy_order_id,
+        OrderId{2}
+    );
+
+    EXPECT_EQ(
+        trade.sell_order_id,
+        OrderId{1}
+    );
+
+    EXPECT_EQ(
+        trade.price,
+        Price{100}
+    );
+
+    EXPECT_EQ(
+        trade.quantity,
+        Quantity{100}
+    );
+
+    // Order 3 was added and subsequently cancelled.
+    EXPECT_EQ(
+        simulator.order_book().find(3),
+        nullptr
+    );
+
+    EXPECT_EQ(
+        simulator.orders_in_use(),
+        0
+    );
+}
+
 } // namespace
 } // namespace simulator

@@ -25,6 +25,7 @@ add_library(simulator_lib
     src/matching/matching_engine.cpp
     src/simulator/simulator.cpp
     src/replay/replay_engine.cpp
+    src/replay/replay_event_reader.cpp
 )
 
 target_include_directories(simulator_lib
@@ -79,6 +80,12 @@ add_executable(simulator_tests
     tests/order_pool_integration_test.cpp
     tests/simulator_test.cpp
     tests/replay_engine_test.cpp
+    tests/replay_event_reader_test.cpp
+)
+
+target_compile_definitions(simulator_tests
+    PRIVATE
+        CHRONOS_TEST_DATA_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/data"
 )
 
 target_link_libraries(simulator_tests

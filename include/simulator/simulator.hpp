@@ -19,6 +19,7 @@ private:
     MatchingEngine matching_engine_;
 
     std::vector<Trade> trades_;
+    std::vector<Order*> filled_orders_;
 
 public:
     explicit Simulator(
@@ -32,6 +33,7 @@ public:
         Quantity quantity,
         Timestamp timestamp
     );
+    std::size_t release_filled_orders() noexcept;
     bool cancel_order(OrderId id) noexcept;
     void advance_to(Timestamp timestamp) noexcept;
     bool release_order(Order& order) noexcept;

@@ -82,9 +82,10 @@ TEST(MatchingEngineTest, ExactBuySellMatch)
     activate(buy);
 
     std::vector<Trade> trades;
+    std::vector<Order*> filled_orders;
 
     const auto trade_count =
-        engine.submit(buy, trades);
+        engine.submit(buy, trades, filled_orders);
 
     ASSERT_EQ(trade_count, 1);
     ASSERT_EQ(trades.size(), 1);
@@ -146,9 +147,10 @@ TEST(MatchingEngineTest, PartialFillIncomingOrderLarger)
     activate(buy);
 
     std::vector<Trade> trades;
+    std::vector<Order*> filled_orders;
 
     const auto trade_count =
-        engine.submit(buy, trades);
+        engine.submit(buy, trades, filled_orders);
 
     ASSERT_EQ(trade_count, 1);
     ASSERT_EQ(trades.size(), 1);
@@ -207,9 +209,10 @@ TEST(MatchingEngineTest, PartialFillRestingOrderLarger)
     activate(buy);
 
     std::vector<Trade> trades;
+    std::vector<Order*> filled_orders;
 
     const auto trade_count =
-        engine.submit(buy, trades);
+        engine.submit(buy, trades, filled_orders);
 
     ASSERT_EQ(trade_count, 1);
     ASSERT_EQ(trades.size(), 1);
@@ -268,9 +271,10 @@ TEST(MatchingEngineTest, DoesNotMatchWhenPricesDoNotCross)
     activate(buy);
 
     std::vector<Trade> trades;
+    std::vector<Order*> filled_orders;
 
     const auto trade_count =
-        engine.submit(buy, trades);
+        engine.submit(buy, trades, filled_orders);
 
     EXPECT_EQ(trade_count, 0);
     EXPECT_TRUE(trades.empty());
@@ -333,9 +337,10 @@ TEST(MatchingEngineTest, MatchesAcrossMultiplePriceLevels)
     activate(buy);
 
     std::vector<Trade> trades;
+    std::vector<Order*> filled_orders;
 
     const auto trade_count =
-        engine.submit(buy, trades);
+        engine.submit(buy, trades, filled_orders);
 
     ASSERT_EQ(trade_count, 3);
     ASSERT_EQ(trades.size(), 3);
@@ -418,9 +423,10 @@ TEST(MatchingEngineTest, PreservesFIFOAtSamePrice)
     activate(buy);
 
     std::vector<Trade> trades;
+    std::vector<Order*> filled_orders;
 
     const auto trade_count =
-        engine.submit(buy, trades);
+        engine.submit(buy, trades, filled_orders);
 
     ASSERT_EQ(trade_count, 2);
     ASSERT_EQ(trades.size(), 2);
@@ -488,9 +494,10 @@ TEST(MatchingEngineTest, ExactSellBuyMatch)
     activate(sell);
 
     std::vector<Trade> trades;
+    std::vector<Order*> filled_orders;
 
     const auto trade_count =
-        engine.submit(sell, trades);
+        engine.submit(sell, trades, filled_orders);
 
     ASSERT_EQ(trade_count, 1);
     ASSERT_EQ(trades.size(), 1);
@@ -545,9 +552,10 @@ TEST(MatchingEngineTest, PartialFillIncomingSellOrderLarger)
     activate(sell);
 
     std::vector<Trade> trades;
+    std::vector<Order*> filled_orders;
 
     const auto trade_count =
-        engine.submit(sell, trades);
+        engine.submit(sell, trades, filled_orders);
 
     ASSERT_EQ(trade_count, 1);
     ASSERT_EQ(trades.size(), 1);
@@ -606,9 +614,10 @@ TEST(MatchingEngineTest, PartialFillRestingBuyOrderLarger)
     activate(sell);
 
     std::vector<Trade> trades;
+    std::vector<Order*> filled_orders;
 
     const auto trade_count =
-        engine.submit(sell, trades);
+        engine.submit(sell, trades, filled_orders);
 
     ASSERT_EQ(trade_count, 1);
     ASSERT_EQ(trades.size(), 1);
@@ -685,9 +694,10 @@ TEST(MatchingEngineTest, SellMatchesAcrossMultipleBidLevels)
     activate(sell);
 
     std::vector<Trade> trades;
+    std::vector<Order*> filled_orders;
 
     const auto trade_count =
-        engine.submit(sell, trades);
+        engine.submit(sell, trades, filled_orders);
 
     ASSERT_EQ(trade_count, 3);
     ASSERT_EQ(trades.size(), 3);
@@ -750,9 +760,10 @@ TEST(MatchingEngineTest, BuyWithNoOpposingLiquidityBecomesRestingOrder)
     activate(buy);
 
     std::vector<Trade> trades;
+    std::vector<Order*> filled_orders;
 
     const auto trade_count =
-        engine.submit(buy, trades);
+        engine.submit(buy, trades, filled_orders);
 
     EXPECT_EQ(trade_count, 0);
     EXPECT_TRUE(trades.empty());
@@ -785,9 +796,10 @@ TEST(MatchingEngineTest, SellWithNoOpposingLiquidityBecomesRestingOrder)
     activate(sell);
 
     std::vector<Trade> trades;
+    std::vector<Order*> filled_orders;
 
     const auto trade_count =
-        engine.submit(sell, trades);
+        engine.submit(sell, trades, filled_orders);
 
     EXPECT_EQ(trade_count, 0);
     EXPECT_TRUE(trades.empty());
@@ -831,9 +843,10 @@ TEST(MatchingEngineTest, SellDoesNotMatchWhenPriceIsAboveBestBid)
     activate(sell);
 
     std::vector<Trade> trades;
+    std::vector<Order*> filled_orders;
 
     const auto trade_count =
-        engine.submit(sell, trades);
+        engine.submit(sell, trades, filled_orders);
 
     EXPECT_EQ(trade_count, 0);
     EXPECT_TRUE(trades.empty());
@@ -887,9 +900,10 @@ TEST(MatchingEngineTest, PreservesFIFOBetweenBidsAtSamePrice)
     activate(sell);
 
     std::vector<Trade> trades;
+    std::vector<Order*> filled_orders;
 
     const auto trade_count =
-        engine.submit(sell, trades);
+        engine.submit(sell, trades, filled_orders);
 
     ASSERT_EQ(trade_count, 2);
     ASSERT_EQ(trades.size(), 2);
@@ -944,9 +958,10 @@ TEST(MatchingEngineTest, RejectsNewOrder)
     );
 
     std::vector<Trade> trades;
+    std::vector<Order*> filled_orders;
 
     const auto trade_count =
-        engine.submit(buy, trades);
+        engine.submit(buy, trades, filled_orders);
 
     EXPECT_EQ(trade_count, 0);
     EXPECT_TRUE(trades.empty());
@@ -971,9 +986,10 @@ TEST(MatchingEngineTest, DoesNotTradeZeroQuantity)
     activate(buy);
 
     std::vector<Trade> trades;
+    std::vector<Order*> filled_orders;
 
     const auto trade_count =
-        engine.submit(buy, trades);
+        engine.submit(buy, trades, filled_orders);
 
     EXPECT_EQ(trade_count, 0);
     EXPECT_TRUE(trades.empty());

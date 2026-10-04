@@ -44,6 +44,9 @@ Order* OrderPool::acquire(
 
     slot->next = nullptr;
 
+    assert(slot->is_available);
+    slot->is_available = false;
+
     --available_;
 
     slot->order.initialize(
@@ -92,6 +95,10 @@ bool OrderPool::release(Order& order) noexcept
             offsetof(Slot, order)
         );
 
+    if (slot->is_available) {
+        return false;
+    }
+
     // An order must not still belong to a PriceLevel.
     //
     // We cannot access level_ directly here because it is
@@ -103,6 +110,7 @@ bool OrderPool::release(Order& order) noexcept
 
     slot->next = free_list_;
     free_list_ = slot;
+    slot->is_available = true;
 
     ++available_;
 

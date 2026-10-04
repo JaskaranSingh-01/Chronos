@@ -212,6 +212,69 @@ TEST(SimulatorTest, FilledOrderCanBeReleasedBackToPool)
     );
 }
 
+TEST(SimulatorTest, ReleasesBothFilledOrdersAfterMatch)
+{
+    Simulator simulator{2};
+
+    ASSERT_NE(
+        simulator.submit_order(
+            1,
+            Side::Sell,
+            Price{100},
+            Quantity{100},
+            Timestamp{10}
+        ),
+        nullptr
+    );
+
+    ASSERT_NE(
+        simulator.submit_order(
+            2,
+            Side::Buy,
+            Price{101},
+            Quantity{100},
+            Timestamp{20}
+        ),
+        nullptr
+    );
+
+    EXPECT_EQ(simulator.orders_in_use(), 2);
+    EXPECT_EQ(simulator.release_filled_orders(), 2);
+    EXPECT_EQ(simulator.orders_in_use(), 0);
+    EXPECT_EQ(simulator.orders_available(), 2);
+}
+
+TEST(SimulatorTest, DirectReleaseRemovesFilledOrderFromPendingCleanup)
+{
+    Simulator simulator{2};
+
+    ASSERT_NE(
+        simulator.submit_order(
+            1,
+            Side::Sell,
+            Price{100},
+            Quantity{100},
+            Timestamp{10}
+        ),
+        nullptr
+    );
+
+    Order* buy = simulator.submit_order(
+        2,
+        Side::Buy,
+        Price{101},
+        Quantity{100},
+        Timestamp{20}
+    );
+
+    ASSERT_NE(buy, nullptr);
+    ASSERT_TRUE(simulator.release_order(*buy));
+
+    EXPECT_EQ(simulator.release_filled_orders(), 1);
+    EXPECT_EQ(simulator.orders_in_use(), 0);
+    EXPECT_EQ(simulator.orders_available(), 2);
+}
+
 TEST(SimulatorTest, ActiveOrderCannotBeReleased)
 {
     Simulator simulator{2};

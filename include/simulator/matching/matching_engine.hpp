@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstddef>
 #include <vector>
 
 #include "simulator/matching/trade.hpp"
@@ -17,7 +18,11 @@ public:
         : book_(book)
     {}
 
-    std::size_t submit(Order& order,std::vector<Trade>& trades);
+    std::size_t submit(
+        Order& order,
+        std::vector<Trade>& trades,
+        std::vector<Order*>& filled_orders
+    );
 };
 
 } // namespace simulator

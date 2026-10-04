@@ -70,9 +70,11 @@ TEST(OrderPoolIntegrationTest, PooledOrdersCanBeMatched)
     // Reusable trade output buffer.
     std::vector<Trade> trades;
     trades.reserve(10);
+    std::vector<Order*> filled_orders;
+    filled_orders.reserve(10);
 
     const std::size_t trade_count =
-        engine.submit(*buy, trades);
+        engine.submit(*buy, trades, filled_orders);
 
     ASSERT_EQ(trade_count, 1);
     ASSERT_EQ(trades.size(), 1);
