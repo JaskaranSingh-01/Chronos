@@ -163,7 +163,75 @@ TEST(SimulatorTest, ReturnsNullWhenOrderPoolIsExhausted)
     EXPECT_EQ(simulator.orders_available(), 0);
 }
 
+TEST(SimulatorTest, FilledOrderCanBeReleasedBackToPool)
+{
+    Simulator simulator{2};
 
+    Order* sell = simulator.submit_order(
+        1,
+        Side::Sell,
+        Price{100},
+        Quantity{100},
+        Timestamp{10}
+    );
+
+    ASSERT_NE(sell, nullptr);
+
+    Order* buy = simulator.submit_order(
+        2,
+        Side::Buy,
+        Price{101},
+        Quantity{100},
+        Timestamp{20}
+    );
+
+    ASSERT_NE(buy, nullptr);
+
+    EXPECT_EQ(
+        buy->state(),
+        OrderState::Filled
+    );
+
+    EXPECT_EQ(
+        simulator.orders_in_use(),
+        2
+    );
+
+    EXPECT_TRUE(
+        simulator.release_order(*buy)
+    );
+
+    EXPECT_EQ(
+        simulator.orders_in_use(),
+        1
+    );
+
+    EXPECT_EQ(
+        simulator.orders_available(),
+        1
+    );
+}
+
+TEST(SimulatorTest, ActiveOrderCannotBeReleased)
+{
+    Simulator simulator{2};
+
+    Order* order = simulator.submit_order(
+        1,
+        Side::Buy,
+        Price{100},
+        Quantity{100},
+        Timestamp{10}
+    );
+
+    ASSERT_NE(order, nullptr);
+
+    EXPECT_FALSE(
+        simulator.release_order(*order)
+    );
+
+    EXPECT_EQ(simulator.orders_in_use(), 1);
+}
 
 } // namespace
 } // namespace simulator
