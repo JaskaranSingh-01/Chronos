@@ -6,7 +6,7 @@
 
 #include "simulator/orders/order.hpp"
 #include "simulator/orders/price_level.hpp"
-
+#include "simulator/types/order_id.hpp"
 namespace simulator
 {
     class OrderBook

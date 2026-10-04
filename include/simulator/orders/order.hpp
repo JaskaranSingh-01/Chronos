@@ -7,13 +7,12 @@
 #include "simulator/types/price.hpp"
 #include "simulator/types/quantity.hpp"
 #include "simulator/types/timestamp.hpp"
+#include "simulator/types/order_id.hpp"
 
 namespace simulator {
 
 class PriceLevel;
 class OrderPool;
-
-using OrderId = std::uint64_t;
 
 class Order {
 private:

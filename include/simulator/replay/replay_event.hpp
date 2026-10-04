@@ -6,6 +6,7 @@
 #include "simulator/types/price.hpp"
 #include "simulator/types/quantity.hpp"
 #include "simulator/types/timestamp.hpp"
+#include "simulator/types/order_id.hpp"
 
 namespace simulator {
 
@@ -26,7 +27,7 @@ struct ReplayEvent
 
     Price price{};
 
-    Quantity quantity{};
+    Quantity quantity{0};
 };
 
 } // namespace simulator

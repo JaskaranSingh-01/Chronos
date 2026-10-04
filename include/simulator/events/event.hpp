@@ -6,9 +6,9 @@
 #include "simulator/types/price.hpp"
 #include "simulator/types/quantity.hpp"
 #include "simulator/types/timestamp.hpp"
+#include "simulator/types/order_id.hpp"
 
 namespace simulator {
-using OrderId = std::uint64_t;
 
 struct Event {
 	Timestamp timestamp{0};

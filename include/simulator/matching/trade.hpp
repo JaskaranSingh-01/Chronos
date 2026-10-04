@@ -1,5 +1,6 @@
 #pragma once
 
+#include "simulator/types/order_id.hpp"
 #include "simulator/orders/order.hpp"
 #include "simulator/types/price.hpp"
 #include "simulator/types/quantity.hpp"
