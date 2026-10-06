@@ -23,6 +23,8 @@ struct ReplayStatistics {
     std::size_t cancel_events{0};
     std::size_t rejected_events{0};
     std::size_t trades{0};
+    std::size_t execute_events{0};
+    std::size_t delete_events{0};
 };
 
 struct ReplayResult {

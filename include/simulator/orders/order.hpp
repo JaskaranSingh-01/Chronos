@@ -56,6 +56,8 @@ public:
     bool execute(Quantity executed) noexcept;
 
     bool cancel() noexcept;
+    bool cancel(Quantity cancelled) noexcept;
+    bool delete_order() noexcept;
 
     // Accessors
     OrderId id() const noexcept;

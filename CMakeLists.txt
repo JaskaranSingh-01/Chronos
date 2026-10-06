@@ -83,8 +83,9 @@ add_executable(simulator_tests
     tests/order_pool_test.cpp
     tests/order_pool_integration_test.cpp
     tests/simulator_test.cpp
-    tests/replay_engine_test.cpp
-    tests/replay_event_reader_test.cpp
+    tests/replay/replay_engine_test.cpp
+    tests/replay/replay_event_reader_test.cpp
+    tests/replay/replay_itch_lifecycle_test.cpp
     tests/itch/byte_reader_test.cpp
     tests/itch/itch_message_reader_test.cpp
     tests/itch/itch_decoder_test.cpp

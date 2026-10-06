@@ -17,25 +17,21 @@ namespace simulator
         std::unordered_map<OrderId, Order *> orders_;
 
     public:
-        bool add(Order &order) noexcept;
-        
+        bool add(Order &order) noexcept;        
         bool remove(OrderId id) noexcept;
-
         bool cancel(OrderId id) noexcept;
-
         Order *find(OrderId id) noexcept;
-
         const Order *find(OrderId id) const noexcept;
-
         Order *best_bid() noexcept;
         Order *best_ask() noexcept;
-
         const Order *best_bid() const noexcept;
         const Order *best_ask() const noexcept;
-
         bool empty() const noexcept;
-
         // void clear() noexcept;
+
+        bool execute(OrderId id, Quantity quantity) noexcept;
+        bool cancel(OrderId id, Quantity quantity) noexcept;
+        bool erase(OrderId id) noexcept;
     };
 
 } // namespace simulator

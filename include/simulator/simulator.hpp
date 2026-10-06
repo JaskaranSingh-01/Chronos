@@ -46,6 +46,17 @@ public:
     std::size_t orders_in_use() const noexcept;
 
     std::size_t orders_available() const noexcept;
+
+    bool replay_add_order(
+        OrderId id,
+        Side side,
+        Price price,
+        Quantity quantity,
+        Timestamp timestamp
+    );
+    bool replay_execute_order(OrderId id, Quantity quantity) noexcept;
+    bool replay_cancel_order(OrderId id, Quantity quantity) noexcept;
+    bool replay_delete_order(OrderId id) noexcept;
 };
 
 } // namespace simulator

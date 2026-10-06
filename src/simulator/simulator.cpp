@@ -140,4 +140,94 @@ std::size_t Simulator::orders_available() const noexcept {
     return order_pool_.available();
 }
 
+bool Simulator::replay_add_order(
+    OrderId id,
+    Side side,
+    Price price,
+    Quantity quantity,
+    Timestamp timestamp
+)
+{
+    Order* order = order_pool_.acquire(
+        id,
+        side,
+        price,
+        quantity,
+        timestamp
+    );
+
+    if (order == nullptr) {
+        return false;
+    }
+
+    if (!order->activate()) {
+        order_pool_.release(*order);
+        return false;
+    }
+
+    if (!order_book_.add(*order)) {
+        order_pool_.release(*order);
+        return false;
+    }
+
+    return true;
+}
+
+bool Simulator::replay_execute_order(OrderId id,Quantity quantity) noexcept
+{
+    Order* order = order_book_.find(id);
+
+    if (order == nullptr) {
+        return false;
+    }
+
+    if (!order_book_.execute(id, quantity)) {
+        return false;
+    }
+
+    if (order->state() == OrderState::Filled) {
+        return order_pool_.release(*order);
+    }
+
+    return true;
+}
+
+bool Simulator::replay_cancel_order(OrderId id,Quantity quantity) noexcept
+{
+    Order* order = order_book_.find(id);
+
+    if (order == nullptr) {
+        return false;
+    }
+
+    if (!order_book_.cancel(id, quantity)) {
+        return false;
+    }
+
+    if (order->state() == OrderState::Cancelled) {
+        return order_pool_.release(*order);
+    }
+
+    return true;
+}
+
+bool Simulator::replay_delete_order(OrderId id) noexcept
+{
+    Order* order = order_book_.find(id);
+
+    if (order == nullptr) {
+        return false;
+    }
+
+    if (!order->delete_order()) {
+        return false;
+    }
+
+    if (!order_book_.erase(id)) {
+        return false;
+    }
+
+    return order_pool_.release(*order);
+}
+
 } // namespace simulator

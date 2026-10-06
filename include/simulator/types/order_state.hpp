@@ -9,7 +9,8 @@ enum class OrderState : std::uint8_t {
     Active,
     PartiallyFilled,
     Filled,
-    Cancelled
+    Cancelled,
+    Deleted
 };
 
 } // namespace simulator

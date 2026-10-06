@@ -78,12 +78,52 @@ bool Order::execute(Quantity executed) noexcept {
     return true;
 }
 
-bool Order::cancel() noexcept {
+bool Order::cancel(Quantity cancelled) noexcept
+{
+    if (cancelled.is_zero()) {
+        return false;
+    }
+
     if (state_ != OrderState::Active &&
         state_ != OrderState::PartiallyFilled) {
         return false;
     }
 
+    if (cancelled > remaining_quantity_) {
+        return false;
+    }
+
+    remaining_quantity_ =
+        remaining_quantity_ - cancelled;
+
+    if (remaining_quantity_.is_zero()) {
+        state_ = OrderState::Cancelled;
+    } else {
+        state_ = OrderState::PartiallyFilled;
+    }
+
+    return true;
+}
+
+bool Order::delete_order() noexcept
+{
+    if (state_ != OrderState::Active &&
+        state_ != OrderState::PartiallyFilled) {
+        return false;
+    }
+
+    remaining_quantity_ = Quantity{0};
+    state_ = OrderState::Deleted;
+
+    return true;
+}
+
+bool Order::cancel() noexcept {
+    if (state_ != OrderState::Active &&
+        state_ != OrderState::PartiallyFilled) {
+        return false;
+    }
+    
     state_ = OrderState::Cancelled;
     return true;
 }
