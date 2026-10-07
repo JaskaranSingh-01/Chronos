@@ -4,7 +4,10 @@
 
 namespace simulator {
 
-TEST(SimulatorReplayTest, AppliesHistoricalOrderLifecycle)
+TEST(
+    SimulatorReplayTest,
+    AppliesHistoricalOrderLifecycle
+)
 {
     Simulator simulator{16};
 
@@ -18,10 +21,13 @@ TEST(SimulatorReplayTest, AppliesHistoricalOrderLifecycle)
         )
     );
 
-   const Order* order =
+    const Order* order =
         simulator.order_book().find(100);
 
-    ASSERT_NE(order, nullptr);
+    ASSERT_NE(
+        order,
+        nullptr
+    );
 
     EXPECT_EQ(
         order->remaining_quantity().value(),
@@ -43,7 +49,10 @@ TEST(SimulatorReplayTest, AppliesHistoricalOrderLifecycle)
     order =
         simulator.order_book().find(100);
 
-    ASSERT_NE(order, nullptr);
+    ASSERT_NE(
+        order,
+        nullptr
+    );
 
     EXPECT_EQ(
         order->remaining_quantity().value(),
@@ -65,7 +74,10 @@ TEST(SimulatorReplayTest, AppliesHistoricalOrderLifecycle)
     order =
         simulator.order_book().find(100);
 
-    ASSERT_NE(order, nullptr);
+    ASSERT_NE(
+        order,
+        nullptr
+    );
 
     EXPECT_EQ(
         order->remaining_quantity().value(),
@@ -97,7 +109,10 @@ TEST(SimulatorReplayTest, AppliesHistoricalOrderLifecycle)
     );
 }
 
-TEST(SimulatorReplayTest, ReleasesFullyExecutedOrder)
+TEST(
+    SimulatorReplayTest,
+    ReleasesFullyExecutedOrder
+)
 {
     Simulator simulator{16};
 
@@ -111,7 +126,10 @@ TEST(SimulatorReplayTest, ReleasesFullyExecutedOrder)
         )
     );
 
-    EXPECT_EQ(simulator.orders_in_use(), 1);
+    EXPECT_EQ(
+        simulator.orders_in_use(),
+        1
+    );
 
     ASSERT_TRUE(
         simulator.replay_execute_order(

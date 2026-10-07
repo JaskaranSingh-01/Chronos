@@ -1,15 +1,18 @@
 #include <gtest/gtest.h>
 
-#include "simulator/replay/replay_event_reader.hpp"
+#include <string>
+
+#include "simulator/replay/csv_replay_event_reader.hpp"
 
 namespace simulator {
 namespace {
 
-TEST(ReplayEventReaderTest, ReadsAddEvent)
+TEST(CsvReplayEventReaderTest, ReadsAddEvent)
 {
-    ReplayEventReader reader{
-    std::string{CHRONOS_TEST_DATA_DIR} + "/basic_replay.csv"
-};
+    CsvReplayEventReader reader{
+        std::string{CHRONOS_TEST_DATA_DIR} +
+        "/basic_replay.csv"
+    };
 
     ASSERT_TRUE(reader.is_open());
 
@@ -51,11 +54,12 @@ TEST(ReplayEventReaderTest, ReadsAddEvent)
     );
 }
 
-TEST(ReplayEventReaderTest, ReadsMultipleEvents)
+TEST(CsvReplayEventReaderTest, ReadsMultipleEvents)
 {
-    ReplayEventReader reader{
-    std::string{CHRONOS_TEST_DATA_DIR} + "/basic_replay.csv"
-};
+    CsvReplayEventReader reader{
+        std::string{CHRONOS_TEST_DATA_DIR} +
+        "/basic_replay.csv"
+    };
 
     ASSERT_TRUE(reader.is_open());
 
@@ -66,21 +70,30 @@ TEST(ReplayEventReaderTest, ReadsMultipleEvents)
         ReplayReadResult::Event
     );
 
-    EXPECT_EQ(event.order_id, OrderId{1});
+    EXPECT_EQ(
+        event.order_id,
+        OrderId{1}
+    );
 
     EXPECT_EQ(
         reader.next(event),
         ReplayReadResult::Event
     );
 
-    EXPECT_EQ(event.order_id, OrderId{2});
+    EXPECT_EQ(
+        event.order_id,
+        OrderId{2}
+    );
 
     EXPECT_EQ(
         reader.next(event),
         ReplayReadResult::Event
     );
 
-    EXPECT_EQ(event.order_id, OrderId{3});
+    EXPECT_EQ(
+        event.order_id,
+        OrderId{3}
+    );
 
     EXPECT_EQ(
         reader.next(event),
@@ -103,10 +116,11 @@ TEST(ReplayEventReaderTest, ReadsMultipleEvents)
     );
 }
 
-TEST(ReplayEventReaderTest, RejectsMissingFile)
+TEST(CsvReplayEventReaderTest, RejectsMissingFile)
 {
-    ReplayEventReader reader{
-        std::string{CHRONOS_TEST_DATA_DIR} + "/does_not_exist.csv"
+    CsvReplayEventReader reader{
+        std::string{CHRONOS_TEST_DATA_DIR} +
+        "/does_not_exist.csv"
     };
 
     EXPECT_FALSE(reader.is_open());
@@ -118,12 +132,14 @@ TEST(ReplayEventReaderTest, RejectsMissingFile)
         ReplayReadResult::Error
     );
 
-    EXPECT_FALSE(reader.error().empty());
+    EXPECT_FALSE(
+        reader.error().empty()
+    );
 }
 
-TEST(ReplayEventReaderTest, RejectsMalformedRow)
+TEST(CsvReplayEventReaderTest, RejectsMalformedRow)
 {
-    ReplayEventReader reader{
+    CsvReplayEventReader reader{
         std::string{CHRONOS_TEST_DATA_DIR} +
         "/malformed_replay.csv"
     };
@@ -142,8 +158,14 @@ TEST(ReplayEventReaderTest, RejectsMalformedRow)
         ReplayReadResult::Error
     );
 
-    EXPECT_EQ(reader.line_number(), 3);
-    EXPECT_FALSE(reader.error().empty());
+    EXPECT_EQ(
+        reader.line_number(),
+        3
+    );
+
+    EXPECT_FALSE(
+        reader.error().empty()
+    );
 }
 
 } // namespace

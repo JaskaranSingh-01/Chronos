@@ -20,6 +20,11 @@ constexpr std::size_t OrderDeletePayloadSize = 14;
 
 constexpr std::size_t AddOrderPayloadSize = 31;
 
+static constexpr std::uint8_t ADD_ORDER = 0x41;
+static constexpr std::uint8_t ORDER_EXECUTED = 0x45;
+static constexpr std::uint8_t ORDER_CANCEL = 0x58;
+static constexpr std::uint8_t ORDER_DELETE = 0x44;
+
 bool parse_side(
     std::uint8_t value,
     Side& side

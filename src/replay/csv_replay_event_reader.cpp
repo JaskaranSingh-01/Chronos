@@ -1,23 +1,23 @@
-#include "simulator/replay/replay_event_reader.hpp"
+#include "simulator/replay/csv_replay_event_reader.hpp"
 
 #include <cstdint>
 #include <sstream>
 #include <string>
 
 namespace simulator {
+
 namespace {
 
-bool parse_side(
-    const std::string& value,
-    Side& side
-)
+bool parse_side(const std::string& value,Side& side)
 {
-    if (value == "BUY") {
+    if (value == "BUY")
+    {
         side = Side::Buy;
         return true;
     }
 
-    if (value == "SELL") {
+    if (value == "SELL")
+    {
         side = Side::Sell;
         return true;
     }
@@ -25,17 +25,15 @@ bool parse_side(
     return false;
 }
 
-bool parse_event_type(
-    const std::string& value,
-    ReplayEventType& type
-)
-{
-    if (value == "ADD") {
+bool parse_event_type(const std::string& value,ReplayEventType& type){
+    if (value == "ADD")
+    {
         type = ReplayEventType::Add;
         return true;
     }
 
-    if (value == "CANCEL") {
+    if (value == "CANCEL")
+    {
         type = ReplayEventType::Cancel;
         return true;
     }
@@ -45,46 +43,49 @@ bool parse_event_type(
 
 } // namespace
 
-ReplayEventReader::ReplayEventReader(
-    const std::string& filename
-)
-    : file_(filename)
+CsvReplayEventReader::CsvReplayEventReader(const std::string& filename) : file_(filename)
 {
-    if (!file_.is_open()) {
-        error_ = "Failed to open replay file: " + filename;
+    if (!file_.is_open())
+    {
+        error_ =
+            "Failed to open replay file: " + filename;
     }
 }
 
-ReplayReadResult ReplayEventReader::next(
-    ReplayEvent& event
-)
+ReplayReadResult CsvReplayEventReader::next(ReplayEvent& event)
 {
-    if (!error_.empty()) {
+    if (!error_.empty())
+    {
         return ReplayReadResult::Error;
     }
 
-    if (!file_.is_open()) {
+    if (!file_.is_open())
+    {
         error_ = "Replay file is not open";
         return ReplayReadResult::Error;
     }
 
     std::string line;
 
-    while (std::getline(file_, line)) {
+    while (std::getline(file_, line))
+    {
         ++line_number_;
 
         // Handle Windows CRLF files.
-        if (!line.empty() && line.back() == '\r') {
+        if (!line.empty() && line.back() == '\r')
+        {
             line.pop_back();
         }
 
         // Skip empty lines.
-        if (line.empty()) {
+        if (line.empty())
+        {
             continue;
         }
 
         // The first non-empty line must be the header.
-        if (!header_read_) {
+        if (!header_read_)
+        {
             header_read_ = true;
 
             if (line !=
@@ -97,14 +98,16 @@ ReplayReadResult ReplayEventReader::next(
             continue;
         }
 
-        if (parse_event(line, event)) {
+        if (parse_event(line, event))
+        {
             return ReplayReadResult::Event;
         }
 
         return ReplayReadResult::Error;
     }
 
-    if (!header_read_) {
+    if (!header_read_)
+    {
         error_ = "Missing CSV header";
         return ReplayReadResult::Error;
     }
@@ -112,10 +115,7 @@ ReplayReadResult ReplayEventReader::next(
     return ReplayReadResult::EndOfFile;
 }
 
-bool ReplayEventReader::parse_event(
-    const std::string& line,
-    ReplayEvent& event
-)
+bool CsvReplayEventReader::parse_event(const std::string& line,ReplayEvent& event)
 {
     std::stringstream stream(line);
 
@@ -140,12 +140,16 @@ bool ReplayEventReader::parse_event(
     // Make sure there are no extra columns.
     std::string extra;
 
-    if (std::getline(stream, extra, ',')) {
-        error_ = "Too many columns in CSV row: " + line;
+    if (std::getline(stream, extra, ','))
+    {
+        error_ =
+            "Too many columns in CSV row: " + line;
+
         return false;
     }
 
-    try {
+    try
+    {
         const std::int64_t timestamp =
             std::stoll(timestamp_string);
 
@@ -175,7 +179,8 @@ bool ReplayEventReader::parse_event(
 
         Side side;
 
-        if (!parse_side(side_string, side)) {
+        if (!parse_side(side_string, side))
+        {
             error_ =
                 "Invalid side: " +
                 side_string;
@@ -192,8 +197,11 @@ bool ReplayEventReader::parse_event(
 
         return true;
     }
-    catch (...) {
-        error_ = "Invalid numeric value in CSV row: " + line;
+    catch (...)
+    {
+        error_ =
+            "Invalid numeric value in CSV row: " + line;
+
         return false;
     }
 }

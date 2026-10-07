@@ -2,36 +2,22 @@
 
 namespace simulator {
 
-ReplayEngine::ProcessResult ReplayEngine::process_event(
-    const ReplayEvent& event,
-    ReplayStatistics& statistics
-)
+ReplayEngine::ProcessResult ReplayEngine::process_event(const ReplayEvent& event,ReplayStatistics& statistics)
 {
     switch (event.type)
     {
     case ReplayEventType::Add:
     {
-        const std::size_t trades_before =
-            simulator_.trades().size();
-
-        Order* order = simulator_.submit_order(
+        if(!simulator_.replay_add_order(
             event.order_id,
             event.side,
             event.price,
             event.quantity,
             event.timestamp
-        );
-
-        if (order == nullptr) {
+        )){
             return ProcessResult::Rejected;
         }
-
-        simulator_.release_filled_orders();
-
         ++statistics.add_events;
-        statistics.trades +=
-            simulator_.trades().size() - trades_before;
-
         return ProcessResult::Processed;
     }
 
@@ -47,7 +33,7 @@ ReplayEngine::ProcessResult ReplayEngine::process_event(
 
     case ReplayEventType::Cancel:
     {
-        if (!simulator_.cancel_order(event.order_id)) {
+        if (!simulator_.replay_cancel_order(event.order_id,event.quantity)) {
             return ProcessResult::Rejected;
         }
 
@@ -78,10 +64,7 @@ ReplayEngine::ProcessResult ReplayEngine::process_event(
     return ProcessResult::Rejected;
 }
 
-ReplayResult ReplayEngine::replay(
-    const std::vector<ReplayEvent>& events
-)
-{
+ReplayResult ReplayEngine::replay(const std::vector<ReplayEvent>& events){
     ReplayResult result;
 
     bool has_previous_timestamp = false;
@@ -120,9 +103,7 @@ ReplayResult ReplayEngine::replay(
     return result;
 }
 
-ReplayResult ReplayEngine::replay(
-    ReplayEventReader& reader
-)
+ReplayResult ReplayEngine::replay(ReplayEventReader& reader)
 {
     ReplayResult result;
 
@@ -136,7 +117,8 @@ ReplayResult ReplayEngine::replay(
         const ReplayReadResult read_result =
             reader.next(event);
 
-        if (read_result == ReplayReadResult::EndOfFile) {
+        if (read_result == ReplayReadResult::EndOfFile)
+        {
             return result;
         }
 
@@ -145,8 +127,7 @@ ReplayResult ReplayEngine::replay(
             result.failure = ReplayFailure::ReaderError;
             result.failed_event_index =
                 result.statistics.received_events + 1;
-            result.failed_source_line = reader.line_number();
-
+            result.failed_source_line = reader.source_position();
             return result;
         }
 
@@ -155,15 +136,9 @@ ReplayResult ReplayEngine::replay(
         if (has_previous_timestamp &&
             event.timestamp < previous_timestamp)
         {
-            result.failure =
-                ReplayFailure::OutOfOrderTimestamp;
-
-            result.failed_event_index =
-                result.statistics.received_events;
-
-            result.failed_source_line =
-                reader.line_number();
-
+            result.failure = ReplayFailure::OutOfOrderTimestamp;
+            result.failed_event_index = result.statistics.received_events;
+            result.failed_source_line = reader.source_position();
             return result;
         }
 

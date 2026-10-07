@@ -37,39 +37,26 @@ struct ReplayResult {
     // CSV source line when replaying through ReplayEventReader.
     std::size_t failed_source_line{0};
 
-    constexpr bool succeeded() const noexcept
-    {
+    constexpr bool succeeded() const noexcept{
         return failure == ReplayFailure::None;
     }
 };
 
 class ReplayEngine
 {
-private:
+public:
     enum class ProcessResult {
         Processed,
         Rejected
     };
-
+private:
     Simulator& simulator_;
-
-    ProcessResult process_event(
-        const ReplayEvent& event,
-        ReplayStatistics& statistics
-    );
+    ProcessResult process_event(const ReplayEvent& event,ReplayStatistics& statistics);
 
 public:
-    explicit ReplayEngine(Simulator& simulator) noexcept
-        : simulator_(simulator)
-    {}
-
-    ReplayResult replay(
-        const std::vector<ReplayEvent>& events
-    );
-
-    ReplayResult replay(
-        ReplayEventReader& reader
-    );
+    explicit ReplayEngine(Simulator& simulator) noexcept : simulator_(simulator) {}
+    ReplayResult replay(const std::vector<ReplayEvent>& events);
+    ReplayResult replay(ReplayEventReader& reader);
 };
 
 } // namespace simulator

@@ -25,7 +25,7 @@ add_library(simulator_lib
     src/matching/matching_engine.cpp
     src/simulator/simulator.cpp
     src/replay/replay_engine.cpp
-    src/replay/replay_event_reader.cpp
+    src/replay/csv_replay_event_reader.cpp
     src/itch/byte_reader.cpp
     src/itch/itch_message_reader.cpp
     src/itch/itch_decoder.cpp
@@ -82,14 +82,16 @@ add_executable(simulator_tests
     tests/matching_engine_test.cpp
     tests/order_pool_test.cpp
     tests/order_pool_integration_test.cpp
-    tests/simulator_test.cpp
+    tests/simulator/simulator_test.cpp
+    tests/simulator/simulator_matching_test.cpp
+    tests/simulator/simulator_replay_test.cpp
     tests/replay/replay_engine_test.cpp
     tests/replay/replay_event_reader_test.cpp
-    tests/replay/replay_itch_lifecycle_test.cpp
     tests/itch/byte_reader_test.cpp
     tests/itch/itch_message_reader_test.cpp
     tests/itch/itch_decoder_test.cpp
     tests/itch/itch_normalizer_test.cpp
+    
 )
 
 target_compile_definitions(simulator_tests
