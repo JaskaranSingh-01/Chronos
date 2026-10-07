@@ -4,6 +4,7 @@
 #include <cstdint>
 
 #include "simulator/itch/byte_reader.hpp"
+#include "simulator/itch/itch_message_types.hpp"
 
 namespace simulator {
 
@@ -55,13 +56,11 @@ ItchDecodeResult ItchDecoder::decode_add_order(
 
     if (message.type != AddOrderMessageType) {
         error_ = ItchDecodeError::InvalidMessageType;
-
         return ItchDecodeResult::UnsupportedMessage;
     }
 
     if (message.payload.size() != AddOrderPayloadSize) {
         error_ = ItchDecodeError::InvalidPayloadLength;
-
         return ItchDecodeResult::InvalidMessage;
     }
 
@@ -73,23 +72,18 @@ ItchDecodeResult ItchDecoder::decode_add_order(
 
     if (!reader.read_u48_be(timestamp)) {
         error_ = ItchDecodeError::TruncatedPayload;
-
         return ItchDecodeResult::InvalidMessage;
     }
 
     std::uint64_t order_id{0};
-
     if (!reader.read_u64_be(order_id)) {
         error_ = ItchDecodeError::TruncatedPayload;
-
         return ItchDecodeResult::InvalidMessage;
     }
 
     std::uint8_t side_value{0};
-
     if (!reader.read_u8(side_value)) {
         error_ = ItchDecodeError::TruncatedPayload;
-
         return ItchDecodeResult::InvalidMessage;
     }
 
@@ -97,15 +91,12 @@ ItchDecodeResult ItchDecoder::decode_add_order(
 
     if (!parse_side(side_value, side)) {
         error_ = ItchDecodeError::InvalidSide;
-
         return ItchDecodeResult::InvalidMessage;
     }
 
     std::uint32_t shares{0};
-
     if (!reader.read_u32_be(shares)) {
         error_ = ItchDecodeError::TruncatedPayload;
-
         return ItchDecodeResult::InvalidMessage;
     }
 
@@ -120,15 +111,12 @@ ItchDecodeResult ItchDecoder::decode_add_order(
 
     if (!reader.read_bytes(8, stock)) {
         error_ = ItchDecodeError::TruncatedPayload;
-
         return ItchDecodeResult::InvalidMessage;
     }
 
     std::uint32_t price{0};
-
     if (!reader.read_u32_be(price)) {
         error_ = ItchDecodeError::TruncatedPayload;
-
         return ItchDecodeResult::InvalidMessage;
     }
 
@@ -149,11 +137,7 @@ ItchDecodeResult ItchDecoder::decode_add_order(
     return ItchDecodeResult::Success;
 }
 
-ItchDecodeResult ItchDecoder::decode_order_executed(
-    const ItchMessage& message,
-    ItchOrderExecuted& order
-) noexcept
-{
+ItchDecodeResult ItchDecoder::decode_order_executed(const ItchMessage& message,ItchOrderExecuted& order) noexcept{
     error_ = ItchDecodeError::None;
     order = ItchOrderExecuted{};
 
@@ -205,11 +189,7 @@ ItchDecodeResult ItchDecoder::decode_order_executed(
     return ItchDecodeResult::Success;
 }
 
-ItchDecodeResult ItchDecoder::decode_order_cancel(
-    const ItchMessage& message,
-    ItchOrderCancel& order
-) noexcept
-{
+ItchDecodeResult ItchDecoder::decode_order_cancel(const ItchMessage& message,ItchOrderCancel& order) noexcept{
     error_ = ItchDecodeError::None;
     order = ItchOrderCancel{};
 
@@ -253,11 +233,7 @@ ItchDecodeResult ItchDecoder::decode_order_cancel(
     return ItchDecodeResult::Success;
 }
 
-ItchDecodeResult ItchDecoder::decode_order_delete(
-    const ItchMessage& message,
-    ItchOrderDelete& order
-) noexcept
-{
+ItchDecodeResult ItchDecoder::decode_order_delete(const ItchMessage& message,ItchOrderDelete& order) noexcept{
     error_ = ItchDecodeError::None;
     order = ItchOrderDelete{};
 

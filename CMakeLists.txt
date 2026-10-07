@@ -30,6 +30,7 @@ add_library(simulator_lib
     src/itch/itch_message_reader.cpp
     src/itch/itch_decoder.cpp
     src/itch/itch_normalizer.cpp
+    src/itch/itch_replay_event_reader.cpp
 )
 
 target_include_directories(simulator_lib
@@ -91,6 +92,8 @@ add_executable(simulator_tests
     tests/itch/itch_message_reader_test.cpp
     tests/itch/itch_decoder_test.cpp
     tests/itch/itch_normalizer_test.cpp
+    tests/itch/itch_replay_event_reader_test.cpp
+    tests/replay/itch_replay_engine_test.cpp
     
 )
 
