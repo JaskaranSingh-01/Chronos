@@ -13,12 +13,6 @@ ItchReadResult ItchMessageReader::next(
         return ItchReadResult::EndOfBuffer;
     }
 
-    /*
-     * Work on a temporary reader.
-     *
-     * If the message is malformed or truncated,
-     * the real reader position is not changed.
-     */
     ByteReader candidate = reader_;
 
     std::uint16_t message_length{0};
@@ -46,10 +40,7 @@ ItchReadResult ItchMessageReader::next(
 
     std::span<const std::byte> message_bytes;
 
-    if (!candidate.read_bytes(
-            message_length,
-            message_bytes))
-    {
+    if (!candidate.read_bytes(message_length,message_bytes)){
         error_ = ItchReadError::TruncatedMessage;
         return ItchReadResult::Error;
     }
@@ -57,22 +48,10 @@ ItchReadResult ItchMessageReader::next(
     /*
      * First byte is the ITCH message type.
      */
-    message.type =
-        std::to_integer<std::uint8_t>(
-            message_bytes[0]
-        );
+    message.type =std::to_integer<std::uint8_t>(message_bytes[0]);
 
-    /*
-     * Everything after the type byte is the
-     * message-specific payload.
-     */
-    message.payload =
-        message_bytes.subspan(1);
+    message.payload = message_bytes.subspan(1);
 
-    /*
-     * Commit the reader position only after the
-     * complete message has been validated.
-     */
     reader_ = candidate;
 
     return ItchReadResult::Message;

@@ -52,12 +52,17 @@ ReplayEngine::ProcessResult ReplayEngine::process_event(const ReplayEvent& event
 
     case ReplayEventType::Replace:
     {
-        // Not implemented yet.
-        //
-        // Replace semantics will be added after the normalized
-        // event model and ITCH message definitions are established.
-
-        return ProcessResult::Rejected;
+        if(!simulator_.replay_replace_order(
+            event.order_id,
+            event.replacement_order_id,
+            event.price,
+            event.quantity,
+            event.timestamp
+        )){
+            return ProcessResult::Rejected;
+        }
+        ++statistics.replace_events;
+        return ProcessResult::Processed;
     }
     }
 

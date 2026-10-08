@@ -57,6 +57,13 @@ public:
     bool replay_execute_order(OrderId id, Quantity quantity) noexcept;
     bool replay_cancel_order(OrderId id, Quantity quantity) noexcept;
     bool replay_delete_order(OrderId id) noexcept;
+    bool replay_replace_order(
+        OrderId order_id,
+        OrderId replacement_order_id,
+        Price price,
+        Quantity quantity,
+        Timestamp timestamp
+    );
 };
 
 } // namespace simulator

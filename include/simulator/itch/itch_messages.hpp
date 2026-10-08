@@ -13,41 +13,40 @@ namespace simulator {
 struct ItchAddOrder
 {
     Timestamp timestamp{0};
-
     OrderId order_id{0};
-
     Side side{Side::Buy};
-
     Quantity quantity{0};
-
     Price price{0};
 };
 
 struct ItchOrderExecuted
 {
     Timestamp timestamp{0};
-
     OrderId order_id{0};
-
     Quantity quantity{0};
-
     std::uint64_t match_number{0};
 };
 
 struct ItchOrderCancel
 {
     Timestamp timestamp{0};
-
     OrderId order_id{0};
-
     Quantity quantity{0};
 };
 
 struct ItchOrderDelete
 {
     Timestamp timestamp{0};
-
     OrderId order_id{0};
+};
+
+struct ItchOrderReplace
+{
+    Timestamp timestamp{0};
+    OrderId original_order_id{0};
+    OrderId replacement_order_id{0};
+    Quantity quantity{0};
+    Price price{0};
 };
 
 } // namespace simulator

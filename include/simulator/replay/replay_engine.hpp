@@ -25,16 +25,13 @@ struct ReplayStatistics {
     std::size_t trades{0};
     std::size_t execute_events{0};
     std::size_t delete_events{0};
+    std::size_t replace_events{0};
 };
 
 struct ReplayResult {
     ReplayStatistics statistics{};
     ReplayFailure failure{ReplayFailure::None};
-
-    // One-based logical event position; zero means no failure.
     std::size_t failed_event_index{0};
-
-    // CSV source line when replaying through ReplayEventReader.
     std::size_t failed_source_line{0};
 
     constexpr bool succeeded() const noexcept{

@@ -78,6 +78,20 @@ ReplayReadResult ItchReplayReader::next(ReplayEvent& event) noexcept{
 
             return ReplayReadResult::Event;
         }
+        case itch::REPLACE_ORDER:
+        {
+            ItchOrderReplace decoded{};
+
+            const ItchDecodeResult result = decoder_.decode_order_replace(message,decoded);
+
+            if (result != ItchDecodeResult::Success){
+                return ReplayReadResult::Error;
+            }
+
+            event = normalizer_.normalize(decoded);
+
+            return ReplayReadResult::Event;
+        }
 
         default:
             /*

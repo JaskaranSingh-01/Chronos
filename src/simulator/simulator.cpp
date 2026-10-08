@@ -230,4 +230,62 @@ bool Simulator::replay_delete_order(OrderId id) noexcept
     return order_pool_.release(*order);
 }
 
+bool Simulator::replay_replace_order(
+    OrderId order_id,
+    OrderId replacement_order_id,
+    Price price,
+    Quantity quantity,
+    Timestamp timestamp
+)
+{
+    Order* old_order = order_book_.find(order_id);
+
+    if (old_order == nullptr) {
+        return false;
+    }
+
+    if (order_id == replacement_order_id) {
+        return false;
+    }
+
+    if (order_book_.find(replacement_order_id) != nullptr) {
+        return false;
+    }
+
+    const Side side = old_order->side();
+
+    if (!order_book_.erase(order_id)) {
+        return false;
+    }
+
+    if (!order_pool_.release(*old_order)) {
+        return false;
+    }
+
+    Order* replacement = order_pool_.acquire(
+        replacement_order_id,
+        side,
+        price,
+        quantity,
+        timestamp
+    );
+
+    if (replacement == nullptr) {
+        return false;
+    }
+
+    if (!replacement->activate()) {
+        order_pool_.release(*replacement);
+        return false;
+    }
+
+    if (!order_book_.add(*replacement)) {
+        order_pool_.release(*replacement);
+        return false;
+    }
+
+    return true;
+}
+
+
 } // namespace simulator

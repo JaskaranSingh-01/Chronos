@@ -2,10 +2,7 @@
 
 namespace simulator {
 
-ReplayEvent ItchNormalizer::normalize(
-    const ItchAddOrder& order
-) const noexcept
-{
+ReplayEvent ItchNormalizer::normalize(const ItchAddOrder& order) const noexcept{
     ReplayEvent event;
 
     event.timestamp = order.timestamp;
@@ -19,10 +16,7 @@ ReplayEvent ItchNormalizer::normalize(
 }
 
 
-ReplayEvent ItchNormalizer::normalize(
-    const ItchOrderExecuted& order
-) const noexcept
-{
+ReplayEvent ItchNormalizer::normalize(const ItchOrderExecuted& order) const noexcept{
     ReplayEvent event;
 
     event.timestamp = order.timestamp;
@@ -34,10 +28,7 @@ ReplayEvent ItchNormalizer::normalize(
 }
 
 
-ReplayEvent ItchNormalizer::normalize(
-    const ItchOrderCancel& order
-) const noexcept
-{
+ReplayEvent ItchNormalizer::normalize(const ItchOrderCancel& order) const noexcept{
     ReplayEvent event;
 
     event.timestamp = order.timestamp;
@@ -49,15 +40,24 @@ ReplayEvent ItchNormalizer::normalize(
 }
 
 
-ReplayEvent ItchNormalizer::normalize(
-    const ItchOrderDelete& order
-) const noexcept
-{
+ReplayEvent ItchNormalizer::normalize(const ItchOrderDelete& order) const noexcept{
     ReplayEvent event;
 
     event.timestamp = order.timestamp;
     event.type = ReplayEventType::Delete;
     event.order_id = order.order_id;
+
+    return event;
+}
+ReplayEvent ItchNormalizer::normalize(const ItchOrderReplace& order) const noexcept{
+    ReplayEvent event;
+
+    event.timestamp = order.timestamp;
+    event.type = ReplayEventType::Replace;
+    event.order_id = order.original_order_id;
+    event.replacement_order_id = order.replacement_order_id;
+    event.quantity = order.quantity;
+    event.price = order.price;
 
     return event;
 }
