@@ -130,6 +130,24 @@ TEST(OrderPoolIntegrationTest, FilledOrderCanBeRemovedAndReleased)
     EXPECT_EQ(pool.available(), 2);
 }
 
+TEST(OrderPoolIntegrationTest, RejectsReleaseWhileInBook)
+{
+    OrderPool pool{2};
+    OrderBook book;
+
+    Order* order = pool.acquire(1, Side::Buy, Price{100}, Quantity{100}, Timestamp{10});
+
+    ASSERT_NE(order, nullptr);
+    ASSERT_TRUE(order->activate());
+    ASSERT_TRUE(book.add(*order));
+
+    // Releasing a resting order would leave a dangling pointer in the book.
+    EXPECT_FALSE(pool.release(*order));
+
+    EXPECT_EQ(pool.in_use(), 1);
+    EXPECT_EQ(book.find(1), order);
+}
+
 } // namespace
 
 } // namespace simulator

@@ -98,15 +98,12 @@ bool OrderPool::release(Order& order) noexcept
     if (slot->is_available) {
         return false;
     }
-
-    // An order must not still belong to a PriceLevel.
-    //
-    // We cannot access level_ directly here because it is
-    // private to Order. For now, enforce this through state:
-    // the caller must remove the order from OrderBook first.
-    //
-    // The stronger ownership check will be added when we
-    // integrate the pool with OrderBook.
+    
+    // An order still linked into a PriceLevel is referenced by the
+    // OrderBook; releasing it would leave a dangling pointer there.
+    if (order.level_ != nullptr){
+        return false;
+    }
 
     slot->next = free_list_;
     free_list_ = slot;

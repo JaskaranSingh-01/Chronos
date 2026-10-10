@@ -25,7 +25,7 @@ Order* Simulator::submit_order(
     Timestamp timestamp
 )
 {
-    if(quantity.is_zero() || order_book.find(id) != nullptr){
+    if(quantity.is_zero() || order_book_.find(id) != nullptr){
         return nullptr;
     }
 
@@ -250,6 +250,10 @@ bool Simulator::replay_replace_order(
     }
 
     if (order_id == replacement_order_id) {
+        return false;
+    }
+
+    if(quantity.is_zero()){
         return false;
     }
 

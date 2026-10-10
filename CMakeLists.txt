@@ -11,6 +11,21 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
+# Default to an optimised build with debug info; an unset build type
+# means no optimisation at all, which makes any timing meaningless.
+if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
+    set(CMAKE_BUILD_TYPE RelWithDebInfo CACHE STRING "" FORCE)
+endif()
+
+option(CHRONOS_SANITIZE "Build with AddressSanitizer + UBSan" OFF)
+
+if(CHRONOS_SANITIZE)
+    add_compile_options(-fsanitize=address,undefined -fno-omit-frame-pointer)
+    add_link_options(-fsanitize=address,undefined)
+endif()
+
+set(CHRONOS_WARNINGS -Wall -Wextra -Wpedantic)
+
 
 # -------------------------
 # Simulator library
@@ -37,6 +52,8 @@ target_include_directories(simulator_lib
     PUBLIC
         ${PROJECT_SOURCE_DIR}/include
 )
+
+target_compile_options(simulator_lib PRIVATE ${CHRONOS_WARNINGS})
 
 
 # -------------------------
@@ -101,6 +118,8 @@ target_compile_definitions(simulator_tests
     PRIVATE
         CHRONOS_TEST_DATA_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/data"
 )
+
+target_compile_options(simulator_tests PRIVATE ${CHRONOS_WARNINGS})
 
 target_link_libraries(simulator_tests
     PRIVATE

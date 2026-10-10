@@ -432,7 +432,17 @@ TEST(SimulatorReplayTest, ReplaceMovesOrderAndLosesPriority)
     EXPECT_EQ(simulator.orders_in_use(), 2u);
 }
 
+TEST(SimulatorReplayTest, RejectedReplaceKeepsOriginalOrder)
+{
+    Simulator simulator{10};
+    ASSERT_TRUE(simulator.replay_add_order(1, Side::Buy, Price{100}, Quantity{10}, Timestamp{1}));
 
+    EXPECT_FALSE(simulator.replay_replace_order(1, 2, Price{101}, Quantity{0}, Timestamp{2}));
+
+    ASSERT_NE(simulator.order_book().find(1), nullptr);
+    EXPECT_EQ(simulator.order_book().find(2), nullptr);
+    EXPECT_EQ(simulator.orders_in_use(), 1u);
+}
 
 } // namespace
 } // namespace simulator
