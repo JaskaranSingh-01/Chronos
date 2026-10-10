@@ -25,6 +25,10 @@ Order* Simulator::submit_order(
     Timestamp timestamp
 )
 {
+    if(quantity.is_zero() || order_book.find(id) != nullptr){
+        return nullptr;
+    }
+
     Order* order = order_pool_.acquire(
         id,
         side,
@@ -38,6 +42,7 @@ Order* Simulator::submit_order(
     }
 
     if (!order->activate()) {
+        order_pool_.release(*order);
         return nullptr;
     }
 

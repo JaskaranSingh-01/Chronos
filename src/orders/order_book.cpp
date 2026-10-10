@@ -4,6 +4,9 @@ namespace simulator {
 
 bool OrderBook::add(Order& order) noexcept
 {
+    if(order.remaining_quantity().is_zero()){
+        return false;
+    }
 
     if (order.state() != OrderState::Active &&
         order.state() != OrderState::PartiallyFilled) {

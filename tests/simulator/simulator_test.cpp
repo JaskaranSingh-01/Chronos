@@ -388,5 +388,51 @@ TEST(SimulatorTest, FilledOrderCannotBeCancelled)
     );
 }
 
+TEST(SimulatorTest, RejectsZeroQuantityWithoutLeakingPoolSlot)
+{
+    Simulator simulator{10};
+
+    EXPECT_EQ(simulator.submit_order(1, Side::Buy, Price{100}, Quantity{0}, Timestamp{10}), nullptr);
+    EXPECT_EQ(simulator.orders_in_use(), 0u);
+}
+
+TEST(SimulatorTest, RejectsDuplicateRestingIdWithoutTradingOrLeaking)
+{
+    Simulator simulator{10};
+
+    ASSERT_NE(simulator.submit_order(1, Side::Buy, Price{100}, Quantity{10}, Timestamp{10}), nullptr);
+
+    // Same id, crossing price: must not trade against its namesake.
+    EXPECT_EQ(simulator.submit_order(1, Side::Sell, Price{100}, Quantity{5}, Timestamp{20}), nullptr);
+
+    EXPECT_TRUE(simulator.trades().empty());
+    EXPECT_EQ(simulator.orders_in_use(), 1u);
+}
+
+TEST(SimulatorTest, ReplayAddRejectsZeroQuantity)
+{
+    Simulator simulator{10};
+
+    EXPECT_FALSE(simulator.replay_add_order(1, Side::Sell, Price{100}, Quantity{0}, Timestamp{10}));
+    EXPECT_EQ(simulator.orders_in_use(), 0u);
+}
+
+TEST(SimulatorReplayTest, ReplaceMovesOrderAndLosesPriority)
+{
+    Simulator simulator{10};
+    ASSERT_TRUE(simulator.replay_add_order(1, Side::Buy, Price{100}, Quantity{10}, Timestamp{1}));
+    ASSERT_TRUE(simulator.replay_add_order(2, Side::Buy, Price{100}, Quantity{10}, Timestamp{2}));
+
+    // Replace 1 -> 3 at the same price: 3 must now queue behind 2.
+    ASSERT_TRUE(simulator.replay_replace_order(1, 3, Price{100}, Quantity{5}, Timestamp{3}));
+
+    EXPECT_EQ(simulator.order_book().find(1), nullptr);
+    ASSERT_NE(simulator.order_book().find(3), nullptr);
+    EXPECT_EQ(simulator.order_book().best_bid()->id(), 2u);
+    EXPECT_EQ(simulator.orders_in_use(), 2u);
+}
+
+
+
 } // namespace
 } // namespace simulator
