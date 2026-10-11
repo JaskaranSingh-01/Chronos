@@ -46,6 +46,7 @@ add_library(simulator_lib
     src/itch/itch_decoder.cpp
     src/itch/itch_normalizer.cpp
     src/itch/itch_replay_event_reader.cpp
+    src/market/instrument_registry.cpp
 )
 
 target_include_directories(simulator_lib
@@ -112,6 +113,11 @@ add_executable(simulator_tests
     tests/itch/itch_replay_event_reader_test.cpp
     tests/itch/itch_test_builder_test.cpp
     tests/replay/itch_replay_engine_test.cpp
+    tests/market/market_event_test.cpp
+    tests/market/market_event_source_test.cpp
+    tests/market/instrument_registry_test.cpp
+    tests/market/vector_source_test.cpp
+    tests/source_conformance_test.cpp
 )
 
 target_compile_definitions(simulator_tests
