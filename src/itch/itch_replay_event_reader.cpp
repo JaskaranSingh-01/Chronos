@@ -34,11 +34,41 @@ ReplayReadResult ItchReplayReader::next(ReplayEvent& event) noexcept{
             return ReplayReadResult::Event;
         }
 
+        case itch::ADD_ORDER_MPID:
+        {
+            ItchAddOrder decoded{};
+
+            const ItchDecodeResult result = decoder_.decode_add_order_mpid(message,decoded);
+
+            if (result != ItchDecodeResult::Success){
+                return ReplayReadResult::Error;
+            }
+
+            event = normalizer_.normalize(decoded);
+
+            return ReplayReadResult::Event;
+        }
+
         case itch::ORDER_EXECUTED:
         {
             ItchOrderExecuted decoded{};
 
             const ItchDecodeResult result = decoder_.decode_order_executed(message,decoded);
+
+            if (result != ItchDecodeResult::Success){
+                return ReplayReadResult::Error;
+            }
+
+            event = normalizer_.normalize(decoded);
+
+            return ReplayReadResult::Event;
+        }
+
+        case itch::ORDER_EXECUTED_WITH_PRICE:
+        {
+            ItchOrderExecutedWithPrice decoded{};
+
+            const ItchDecodeResult result = decoder_.decode_order_executed_with_price(message,decoded);
 
             if (result != ItchDecodeResult::Success){
                 return ReplayReadResult::Error;

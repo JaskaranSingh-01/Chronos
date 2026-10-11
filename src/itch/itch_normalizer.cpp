@@ -28,6 +28,22 @@ ReplayEvent ItchNormalizer::normalize(const ItchOrderExecuted& order) const noex
 }
 
 
+/*
+ * 'C' is an execution like 'E'. ReplayEvent has no field for the
+ * execution price yet, so it is dropped here.
+ */
+ReplayEvent ItchNormalizer::normalize(const ItchOrderExecutedWithPrice& order) const noexcept{
+    ReplayEvent event;
+
+    event.timestamp = order.timestamp;
+    event.type = ReplayEventType::Execute;
+    event.order_id = order.order_id;
+    event.quantity = order.quantity;
+
+    return event;
+}
+
+
 ReplayEvent ItchNormalizer::normalize(const ItchOrderCancel& order) const noexcept{
     ReplayEvent event;
 

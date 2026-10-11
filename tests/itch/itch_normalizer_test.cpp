@@ -107,6 +107,49 @@ TEST(ItchNormalizerTest, NormalizesOrderDelete)
     EXPECT_EQ(event.order_id, 42);
 }
 
+TEST(ItchNormalizerTest, NormalizesOrderReplace)
+{
+    ItchOrderReplace source;
 
+    source.timestamp = Timestamp{400};
+    source.original_order_id = OrderId{42};
+    source.replacement_order_id = OrderId{43};
+    source.quantity = Quantity{80};
+    source.price = Price{10100};
 
+    ItchNormalizer normalizer;
+
+    const ReplayEvent event =
+        normalizer.normalize(source);
+
+    EXPECT_EQ(event.timestamp, 400);
+    EXPECT_EQ(event.type, ReplayEventType::Replace);
+    EXPECT_EQ(event.order_id, 42);
+    EXPECT_EQ(event.replacement_order_id, 43);
+    EXPECT_EQ(event.quantity.value(), 80);
+    EXPECT_EQ(event.price, Price{10100});
 }
+
+TEST(ItchNormalizerTest, NormalizesExecutedWithPriceAsExecute)
+{
+    ItchOrderExecutedWithPrice source;
+
+    source.timestamp = Timestamp{500};
+    source.order_id = OrderId{42};
+    source.quantity = Quantity{30};
+    source.match_number = 999;
+    source.printable = true;
+    source.price = Price{10200};
+
+    ItchNormalizer normalizer;
+
+    const ReplayEvent event =
+        normalizer.normalize(source);
+
+    EXPECT_EQ(event.timestamp, 500);
+    EXPECT_EQ(event.type, ReplayEventType::Execute);
+    EXPECT_EQ(event.order_id, 42);
+    EXPECT_EQ(event.quantity.value(), 30);
+}
+
+} // namespace simulator

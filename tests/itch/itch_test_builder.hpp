@@ -109,6 +109,15 @@ public:
         return end(start);
     }
 
+    // 'S' System Event (12 bytes). Chronos doesn't decode it; tests use it as
+    // a real message the replay reader must skip.
+    ItchBuilder& system_event(std::uint16_t locate, std::uint64_t ts, char event_code)
+    {
+        const auto start = begin('S', locate, ts);
+        put_char(event_code);
+        return end(start);
+    }
+
     // 'R' Stock Directory (39 bytes). Only locate and stock matter to Chronos;
     // the remaining fields get fixed plausible values.
     ItchBuilder& stock_directory(std::uint16_t locate, std::uint64_t ts, std::string_view stock)
