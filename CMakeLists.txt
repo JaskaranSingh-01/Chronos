@@ -110,8 +110,8 @@ add_executable(simulator_tests
     tests/itch/itch_decoder_test.cpp
     tests/itch/itch_normalizer_test.cpp
     tests/itch/itch_replay_event_reader_test.cpp
+    tests/itch/itch_test_builder_test.cpp
     tests/replay/itch_replay_engine_test.cpp
-    
 )
 
 target_compile_definitions(simulator_tests
