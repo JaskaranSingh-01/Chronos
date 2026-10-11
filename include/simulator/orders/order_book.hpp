@@ -11,9 +11,14 @@ namespace simulator
 {
     class OrderBook
     {
+    public:
+        // Best price first on both sides.
+        using BidLevels = std::map<Price, PriceLevel, std::greater<Price>>;
+        using AskLevels = std::map<Price, PriceLevel>;
+
     private:
-        std::map<Price, PriceLevel, std::greater<Price>> bids_;
-        std::map<Price, PriceLevel> asks_;
+        BidLevels bids_;
+        AskLevels asks_;
         std::unordered_map<OrderId, Order *> orders_;
 
         bool unlink(Order &order) noexcept;
@@ -29,6 +34,9 @@ namespace simulator
         const Order *best_bid() const noexcept;
         const Order *best_ask() const noexcept;
         bool empty() const noexcept;
+        std::size_t size() const noexcept { return orders_.size(); }
+        const BidLevels& bids() const noexcept { return bids_; }
+        const AskLevels& asks() const noexcept { return asks_; }
         // void clear() noexcept;
 
         bool execute(OrderId id, Quantity quantity) noexcept;

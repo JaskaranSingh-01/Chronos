@@ -275,6 +275,8 @@ bool OrderBook::execute(
         return false;
     }
 
+    order->level_->reduce(quantity);
+
     if (order->state() != OrderState::Filled) {
         return true;
     }
@@ -308,6 +310,8 @@ bool OrderBook::cancel(
     if (!order->cancel(quantity)) {
         return false;
     }
+
+    order->level_->reduce(quantity);
 
     if (order->state() != OrderState::Cancelled) {
         return true;

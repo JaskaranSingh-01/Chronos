@@ -769,4 +769,76 @@ TEST(OrderBookTest, RemovesFilledSellOrder)
     EXPECT_TRUE(book.empty());
 }
 
+
+// =============================================================================
+// Level totals
+// =============================================================================
+
+TEST(OrderBookTest, LevelTotalAfterPartialExecute)
+{
+    OrderBook book;
+
+    auto order1 = make_buy_order(1, Price{100}, Quantity{100});
+    auto order2 = make_buy_order(2, Price{100}, Quantity{50});
+    activate(order1);
+    activate(order2);
+    ASSERT_TRUE(book.add(order1));
+    ASSERT_TRUE(book.add(order2));
+
+    const PriceLevel& level = book.bids().at(Price{100});
+    EXPECT_EQ(level.total_quantity(), 150u);
+
+    ASSERT_TRUE(book.execute(1, Quantity{40}));
+    EXPECT_EQ(level.total_quantity(), 110u);
+
+    // A full execute unlinks the order; the level keeps the other one.
+    ASSERT_TRUE(book.execute(1, Quantity{60}));
+    EXPECT_EQ(level.total_quantity(), 50u);
+    EXPECT_EQ(level.order_count(), 1u);
+}
+
+TEST(OrderBookTest, LevelTotalAfterPartialCancel)
+{
+    OrderBook book;
+
+    auto order1 = make_sell_order(1, Price{100}, Quantity{100});
+    auto order2 = make_sell_order(2, Price{100}, Quantity{50});
+    activate(order1);
+    activate(order2);
+    ASSERT_TRUE(book.add(order1));
+    ASSERT_TRUE(book.add(order2));
+
+    const PriceLevel& level = book.asks().at(Price{100});
+
+    ASSERT_TRUE(book.cancel(2, Quantity{20}));
+    EXPECT_EQ(level.total_quantity(), 130u);
+
+    ASSERT_TRUE(book.cancel(2, Quantity{30}));
+    EXPECT_EQ(level.total_quantity(), 100u);
+    EXPECT_EQ(level.order_count(), 1u);
+}
+
+TEST(OrderBookTest, LevelTotalAfterErase)
+{
+    OrderBook book;
+
+    auto order1 = make_buy_order(1, Price{100}, Quantity{100});
+    auto order2 = make_buy_order(2, Price{100}, Quantity{50});
+    activate(order1);
+    activate(order2);
+    ASSERT_TRUE(book.add(order1));
+    ASSERT_TRUE(book.add(order2));
+    ASSERT_TRUE(book.execute(2, Quantity{10}));
+
+    const PriceLevel& level = book.bids().at(Price{100});
+
+    ASSERT_TRUE(book.erase(2));
+    EXPECT_EQ(level.total_quantity(), 100u);
+    EXPECT_EQ(book.size(), 1u);
+
+    ASSERT_TRUE(book.erase(1));
+    EXPECT_TRUE(book.bids().empty());
+    EXPECT_EQ(book.size(), 0u);
+}
+
 } // namespace simulator

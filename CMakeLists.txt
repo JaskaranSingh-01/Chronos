@@ -47,6 +47,11 @@ add_library(simulator_lib
     src/itch/itch_normalizer.cpp
     src/itch/itch_replay_event_reader.cpp
     src/market/instrument_registry.cpp
+    src/market/market_book.cpp
+    src/io/mapped_file.cpp
+    src/itch/itch_source.cpp
+    src/market/market_replay.cpp
+    src/cli/replay_args.cpp
 )
 
 target_include_directories(simulator_lib
@@ -65,6 +70,8 @@ add_executable(simulator
 
     app/main.cpp
 )
+
+target_compile_options(simulator PRIVATE ${CHRONOS_WARNINGS})
 
 target_link_libraries(simulator
     PRIVATE
@@ -117,7 +124,13 @@ add_executable(simulator_tests
     tests/market/market_event_source_test.cpp
     tests/market/instrument_registry_test.cpp
     tests/market/vector_source_test.cpp
+    tests/market/market_book_test.cpp
     tests/source_conformance_test.cpp
+    tests/io/mapped_file_test.cpp
+    tests/itch/itch_source_test.cpp
+    tests/market/market_replay_test.cpp
+    tests/cli/replay_args_test.cpp
+    tests/itch/itch_real_data_test.cpp
 )
 
 target_compile_definitions(simulator_tests

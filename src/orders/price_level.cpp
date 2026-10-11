@@ -29,6 +29,7 @@ bool PriceLevel::add(Order& order) noexcept {
     tail_ = &order;
 
     ++order_count_;
+    total_quantity_ += order.remaining_quantity_.value();
 
     return true;
 }
@@ -61,6 +62,8 @@ bool PriceLevel::remove(Order& order) noexcept {
     order.level_ = nullptr;
 
     --order_count_;
+    // Remaining at unlink time: callers unlink before zeroing it (delete_order).
+    total_quantity_ -= order.remaining_quantity_.value();
 
     return true;
 }

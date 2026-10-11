@@ -23,6 +23,7 @@ void Order::initialize(
 
         state_ = OrderState::New;
         timestamp_ = timestamp;
+        sequence_ = 0;
 
         prev_ = nullptr;
         next_ = nullptr;
@@ -37,12 +38,12 @@ Order::Order(
     Timestamp timestamp
 ) noexcept
     : id_(id),
-      side_(side),
       price_(price),
       quantity_(quantity),
       remaining_quantity_(quantity),
-      state_(OrderState::New),
-      timestamp_(timestamp) {}
+      timestamp_(timestamp),
+      side_(side),
+      state_(OrderState::New) {}
 
 bool Order::activate() noexcept {
     if (state_ != OrderState::New) {

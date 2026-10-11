@@ -416,4 +416,37 @@ namespace simulator
 
         EXPECT_TRUE(level.empty());
     }
+
+    // ------------------------------------------------------------
+    // Total quantity
+    // ------------------------------------------------------------
+
+    TEST(PriceLevelTest, TracksTotalQuantity)
+    {
+        PriceLevel level{Price{100}};
+
+        auto order1 = make_order(1, Price{100}, 10);
+        auto order2 = make_order(2, Price{100}, 20);
+
+        ASSERT_TRUE(order1.activate());
+        ASSERT_TRUE(order2.activate());
+
+        EXPECT_EQ(level.total_quantity(), 0u);
+
+        ASSERT_TRUE(level.add(order1));
+        ASSERT_TRUE(level.add(order2));
+        EXPECT_EQ(level.total_quantity(), 200u);
+
+        // A partial change goes through reduce(); remove() then subtracts
+        // whatever is remaining at unlink time.
+        ASSERT_TRUE(order1.execute(Quantity{30}));
+        level.reduce(Quantity{30});
+        EXPECT_EQ(level.total_quantity(), 170u);
+
+        ASSERT_TRUE(level.remove(order1));
+        EXPECT_EQ(level.total_quantity(), 100u);
+
+        ASSERT_TRUE(level.remove(order2));
+        EXPECT_EQ(level.total_quantity(), 0u);
+    }
 } // namespace simulator

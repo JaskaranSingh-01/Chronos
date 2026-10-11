@@ -31,8 +31,8 @@
 //
 // Adding a source: one INSTANTIATE_TEST_SUITE_P line in
 // tests/source_conformance_test.cpp, plus one small synthetic data file under
-// tests/data/conformance/ (never a slice of real data) unless the events come
-// from an in-test array.
+// tests/data/conformance/ (never a slice of real data) unless the input is
+// built in the test (SourceCase::data) or the events come from an in-test array.
 
 namespace simulator::conformance {
 
@@ -45,6 +45,7 @@ struct SourceCase
 {
     std::string_view name;
     std::string_view data_file;             // under tests/data/conformance/; empty: no file
+    std::string_view data;                  // in-memory good input, used when data_file is empty
     SourceFactory factory{nullptr};         // registers its instruments in `registry`
     std::string_view bad_input;             // must end in expected_error
     SourceError expected_error{SourceError::None};  // None: cannot fail, the error check is skipped
@@ -317,6 +318,7 @@ protected:
         const std::string_view file = GetParam().data_file;
 
         if (file.empty()) {
+            data_ = GetParam().data;
             return;
         }
 

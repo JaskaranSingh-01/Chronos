@@ -175,4 +175,16 @@ TEST(OrderTest, CannotExecuteFilledOrder) {
     EXPECT_EQ(order.remaining_quantity().value(), 0);
 }
 
+TEST(OrderTest, SequenceDefaultsToZeroAndIsSettable) {
+    auto order = make_test_order();
+
+    EXPECT_EQ(order.sequence(), 0u);
+
+    order.set_sequence(42);
+    EXPECT_EQ(order.sequence(), 42u);
+
+    order.initialize(2, Side::Sell, Price{1}, Quantity{1}, 0);
+    EXPECT_EQ(order.sequence(), 0u);
+}
+
 } // namespace simulator

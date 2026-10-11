@@ -109,6 +109,22 @@ public:
         return end(start);
     }
 
+    // 'P' Trade, non-cross (44 bytes).
+    ItchBuilder& trade(
+        std::uint16_t locate, std::uint64_t ts, std::uint64_t order_id,
+        char side, std::uint32_t shares, std::string_view stock, std::uint32_t price,
+        std::uint64_t match)
+    {
+        const auto start = begin('P', locate, ts);
+        put(order_id, 8);
+        put_char(side);
+        put(shares, 4);
+        put_alpha(stock, 8);
+        put(price, 4);
+        put(match, 8);
+        return end(start);
+    }
+
     // 'S' System Event (12 bytes). Chronos doesn't decode it; tests use it as
     // a real message the replay reader must skip.
     ItchBuilder& system_event(std::uint16_t locate, std::uint64_t ts, char event_code)

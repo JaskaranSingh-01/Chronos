@@ -23,4 +23,21 @@ namespace simulator
         return std::chrono::nanoseconds{midnight.time_since_epoch()}.count();
     }
 
+    // America/New_York's UTC offset at 00:00 local on `date`, the offset
+    // session_midnight_ns needs: -04:00 (EDT) or -05:00 (EST). DST starts on
+    // the 2nd Sunday of March and ends on the 1st Sunday of November, both at
+    // 02:00 local, so midnight on either Sunday still has the old offset.
+    // ponytail: US rule since 2007 only (earlier: 1st Sunday of April to last
+    // Sunday of October); pass --utc-offset for older dates.
+    constexpr std::chrono::minutes us_eastern_utc_offset(std::chrono::year_month_day date) noexcept
+    {
+        using namespace std::chrono;
+
+        const sys_days day{date};
+        const sys_days dst_start{date.year() / March / Sunday[2]};
+        const sys_days dst_end{date.year() / November / Sunday[1]};
+
+        return day > dst_start && day <= dst_end ? hours{-4} : hours{-5};
+    }
+
 } // namespace simulator

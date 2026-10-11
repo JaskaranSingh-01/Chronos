@@ -6,6 +6,8 @@
 #include <span>
 #include <string>
 
+#include "itch/itch_test_builder.hpp"
+#include "simulator/itch/itch_source.hpp"
 #include "simulator/market/vector_source.hpp"
 #include "support/source_conformance.hpp"
 
@@ -98,6 +100,54 @@ std::unique_ptr<MarketEventSource> make_vector_source(
 INSTANTIATE_TEST_SUITE_P(
     Vector, SourceConformanceTest,
     ::testing::Values(SourceCase{.name = "Vector", .factory = make_vector_source}));
+
+// ItchSource: ItchBuilder bytes held in memory, ticker AAPL. Every mapped ITCH
+// type appears, plus an S (skipped) and MSFT orders (filtered).
+std::string to_string(std::span<const std::byte> bytes)
+{
+    return {reinterpret_cast<const char*>(bytes.data()), bytes.size()};
+}
+
+const std::string itch_good = to_string(
+    itch_test::ItchBuilder{}
+        .system_event(0, 1, 'O')
+        .stock_directory(1, 2, "AAPL")
+        .stock_directory(2, 3, "MSFT")
+        .add_order(2, 10, 1, 'B', 100, "MSFT", 1'500'000)
+        .add_order(1, 10, 1, 'S', 500, "AAPL", 2'900'100)
+        .add_order_mpid(1, 11, 2, 'B', 300, "AAPL", 2'899'900, "GSCO")
+        .executed(1, 12, 1, 100, 1)
+        .executed_with_price(1, 13, 1, 100, 2, true, 2'900'000)
+        .cancel(1, 14, 2, 100)
+        .replace(1, 15, 2, 3, 200, 2'899'800)
+        .trade(1, 16, 0, 'B', 50, "AAPL", 2'900'050, 3)
+        .erase(1, 17, 3)
+        .executed(2, 18, 1, 100, 4)
+        .executed(1, 19, 1, 300, 5)
+        .bytes());
+
+// R, then an A for AAPL with side 'Z': InvalidSide at the A, after the 41-byte R.
+const std::string itch_bad = to_string(
+    itch_test::ItchBuilder{}
+        .stock_directory(1, 1, "AAPL")
+        .add_order(1, 2, 1, 'Z', 100, "AAPL", 2'900'000)
+        .bytes());
+
+std::unique_ptr<MarketEventSource> make_itch_source(
+    std::span<const std::byte> data, InstrumentRegistry& registry)
+{
+    using namespace std::chrono_literals;
+    return std::make_unique<ItchSource>(
+        data,
+        ItchSourceConfig{.ticker = "AAPL", .session_date = 2019y / 12 / 30, .utc_offset = -5h},
+        registry);
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    Itch, SourceConformanceTest,
+    ::testing::Values(SourceCase{
+        .name = "Itch", .data = itch_good, .factory = make_itch_source, .bad_input = itch_bad,
+        .expected_error = SourceError::InvalidSide, .expected_position = 41}));
 
 // ---------------------------------------------------------------------------
 // The checks themselves, run against deliberately broken in-test sources.

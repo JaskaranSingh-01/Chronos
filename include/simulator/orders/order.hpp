@@ -17,19 +17,23 @@ class OrderPool;
 class Order {
 private:
     OrderId id_{0};
-    Side side_{Side::Buy};
     Price price_{};
     Quantity quantity_{0};
     Quantity remaining_quantity_{0};
-    OrderState state_{OrderState::New};
     Timestamp timestamp_{0};
+    std::uint64_t sequence_{0};  // arrival order, assigned by MarketBook
 
     Order* prev_{nullptr};
     Order* next_{nullptr};
     PriceLevel* level_{nullptr};
 
+    // The two 1-byte fields sit together at the end: 80 bytes, not 88.
+    Side side_{Side::Buy};
+    OrderState state_{OrderState::New};
+
     friend class PriceLevel;
     friend class OrderPool;
+    friend class OrderBook;  // reduces level_->total_quantity on partial changes
 
 
 public:
@@ -67,6 +71,13 @@ public:
     Quantity remaining_quantity() const noexcept;
     OrderState state() const noexcept;
     Timestamp timestamp() const noexcept;
+
+    std::uint64_t sequence() const noexcept { return sequence_; }
+    void set_sequence(std::uint64_t sequence) noexcept { sequence_ = sequence; }
+
+    // Read-only view of the order's place in the book.
+    const Order* next() const noexcept { return next_; }
+    const PriceLevel* level() const noexcept { return level_; }
 };
 
 } // namespace simulator
