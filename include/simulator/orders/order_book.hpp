@@ -16,6 +16,8 @@ namespace simulator
         std::map<Price, PriceLevel> asks_;
         std::unordered_map<OrderId, Order *> orders_;
 
+        bool unlink(Order &order) noexcept;
+
     public:
         bool add(Order &order) noexcept;        
         bool remove(OrderId id) noexcept;

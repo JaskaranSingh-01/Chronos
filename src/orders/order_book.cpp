@@ -2,6 +2,28 @@
 
 namespace simulator {
 
+// Detaches the order from its price level and drops the level once it
+// is empty. Leaves orders_ and the order's state to the caller.
+bool OrderBook::unlink(Order& order) noexcept
+{
+    // bids_ and asks_ differ only in comparator, so one generic lambda serves both.
+    auto unlink_from = [&order](auto& levels) noexcept {
+        auto level_it = levels.find(order.price());
+
+        if (level_it == levels.end() || !level_it->second.remove(order)) {
+            return false;
+        }
+
+        if (level_it->second.empty()) {
+            levels.erase(level_it);
+        }
+
+        return true;
+    };
+
+    return order.side() == Side::Buy ? unlink_from(bids_) : unlink_from(asks_);
+}
+
 bool OrderBook::add(Order& order) noexcept
 {
     if(order.remaining_quantity().is_zero()){
@@ -79,43 +101,8 @@ bool OrderBook::remove(OrderId id) noexcept{
         return false;
     }
     
-    const Price price = order->price();
-
-    if (order->side() == Side::Buy) {
-
-        auto level_it = bids_.find(price);
-
-        if (level_it == bids_.end()) {
-            return false;
-        }
-
-        PriceLevel& level = level_it->second;
-
-        if (!level.remove(*order)) {
-            return false;
-        }
-
-        if (level.empty()) {
-            bids_.erase(level_it);
-        }
-
-    } else {
-
-        auto level_it = asks_.find(price);
-
-        if (level_it == asks_.end()) {
-            return false;
-        }
-
-        PriceLevel& level = level_it->second;
-
-        if (!level.remove(*order)) {
-            return false;
-        }
-
-        if (level.empty()) {
-            asks_.erase(level_it);
-        }
+    if (!unlink(*order)) {
+        return false;
     }
 
     orders_.erase(it);
@@ -143,43 +130,8 @@ bool OrderBook::cancel(OrderId id) noexcept
         return false;
     }
 
-    const Price price = order->price();
-
-    if (order->side() == Side::Buy) {
-
-        auto level_it = bids_.find(price);
-
-        if (level_it == bids_.end()) {
-            return false;
-        }
-
-        PriceLevel& level = level_it->second;
-
-        if (!level.remove(*order)) {
-            return false;
-        }
-
-        if (level.empty()) {
-            bids_.erase(level_it);
-        }
-
-    } else {
-
-        auto level_it = asks_.find(price);
-
-        if (level_it == asks_.end()) {
-            return false;
-        }
-
-        PriceLevel& level = level_it->second;
-
-        if (!level.remove(*order)) {
-            return false;
-        }
-
-        if (level.empty()) {
-            asks_.erase(level_it);
-        }
+    if (!unlink(*order)) {
+        return false;
     }
 
     // Now that the order is no longer in the book,
@@ -327,40 +279,8 @@ bool OrderBook::execute(
         return true;
     }
 
-    const Price price = order->price();
-
-    if (order->side() == Side::Buy) {
-        auto level_it = bids_.find(price);
-
-        if (level_it == bids_.end()) {
-            return false;
-        }
-
-        PriceLevel& level = level_it->second;
-
-        if (!level.remove(*order)) {
-            return false;
-        }
-
-        if (level.empty()) {
-            bids_.erase(level_it);
-        }
-    } else {
-        auto level_it = asks_.find(price);
-
-        if (level_it == asks_.end()) {
-            return false;
-        }
-
-        PriceLevel& level = level_it->second;
-
-        if (!level.remove(*order)) {
-            return false;
-        }
-
-        if (level.empty()) {
-            asks_.erase(level_it);
-        }
+    if (!unlink(*order)) {
+        return false;
     }
 
     orders_.erase(it);
@@ -393,40 +313,8 @@ bool OrderBook::cancel(
         return true;
     }
 
-    const Price price = order->price();
-
-    if (order->side() == Side::Buy) {
-        auto level_it = bids_.find(price);
-
-        if (level_it == bids_.end()) {
-            return false;
-        }
-
-        PriceLevel& level = level_it->second;
-
-        if (!level.remove(*order)) {
-            return false;
-        }
-
-        if (level.empty()) {
-            bids_.erase(level_it);
-        }
-    } else {
-        auto level_it = asks_.find(price);
-
-        if (level_it == asks_.end()) {
-            return false;
-        }
-
-        PriceLevel& level = level_it->second;
-
-        if (!level.remove(*order)) {
-            return false;
-        }
-
-        if (level.empty()) {
-            asks_.erase(level_it);
-        }
+    if (!unlink(*order)) {
+        return false;
     }
 
     orders_.erase(it);
@@ -448,40 +336,8 @@ bool OrderBook::erase(OrderId id) noexcept
         return false;
     }
 
-    const Price price = order->price();
-
-    if (order->side() == Side::Buy) {
-        auto level_it = bids_.find(price);
-
-        if (level_it == bids_.end()) {
-            return false;
-        }
-
-        PriceLevel& level = level_it->second;
-
-        if (!level.remove(*order)) {
-            return false;
-        }
-
-        if (level.empty()) {
-            bids_.erase(level_it);
-        }
-    } else {
-        auto level_it = asks_.find(price);
-
-        if (level_it == asks_.end()) {
-            return false;
-        }
-
-        PriceLevel& level = level_it->second;
-
-        if (!level.remove(*order)) {
-            return false;
-        }
-
-        if (level.empty()) {
-            asks_.erase(level_it);
-        }
+    if (!unlink(*order)) {
+        return false;
     }
 
     orders_.erase(it);

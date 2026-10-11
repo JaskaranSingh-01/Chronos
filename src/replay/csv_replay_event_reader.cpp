@@ -159,10 +159,8 @@ bool CsvReplayEventReader::parse_event(const std::string& line,ReplayEvent& even
         const std::int64_t price =
             std::stoll(price_string);
 
-        const std::uint32_t quantity =
-            static_cast<std::uint32_t>(
-                std::stoul(quantity_string)
-            );
+        const std::uint64_t quantity =
+            std::stoull(quantity_string);
 
         ReplayEventType event_type;
 

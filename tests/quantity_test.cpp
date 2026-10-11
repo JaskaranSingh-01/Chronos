@@ -60,3 +60,23 @@ TEST(QuantityTest, SupportsMaximumValue)
         std::numeric_limits<std::uint32_t>::max()
     );
 }
+
+TEST(QuantityTest, HoldsValuesAboveUint32Max)
+{
+    constexpr std::uint64_t above =
+        std::uint64_t{std::numeric_limits<std::uint32_t>::max()} + 1;
+
+    constexpr Quantity quantity{above};
+
+    EXPECT_EQ(quantity.value(), above);
+    EXPECT_EQ((quantity - Quantity{1}).value(), above - 1);
+}
+
+TEST(QuantityTest, SubtractionUnderflowAssertsInDebug)
+{
+    // Debug: the assert aborts. NDEBUG: the statement just runs (and wraps).
+    EXPECT_DEBUG_DEATH(
+        static_cast<void>(Quantity{1} - Quantity{2}),
+        ""
+    );
+}

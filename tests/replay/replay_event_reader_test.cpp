@@ -116,6 +116,29 @@ TEST(CsvReplayEventReaderTest, ReadsMultipleEvents)
     );
 }
 
+TEST(CsvReplayEventReaderTest, ReadsQuantityAboveUint32Max)
+{
+    CsvReplayEventReader reader{
+        std::string{CHRONOS_TEST_DATA_DIR} +
+        "/large_quantity_replay.csv"
+    };
+
+    ASSERT_TRUE(reader.is_open());
+
+    ReplayEvent event;
+
+    ASSERT_EQ(
+        reader.next(event),
+        ReplayReadResult::Event
+    );
+
+    // 2^32 used to truncate to 0 through a uint32_t cast.
+    EXPECT_EQ(
+        event.quantity,
+        Quantity{4294967296ULL}
+    );
+}
+
 TEST(CsvReplayEventReaderTest, RejectsMissingFile)
 {
     CsvReplayEventReader reader{
