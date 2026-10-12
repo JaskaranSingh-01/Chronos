@@ -19,6 +19,7 @@ private:
     LatencyConfig latency_;
     Timestamp now_{0};
     OrderId next_id_{1};
+    bool timers_open_{true};
 
 public:
     OrderGateway(SimQueue& queue, Portfolio& portfolio, LatencyConfig latency) noexcept
@@ -47,10 +48,11 @@ public:
                              .order_id = id});
     }
 
-    // Strategy::on_timer(timer_id) at `at`. False, and nothing queued, if `at` < now.
+    // Strategy::on_timer(timer_id) at `at`. False, and nothing queued, if `at`
+    // < now or after stop_timers().
     bool set_timer(Timestamp at, std::uint64_t timer_id) noexcept
     {
-        if (at < now_) {
+        if (at < now_ || !timers_open_) {
             return false;
         }
         queue_.push(SimEvent{.timestamp = at, .type = SimEventType::Timer, .timer_id = timer_id});
@@ -59,6 +61,9 @@ public:
 
     Timestamp now() const noexcept { return now_; }
     void set_now(Timestamp now) noexcept { now_ = now; }
+
+    // The EventLoop calls this at the end of the market stream (see EventLoop).
+    void stop_timers() noexcept { timers_open_ = false; }
 };
 
 } // namespace simulator

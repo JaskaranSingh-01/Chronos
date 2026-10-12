@@ -13,6 +13,7 @@
 #include "simulator/itch/itch_source.hpp"
 #include "simulator/market/market_replay.hpp"
 #include "simulator/strategies/imbalance_taker.hpp"
+#include "simulator/strategies/market_maker.hpp"
 
 namespace {
 
@@ -212,9 +213,48 @@ int replay(const ReplayArgs& args)
     return report.succeeded() && invariants ? 0 : 1;
 }
 
-// MarketReplay plus the ImbalanceTaker toy through EventLoop: IOC orders
-// filled against the replayed book (never changing it), with latency, risk
-// and fees. Money prints in the instrument's currency.
+void print_strategy(const ImbalanceTakerStats& stats)
+{
+    std::printf("\nStrategy\n");
+    std::printf("  orders sent      %" PRIu64 "\n", stats.sent);
+    std::printf("  risk rejects     %" PRIu64 "\n", stats.risk_rejects);
+    std::printf("  fills            %" PRIu64 "\n", stats.fills);
+    std::printf("  expired          %" PRIu64 "\n", stats.expired);
+    std::printf("  bought           %" PRIu64 " shares\n", stats.bought);
+    std::printf("  sold             %" PRIu64 " shares\n", stats.sold);
+}
+
+void print_strategy(const MarketMakerStats& stats)
+{
+    std::printf("\nStrategy\n");
+    std::printf("  quotes sent      %" PRIu64 "\n", stats.quotes);
+    std::printf("  risk rejects     %" PRIu64 "\n", stats.risk_rejects);
+    std::printf("  cancels sent     %" PRIu64 "\n", stats.cancels);
+    std::printf("  fills            %" PRIu64 "\n", stats.fills);
+    std::printf("  rejects          %" PRIu64 " (would cross)\n", stats.rejects);
+    std::printf("  bought           %" PRIu64 " shares\n", stats.bought);
+    std::printf("  sold             %" PRIu64 " shares\n", stats.sold);
+}
+
+void print_execution(const ExecutionStatistics& stats)
+{
+    std::printf("\nExecution\n");
+    std::printf("  maker fills      %" PRIu64 " (%" PRIu64 " shares)\n", stats.maker_fills, stats.maker_quantity);
+    std::printf("  taker fills      %" PRIu64 " (%" PRIu64 " shares)\n", stats.taker_fills, stats.taker_quantity);
+    if (stats.accepted_quantity != 0) {
+        std::printf("  fill rate        %.2f%% of %" PRIu64 " shares quoted\n",
+                    100.0 * static_cast<double>(stats.maker_quantity) / static_cast<double>(stats.accepted_quantity),
+                    stats.accepted_quantity);
+    }
+    std::printf("  cancels          %" PRIu64 " done, %" PRIu64 " rejected (too late)\n", stats.cancelled,
+                stats.cancel_rejects);
+    std::printf("  would cross      %" PRIu64 " rejected\n", stats.would_cross_rejects);
+    std::printf("  FIFO anomalies   %" PRIu64 "\n", stats.fifo_anomalies);
+}
+
+// MarketReplay plus a toy strategy through EventLoop: our orders filled
+// against the replayed book (never changing it), with latency, risk and fees.
+// Money prints in the instrument's currency.
 int backtest(const ReplayArgs& args)
 {
     MappedFile file;
@@ -224,18 +264,24 @@ int backtest(const ReplayArgs& args)
     }
 
     const BacktestArgs& b = args.backtest;
+    const bool mm = b.strategy == StrategyKind::MarketMaker;
     const ItchSourceConfig config{.ticker = args.symbol, .session_date = args.date,
                                   .utc_offset = args.utc_offset,
                                   .allow_truncated_tail = args.allow_truncated_tail};
     const Timestamp midnight = session_midnight_ns(args.date, args.utc_offset);
     const LatencyConfig latency{.order_latency = static_cast<Timestamp>(b.order_latency_us) * 1'000,
                                 .report_latency = static_cast<Timestamp>(b.report_latency_us) * 1'000};
-    const ImbalanceTakerParams params{.threshold = b.threshold, .clip = b.clip, .max_position = b.max_position,
-                                      .cooldown_ns = static_cast<Timestamp>(b.cooldown_ms) * 1'000'000};
-    // One IOC in flight at a time; the strategy's own position limit, enforced again pre-trade.
-    const RiskLimits limits{.max_position = b.max_position, .max_order_quantity = Quantity{b.clip},
-                            .max_open_orders = 1};
-    const FeeSchedule fees{.taker_fee_per_share = static_cast<std::int64_t>(b.taker_fee_ticks)};
+    const ImbalanceTakerParams imbalance_params{.threshold = b.threshold, .clip = b.clip,
+                                                .max_position = b.max_position,
+                                                .cooldown_ns = static_cast<Timestamp>(b.cooldown_ms) * 1'000'000};
+    const MarketMakerParams mm_params{.quote_size = b.quote_size, .max_position = b.max_position,
+                                      .requote_cooldown_ns = static_cast<Timestamp>(b.requote_ms) * 1'000'000};
+    // The strategy's own position limit, enforced again pre-trade.
+    const RiskLimits limits{.max_position = b.max_position, .max_order_quantity = Quantity{mm ? b.quote_size : b.clip},
+                            .max_open_orders = b.max_open_orders != 0 ? b.max_open_orders
+                                                                      : default_max_open_orders(b.strategy)};
+    const FeeSchedule fees{.maker_fee_per_share = b.maker_fee_ticks,
+                           .taker_fee_per_share = static_cast<std::int64_t>(b.taker_fee_ticks)};
 
     InstrumentRegistry registry{1};
     ItchSource source{file.bytes(), config, registry};
@@ -247,63 +293,75 @@ int backtest(const ReplayArgs& args)
     print_config("backtest", args, file);
     std::printf("  latency          order %" PRIu64 " us, report %" PRIu64 " us\n", b.order_latency_us,
                 b.report_latency_us);
-    std::printf("  strategy         ImbalanceTaker (a toy): threshold %g, clip %" PRIu64 ", max position %" PRId64
-                ", cooldown %" PRIu64 " ms\n",
-                b.threshold, b.clip, b.max_position, b.cooldown_ms);
+    if (mm) {
+        std::printf("  strategy         MarketMaker (a toy): quote size %" PRIu64 ", max position %" PRId64
+                    ", requote cooldown %" PRIu64 " ms, joins the best bid and ask\n",
+                    b.quote_size, b.max_position, b.requote_ms);
+    } else {
+        std::printf("  strategy         ImbalanceTaker (a toy): threshold %g, clip %" PRIu64
+                    ", max position %" PRId64 ", cooldown %" PRIu64 " ms\n",
+                    b.threshold, b.clip, b.max_position, b.cooldown_ms);
+    }
     std::printf("  risk             max position %" PRId64 ", max order %" PRIu64 ", max open orders %zu\n",
                 limits.max_position, limits.max_order_quantity.value(), limits.max_open_orders);
-    std::printf("  taker fee        %s per share\n", usd(fees.taker_fee_per_share, price_scale).c_str());
+    std::printf("  fees             maker %s, taker %s per share\n",
+                usd(fees.maker_fee_per_share, price_scale).c_str(), usd(fees.taker_fee_per_share, price_scale).c_str());
 
     ExecutionSimulator execution;
     Portfolio portfolio{instrument, limits, fees};
-    ImbalanceTaker strategy{params};
-    EventLoop<ImbalanceTaker> loop{
-        source, book, execution, portfolio, strategy, latency,
-        ReplayOptions{.check_invariants_every = args.check_invariants_every, .session_midnight = midnight}};
+    const ReplayOptions options{.check_invariants_every = args.check_invariants_every, .session_midnight = midnight};
 
-    const auto start = std::chrono::steady_clock::now();
-    const LoopReport report = loop.run();
-    const std::chrono::duration<double> elapsed = std::chrono::steady_clock::now() - start;
-    const ReplayReport& replay = report.replay;
+    auto run = [&]<Strategy S>(S& strategy) {
+        EventLoop<S> loop{source, book, execution, portfolio, strategy, latency, options};
 
-    std::printf("\nReplay\n");
-    std::printf("  events           %" PRIu64, replay.events);
-    if (replay.events != 0) {
-        std::printf(", %s to %s local", clock_time(replay.first_timestamp, midnight).c_str(),
-                    clock_time(replay.last_timestamp, midnight).c_str());
+        const auto start = std::chrono::steady_clock::now();
+        const LoopReport report = loop.run();
+        const std::chrono::duration<double> elapsed = std::chrono::steady_clock::now() - start;
+        const ReplayReport& replay = report.replay;
+
+        std::printf("\nReplay\n");
+        std::printf("  events           %" PRIu64, replay.events);
+        if (replay.events != 0) {
+            std::printf(", %s to %s local", clock_time(replay.first_timestamp, midnight).c_str(),
+                        clock_time(replay.last_timestamp, midnight).c_str());
+        }
+        std::printf("\n");
+        print_applied(replay, "  ");
+        std::printf("  sim events       %" PRIu64 " handled (%" PRIu64 " drained after end of stream), %" PRIu64
+                    " discarded\n",
+                    report.sim_events, report.drained_sim_events, report.discarded_sim_events);
+        print_failure(replay, args);
+
+        print_strategy(strategy.stats());
+        print_execution(execution.statistics());
+
+        std::printf("\nPortfolio\n");
+        std::printf("  position         %" PRId64 " shares\n", portfolio.position());
+        std::printf("  cash             %s\n", usd(portfolio.cash(), money_scale).c_str());
+        std::printf("  realised PnL     %s\n", usd(portfolio.realised_pnl(), money_scale).c_str());
+        std::printf("  unrealised PnL   %s\n", usd(portfolio.unrealised_pnl(), money_scale).c_str());
+        std::printf("  fees             %s\n", usd(portfolio.fees(), money_scale).c_str());
+        std::printf("  total PnL        %s (realised + unrealised - fees)\n",
+                    usd(portfolio.pnl(), money_scale).c_str());
+        std::printf("  max drawdown     %s\n", usd(portfolio.max_drawdown(), money_scale).c_str());
+        std::printf("  max |position|   %" PRId64 " shares\n", portfolio.max_abs_position());
+        std::printf("  open orders      %zu at the end\n", portfolio.open_orders());
+
+        const bool invariants = print_final_book(book, replay, args.depth, price_scale, midnight);
+
+        const double seconds = elapsed.count();
+        std::printf("Elapsed           %.1f ms, %.0f events/s\n", seconds * 1e3,
+                    static_cast<double>(replay.events) / seconds);
+
+        return replay.succeeded() && invariants ? 0 : 1;
+    };
+
+    if (mm) {
+        MarketMaker strategy{mm_params};
+        return run(strategy);
     }
-    std::printf("\n");
-    print_applied(replay, "  ");
-    std::printf("  sim events       %" PRIu64 " handled, %" PRIu64 " discarded at end of stream\n",
-                report.sim_events, report.discarded_sim_events);
-    print_failure(replay, args);
-
-    const ImbalanceTakerStats& stats = strategy.stats();
-    std::printf("\nStrategy\n");
-    std::printf("  orders sent      %" PRIu64 "\n", stats.sent);
-    std::printf("  risk rejects     %" PRIu64 "\n", stats.risk_rejects);
-    std::printf("  fills            %" PRIu64 "\n", stats.fills);
-    std::printf("  expired          %" PRIu64 "\n", stats.expired);
-    std::printf("  bought           %" PRIu64 " shares\n", stats.bought);
-    std::printf("  sold             %" PRIu64 " shares\n", stats.sold);
-
-    std::printf("\nPortfolio\n");
-    std::printf("  position         %" PRId64 " shares\n", portfolio.position());
-    std::printf("  cash             %s\n", usd(portfolio.cash(), money_scale).c_str());
-    std::printf("  realised PnL     %s\n", usd(portfolio.realised_pnl(), money_scale).c_str());
-    std::printf("  unrealised PnL   %s\n", usd(portfolio.unrealised_pnl(), money_scale).c_str());
-    std::printf("  fees             %s\n", usd(portfolio.fees(), money_scale).c_str());
-    std::printf("  total PnL        %s (realised + unrealised - fees)\n", usd(portfolio.pnl(), money_scale).c_str());
-    std::printf("  max drawdown     %s\n", usd(portfolio.max_drawdown(), money_scale).c_str());
-    std::printf("  max |position|   %" PRId64 " shares\n", portfolio.max_abs_position());
-
-    const bool invariants = print_final_book(book, replay, args.depth, price_scale, midnight);
-
-    const double seconds = elapsed.count();
-    std::printf("Elapsed           %.1f ms, %.0f events/s\n", seconds * 1e3,
-                static_cast<double>(replay.events) / seconds);
-
-    return replay.succeeded() && invariants ? 0 : 1;
+    ImbalanceTaker strategy{imbalance_params};
+    return run(strategy);
 }
 
 } // namespace

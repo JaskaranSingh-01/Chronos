@@ -149,6 +149,18 @@ bool parse_replay_args(std::span<const std::string_view> args, ReplayArgs& out, 
             ok = parse_number(value, b.cooldown_ms) && b.cooldown_ms <= max_value;
         } else if (backtest && arg == "--taker-fee-ticks") {
             ok = parse_number(value, b.taker_fee_ticks) && b.taker_fee_ticks <= 1'000'000;
+        } else if (backtest && arg == "--strategy") {
+            ok = value == "imbalance" || value == "mm";
+            b.strategy = value == "mm" ? StrategyKind::MarketMaker : StrategyKind::Imbalance;
+        } else if (backtest && arg == "--max-open-orders") {
+            ok = parse_number(value, b.max_open_orders) && b.max_open_orders > 0 && b.max_open_orders <= max_value;
+        } else if (backtest && arg == "--quote-size") {
+            ok = parse_number(value, b.quote_size) && b.quote_size > 0 && b.quote_size <= max_value;
+        } else if (backtest && arg == "--requote-ms") {
+            ok = parse_number(value, b.requote_ms) && b.requote_ms <= max_value;
+        } else if (backtest && arg == "--maker-fee-ticks") {
+            ok = parse_number(value, b.maker_fee_ticks) && b.maker_fee_ticks >= -1'000'000 &&
+                 b.maker_fee_ticks <= 1'000'000;
         } else {
             error = "unknown option " + std::string{arg};
             return false;

@@ -6,6 +6,7 @@
 #include <cstdlib>
 #include <random>
 #include <string_view>
+#include <type_traits>
 #include <vector>
 
 #include "simulator/cli/replay_args.hpp"
@@ -15,32 +16,36 @@
 #include "simulator/market/market_replay.hpp"
 #include "simulator/market/vector_source.hpp"
 #include "simulator/strategies/imbalance_taker.hpp"
+#include "simulator/strategies/market_maker.hpp"
 
 namespace simulator {
 namespace {
 
 constexpr Instrument kEquity{.price_scale = 4, .quantity_scale = 0};
 
-// ImbalanceTaker, keeping every report it is delivered.
+// A strategy, keeping every report it is delivered.
+template <class S>
 struct Recorded
 {
-    ImbalanceTaker taker;
+    S strategy;
     std::vector<ExecutionReport> reports;
 
-    void on_market(StrategyContext& ctx, const MarketEvent& event) noexcept { taker.on_market(ctx, event); }
+    void on_market(StrategyContext& ctx, const MarketEvent& event) noexcept { strategy.on_market(ctx, event); }
     void on_report(StrategyContext& ctx, const ExecutionReport& report) noexcept
     {
         reports.push_back(report);
-        taker.on_report(ctx, report);
+        strategy.on_report(ctx, report);
     }
-    void on_timer(StrategyContext& ctx, std::uint64_t timer_id) noexcept { taker.on_timer(ctx, timer_id); }
+    void on_timer(StrategyContext& ctx, std::uint64_t timer_id) noexcept { strategy.on_timer(ctx, timer_id); }
 };
 
+template <class Stats>
 struct Outcome
 {
     LoopReport loop;
     std::vector<ExecutionReport> reports;
-    ImbalanceTakerStats stats;
+    Stats stats;
+    ExecutionStatistics execution;
     std::uint64_t digest{0};
     std::int64_t position{0};
     std::int64_t cash{0};
@@ -52,23 +57,22 @@ struct Outcome
     bool operator==(const Outcome&) const = default;
 };
 
-// A fresh book, portfolio, strategy and loop over `source`.
-Outcome backtest(MarketEventSource& source, SymbolId symbol, std::size_t capacity, const ImbalanceTakerParams& params,
-             LatencyConfig latency)
+// A fresh book (symbol 0), portfolio, strategy and loop over `source`.
+template <class S>
+auto backtest(MarketEventSource& source, std::size_t capacity, S strategy, RiskLimits limits, FeeSchedule fees,
+              LatencyConfig latency)
 {
-    MarketBook book{symbol, capacity};
+    MarketBook book{0, capacity};
     ExecutionSimulator execution;
-    Portfolio portfolio{kEquity,
-                        RiskLimits{.max_position = params.max_position, .max_order_quantity = Quantity{params.clip},
-                                   .max_open_orders = 1},
-                        FeeSchedule{.taker_fee_per_share = 30}};
-    Recorded strategy{ImbalanceTaker{params}, {}};
-    EventLoop<Recorded> loop{source, book, execution, portfolio, strategy, latency};
+    Portfolio portfolio{kEquity, limits, fees};
+    Recorded<S> recorded{strategy, {}};
+    EventLoop<Recorded<S>> loop{source, book, execution, portfolio, recorded, latency};
 
-    Outcome run;
+    Outcome<std::remove_cvref_t<decltype(strategy.stats())>> run;
     run.loop = loop.run();
-    run.reports = strategy.reports;
-    run.stats = strategy.taker.stats();
+    run.reports = recorded.reports;
+    run.stats = recorded.strategy.stats();
+    run.execution = execution.statistics();
     run.digest = book.digest();
     run.position = portfolio.position();
     run.cash = portfolio.cash();
@@ -77,6 +81,32 @@ Outcome backtest(MarketEventSource& source, SymbolId symbol, std::size_t capacit
     run.pnl = portfolio.pnl();
     run.max_drawdown = portfolio.max_drawdown();
     return run;
+}
+
+Outcome<ImbalanceTakerStats> imbalance(MarketEventSource& source, std::size_t capacity,
+                                       const ImbalanceTakerParams& params, LatencyConfig latency)
+{
+    return backtest(source, capacity, ImbalanceTaker{params},
+                    RiskLimits{.max_position = params.max_position, .max_order_quantity = Quantity{params.clip},
+                               .max_open_orders = 1},
+                    FeeSchedule{.taker_fee_per_share = 30}, latency);
+}
+
+Outcome<MarketMakerStats> market_maker(MarketEventSource& source, std::size_t capacity,
+                                       const MarketMakerParams& params, LatencyConfig latency)
+{
+    return backtest(source, capacity, MarketMaker{params},
+                    RiskLimits{.max_position = params.max_position,
+                               .max_order_quantity = Quantity{params.quote_size}, .max_open_orders = 2},
+                    FeeSchedule{.maker_fee_per_share = -2, .taker_fee_per_share = 30}, latency);
+}
+
+// The history digest after replaying `source` alone.
+std::uint64_t replay_digest(MarketEventSource& source, std::size_t capacity)
+{
+    MarketBook book{0, capacity};
+    MarketReplay::run(source, book, {});
+    return book.digest();
 }
 
 // A quoting market around a fixed mid: three levels a side, 6-40 live orders
@@ -135,8 +165,8 @@ TEST(BacktestDeterminismTest, SyntheticRunsAreIdentical)
 
     VectorSource first_source{events};
     VectorSource second_source{events};
-    const Outcome first = backtest(first_source, 0, 4'096, params, latency);
-    const Outcome second = backtest(second_source, 0, 4'096, params, latency);
+    const Outcome first = imbalance(first_source, 4'096, params, latency);
+    const Outcome second = imbalance(second_source, 4'096, params, latency);
 
     ASSERT_TRUE(first.loop.replay.succeeded());
     EXPECT_EQ(first.loop.replay.rejected(), 0u);
@@ -151,9 +181,36 @@ TEST(BacktestDeterminismTest, SyntheticRunsAreIdentical)
 
     // Our orders never touch the historical book.
     VectorSource replay_source{events};
-    MarketBook replay_book{0, 4'096};
-    MarketReplay::run(replay_source, replay_book, {});
-    EXPECT_EQ(first.digest, replay_book.digest());
+    EXPECT_EQ(first.digest, replay_digest(replay_source, 4'096));
+}
+
+TEST(BacktestDeterminismTest, SyntheticMarketMakerRunsAreIdentical)
+{
+    const std::vector<MarketEvent> events = synthetic_market(13, 20'000);
+    const MarketMakerParams params{.quote_size = 100, .max_position = 300, .requote_cooldown_ns = 400};
+    const LatencyConfig latency{.order_latency = 300, .report_latency = 300};
+
+    VectorSource first_source{events};
+    VectorSource second_source{events};
+    const Outcome first = market_maker(first_source, 4'096, params, latency);
+    const Outcome second = market_maker(second_source, 4'096, params, latency);
+
+    ASSERT_TRUE(first.loop.replay.succeeded());
+    EXPECT_EQ(first.loop.replay.rejected(), 0u);
+    EXPECT_GT(first.stats.bought, 0u);
+    EXPECT_GT(first.stats.sold, 0u);
+    EXPECT_GT(first.stats.cancels, 0u);
+    EXPECT_GT(first.execution.maker_quantity, 0u);
+    EXPECT_EQ(first.execution.taker_quantity, 0u);
+    EXPECT_LT(first.fees, 0);  // rebates only
+    EXPECT_LE(std::abs(first.position), params.max_position);
+
+    EXPECT_EQ(first.reports, second.reports);
+    EXPECT_EQ(first, second);
+
+    // Resting orders, queue tracking and maker fills never touch the history.
+    VectorSource replay_source{events};
+    EXPECT_EQ(first.digest, replay_digest(replay_source, 4'096));
 }
 
 // Real NASDAQ data, never committed: see ItchRealDataTest.
@@ -163,51 +220,87 @@ std::string_view env_or(const char* name, std::string_view fallback)
     return value != nullptr && *value != '\0' ? std::string_view{value} : fallback;
 }
 
-TEST(BacktestDeterminismTest, RealDataRunsAreIdenticalWithoutRejections)
+struct RealData
+{
+    MappedFile file;
+    ItchSourceConfig config;
+};
+
+// False (and the test skips) without CHRONOS_ITCH_FILE.
+bool open_real_data(RealData& data)
 {
     const char* path = std::getenv("CHRONOS_ITCH_FILE");
     if (path == nullptr || *path == '\0') {
-        GTEST_SKIP() << "set CHRONOS_ITCH_FILE to a NASDAQ ITCH 5.0 file";
+        return false;
     }
-
     std::chrono::year_month_day date{};
-    ASSERT_TRUE(parse_date(env_or("CHRONOS_ITCH_DATE", "2019-12-30"), date));
-    MappedFile file;
-    ASSERT_TRUE(file.open(path)) << file.error();
-    const ItchSourceConfig config{.ticker = env_or("CHRONOS_ITCH_SYMBOL", "AAPL"), .session_date = date,
-                                  .utc_offset = us_eastern_utc_offset(date), .allow_truncated_tail = true};
+    EXPECT_TRUE(parse_date(env_or("CHRONOS_ITCH_DATE", "2019-12-30"), date));
+    EXPECT_TRUE(data.file.open(path)) << data.file.error();
+    data.config = ItchSourceConfig{.ticker = env_or("CHRONOS_ITCH_SYMBOL", "AAPL"), .session_date = date,
+                                   .utc_offset = us_eastern_utc_offset(date), .allow_truncated_tail = true};
+    return true;
+}
 
-    // The CLI's defaults.
-    const ImbalanceTakerParams params{.threshold = 3.0, .clip = 100, .max_position = 500,
-                                      .cooldown_ns = 100'000'000};
-    const LatencyConfig latency{.order_latency = 50'000, .report_latency = 50'000};
+// Two runs of `run_once` agree, have no replay rejections, and leave the history's digest.
+template <class Run>
+void expect_deterministic(const RealData& data, Run run_once, const char* name)
+{
+    const auto first = run_once();
+    const auto second = run_once();
 
-    auto run_once = [&] {
-        InstrumentRegistry registry{1};
-        ItchSource source{file.bytes(), config, registry};
-        return backtest(source, 0, 1'048'576, params, latency);  // ItchSource registers id 0
-    };
-    const Outcome first = run_once();
-    const Outcome second = run_once();
-
-    std::printf("[ RealData ] %.*s backtest: %llu events, %llu sent, %llu reports, pnl %lld, digest %016llx\n",
-                static_cast<int>(config.ticker.size()), config.ticker.data(),
+    std::printf("[ RealData ] %.*s %s: %llu events, %llu reports, pnl %lld, digest %016llx\n",
+                static_cast<int>(data.config.ticker.size()), data.config.ticker.data(), name,
                 static_cast<unsigned long long>(first.loop.replay.events),
-                static_cast<unsigned long long>(first.stats.sent),
                 static_cast<unsigned long long>(first.reports.size()), static_cast<long long>(first.pnl),
                 static_cast<unsigned long long>(first.digest));
 
     ASSERT_TRUE(first.loop.replay.succeeded()) << first.loop.replay.message;
     EXPECT_EQ(first.loop.replay.rejected(), 0u);
-    EXPECT_GT(first.stats.sent, 0u);
+    EXPECT_FALSE(first.reports.empty());
     EXPECT_EQ(first.reports, second.reports);
     EXPECT_EQ(first, second);
 
     InstrumentRegistry registry{1};
-    ItchSource source{file.bytes(), config, registry};
-    MarketBook book{0, 1'048'576};
-    MarketReplay::run(source, book, {});
-    EXPECT_EQ(first.digest, book.digest());
+    ItchSource source{data.file.bytes(), data.config, registry};
+    EXPECT_EQ(first.digest, replay_digest(source, 1'048'576));
+}
+
+// The CLI's defaults throughout.
+constexpr LatencyConfig kCliLatency{.order_latency = 50'000, .report_latency = 50'000};
+
+TEST(BacktestDeterminismTest, RealDataRunsAreIdenticalWithoutRejections)
+{
+    RealData data;
+    if (!open_real_data(data)) {
+        GTEST_SKIP() << "set CHRONOS_ITCH_FILE to a NASDAQ ITCH 5.0 file";
+    }
+    const ImbalanceTakerParams params{.threshold = 3.0, .clip = 100, .max_position = 500,
+                                      .cooldown_ns = 100'000'000};
+    expect_deterministic(
+        data,
+        [&] {
+            InstrumentRegistry registry{1};
+            ItchSource source{data.file.bytes(), data.config, registry};
+            return imbalance(source, 1'048'576, params, kCliLatency);  // ItchSource registers id 0
+        },
+        "imbalance");
+}
+
+TEST(BacktestDeterminismTest, RealDataMarketMakerRunsAreIdenticalWithoutRejections)
+{
+    RealData data;
+    if (!open_real_data(data)) {
+        GTEST_SKIP() << "set CHRONOS_ITCH_FILE to a NASDAQ ITCH 5.0 file";
+    }
+    const MarketMakerParams params{.quote_size = 100, .max_position = 500, .requote_cooldown_ns = 100'000'000};
+    expect_deterministic(
+        data,
+        [&] {
+            InstrumentRegistry registry{1};
+            ItchSource source{data.file.bytes(), data.config, registry};
+            return market_maker(source, 1'048'576, params, kCliLatency);
+        },
+        "market maker");
 }
 
 } // namespace

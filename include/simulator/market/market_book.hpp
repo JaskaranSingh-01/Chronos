@@ -81,6 +81,7 @@ public:
 
     ApplyResult apply(const MarketEvent& event) noexcept;
 
+    SymbolId symbol() const noexcept { return symbol_; }
     const Order* find(OrderId id) const noexcept { return book_.find(id); }
 
     // False if the side is empty.

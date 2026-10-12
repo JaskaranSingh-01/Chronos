@@ -31,7 +31,7 @@ struct ImbalanceTakerStats
 // the best ask's, it sends a buy IOC for `clip` at the best ask; in the mirror
 // case a sell IOC at the best bid. It ignores fees, pays the spread on every
 // trade, has no fair value, and leans on the no-impact fill model (spec §11
-// Q2). The stand-in for M3.11's market maker until resting orders exist.
+// Q2). MarketMaker is its passive counterpart.
 class ImbalanceTaker
 {
 private:

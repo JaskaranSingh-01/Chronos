@@ -13,11 +13,15 @@
 
 namespace simulator {
 
+// The most SimEvents the end-of-stream drain handles (see EventLoop).
+inline constexpr std::uint64_t max_drain_events = 100'000;
+
 struct LoopReport
 {
     ReplayReport replay;                    // the market side, counted as MarketReplay::run counts it
-    std::uint64_t sim_events{0};            // SimEvents handled
-    std::uint64_t discarded_sim_events{0};  // still queued when the market stream ended or failed
+    std::uint64_t sim_events{0};            // SimEvents handled, drained ones included
+    std::uint64_t drained_sim_events{0};    // handled after the market stream's EndOfStream
+    std::uint64_t discarded_sim_events{0};  // never handled: queued at a fatal failure, or past the drain cap
 
     bool operator==(const LoopReport&) const = default;
 };
@@ -34,7 +38,7 @@ struct LoopReport
 //   ④ strategy.on_market, only if ② Applied, so it sees the post-event book
 // Per SimEvent at t:
 //   OrderArrive   execution.on_order_arrive; reports delivered at t + report_latency
-//   CancelArrive  nothing yet (see on_sim)
+//   CancelArrive  execution.on_cancel_arrive; likewise
 //   ReportDeliver portfolio.on_report, portfolio.mark, then strategy.on_report
 //   Timer         strategy.on_timer
 //
@@ -43,11 +47,19 @@ struct LoopReport
 // before its report arrives. Prices and exchange_time are unchanged; only
 // marks inside the report_latency window differ.
 //
+// End of stream: the SimQueue is drained in (timestamp, sequence) order, so
+// orders, cancels and reports still in flight reach the ExecutionSimulator,
+// the Portfolio and the strategy. The clock advances to each event; the book
+// stays frozen at its final state. Callbacks still run and may send orders
+// and cancels, but set_timer now returns false, so a re-arming timer ends.
+// A strategy that answers every report with another order would never end, so
+// the drain stops after max_drain_events; whatever is left is discarded and
+// counted. Deterministic either way.
+//
 // Fatal, as in MarketReplay::run: a source Error, a market timestamp earlier
-// than the one before, or a failed periodic invariant check. When the market
-// stream stops, queued SimEvents are discarded and counted: deterministic,
-// and a re-arming timer cannot loop forever, but an order or report still in
-// flight then never reaches the Portfolio. No wall clock: callers time run().
+// than the one before, or a failed periodic invariant check. A fatal failure
+// ends the run at once: queued SimEvents are discarded and counted, not
+// drained. No wall clock: callers time run().
 template <Strategy S>
 class EventLoop
 {
@@ -98,9 +110,8 @@ private:
             schedule_reports(sim.timestamp);
             return;
         case SimEventType::CancelArrive:
-            // ponytail: IOC-only, so no order of ours ever rests and there is
-            // nothing to cancel. Increment 2 adds ExecutionSimulator::on_cancel_arrive
-            // (Cancelled or CancelRejected) and schedules its reports here.
+            execution_.on_cancel_arrive(sim.order_id, sim.timestamp, reports_);
+            schedule_reports(sim.timestamp);
             return;
         case SimEventType::ReportDeliver:
             portfolio_.on_report(sim.report);
@@ -141,6 +152,13 @@ public:
             const SourceResult result = source_.next(event);
 
             if (result == SourceResult::EndOfStream) {
+                gateway_.stop_timers();
+                for (; !queue_.empty() && report.drained_sim_events < max_drain_events; ++report.drained_sim_events) {
+                    const SimEvent sim = queue_.top();  // a copy: handling it may push
+                    queue_.pop();
+                    ++report.sim_events;
+                    on_sim(sim);
+                }
                 break;
             }
             if (result == SourceResult::Error) {

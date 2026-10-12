@@ -157,6 +157,7 @@ TEST(EventLoopTest, LatencySchedulesArrivalAndDelivery)
     EXPECT_EQ(delivered.report.order_id, 1u);
     EXPECT_EQ(delivered.report.quantity, Quantity{100});
     EXPECT_EQ(report.sim_events, 3u);  // timer, arrival, delivery
+    EXPECT_EQ(report.drained_sim_events, 0u);
     EXPECT_EQ(report.discarded_sim_events, 0u);
 }
 
@@ -180,7 +181,6 @@ TEST(EventLoopTest, StrategySeesPostApplyBookAndMarkedPortfolio)
     const Seen& last = h.strategy.seen[4];
     EXPECT_EQ(last.bid.price, Price{999'950});
     EXPECT_EQ(last.unrealised, 100 * (999'950 - 1'000'000));
-    // ① (ExecutionSimulator::on_market) is a no-op until resting orders exist.
 }
 
 // Spec §5 walkthrough, with the t=1,000 execution taking the level down to
@@ -244,23 +244,144 @@ TEST(EventLoopTest, RiskRejectSchedulesNothing)
     EXPECT_EQ(h.portfolio.open_orders(), 0u);
 }
 
-TEST(EventLoopTest, PendingSimEventsAreDiscardedAtEndOfStream)
+// Sells 10 at the best bid (999,950 x 50) on the last market event, t=300.
+void sell_at_the_end(Harness& h)
 {
-    const std::vector<MarketEvent> events = round_trip_events();
-    Harness h{events};
     h.strategy.act = [](StrategyContext& ctx, const MarketEvent& event) {
         if (event.timestamp == 300) {
             OrderId id{0};
-            ctx.gateway.send(Side::Sell, Price{999'950}, Quantity{10}, TimeInForce::Ioc, id);
+            ASSERT_EQ(ctx.gateway.send(Side::Sell, Price{999'950}, Quantity{10}, TimeInForce::Ioc, id),
+                      RiskCheck::Accepted);
+        }
+    };
+}
+
+// The order arrives at 400 and its report is delivered at 500, both after the
+// last market event: the drain still executes it against the final book and
+// delivers the fill to the Portfolio and the strategy.
+TEST(EventLoopTest, InFlightOrderAndReportAreDrainedAtEndOfStream)
+{
+    const std::vector<MarketEvent> events = round_trip_events();
+    Harness h{events};
+    sell_at_the_end(h);
+
+    const LoopReport report = h.run({.order_latency = 100, .report_latency = 100});
+
+    ASSERT_TRUE(report.replay.succeeded());
+    EXPECT_EQ(report.sim_events, 2u);  // arrival, delivery
+    EXPECT_EQ(report.drained_sim_events, 2u);
+    EXPECT_EQ(report.discarded_sim_events, 0u);
+    EXPECT_EQ(h.strategy.kinds(), (std::vector<char>{'M', 'M', 'M', 'R'}));
+
+    const Seen& delivered = h.strategy.seen[3];
+    EXPECT_EQ(delivered.now, 500);  // the clock moves on; the book stays frozen
+    EXPECT_EQ(delivered.bid, (LevelInfo{Price{999'950}, 50, 1}));
+    EXPECT_EQ(delivered.report,
+              (ExecutionReport{.exchange_time = 400, .order_id = 1, .price = Price{999'950},
+                               .quantity = Quantity{10}, .leaves = Quantity{0}, .type = ReportType::Fill,
+                               .liquidity = Liquidity::Taker, .side = Side::Sell}));
+    EXPECT_EQ(delivered.position, -10);
+
+    EXPECT_EQ(h.portfolio.position(), -10);
+    EXPECT_EQ(h.portfolio.cash(), 9'999'500);
+    EXPECT_EQ(h.portfolio.open_orders(), 0u);
+}
+
+// A resting Day bid: Accepted, a Maker fill from a crossing Add (rule c) with a
+// rebate, then a gateway cancel, each delivered report_latency later.
+TEST(EventLoopTest, RestingOrderFillsAsMakerAndCancelsEndToEnd)
+{
+    const std::vector<MarketEvent> events{add(10, 1, Side::Buy, 999'900, 100), add(20, 2, Side::Sell, 1'000'100, 100),
+                                          add(500, 3, Side::Sell, 1'000'000, 30),
+                                          add(1'000, 4, Side::Buy, 999'800, 10)};
+    Harness h{events, kWide, FeeSchedule{.maker_fee_per_share = -2, .taker_fee_per_share = 30}};
+    h.strategy.act = [](StrategyContext& ctx, const MarketEvent& event) {
+        OrderId id{0};
+        if (event.timestamp == 20) {
+            ASSERT_EQ(ctx.gateway.send(Side::Buy, Price{1'000'000}, Quantity{50}, TimeInForce::Day, id),
+                      RiskCheck::Accepted);
+        } else if (event.timestamp == 1'000) {
+            ctx.gateway.cancel(1);
         }
     };
 
     const LoopReport report = h.run({.order_latency = 100, .report_latency = 100});
 
-    EXPECT_TRUE(report.replay.succeeded());
-    EXPECT_EQ(report.sim_events, 0u);
-    EXPECT_EQ(report.discarded_sim_events, 1u);
-    EXPECT_EQ(h.portfolio.position(), 0);
+    ASSERT_TRUE(report.replay.succeeded());
+    ASSERT_EQ(h.strategy.kinds(), (std::vector<char>{'M', 'M', 'R', 'M', 'R', 'M', 'R'}));
+    EXPECT_EQ(h.strategy.seen[2].now, 220);
+    EXPECT_EQ(h.strategy.seen[2].report.type, ReportType::Accepted);
+    EXPECT_EQ(h.strategy.seen[4].now, 600);
+    EXPECT_EQ(h.strategy.seen[4].report,
+              (ExecutionReport{.exchange_time = 500, .order_id = 1, .price = Price{1'000'000},
+                               .quantity = Quantity{30}, .leaves = Quantity{20}, .type = ReportType::Fill,
+                               .liquidity = Liquidity::Maker, .side = Side::Buy}));
+    EXPECT_EQ(h.strategy.seen[6].now, 1'200);  // drained after the last market event
+    EXPECT_EQ(h.strategy.seen[6].report,
+              (ExecutionReport{.exchange_time = 1'100, .order_id = 1, .quantity = Quantity{20},
+                               .type = ReportType::Cancelled, .side = Side::Buy}));
+
+    EXPECT_EQ(h.portfolio.position(), 30);
+    EXPECT_EQ(h.portfolio.cash(), -30'000'000);
+    EXPECT_EQ(h.portfolio.fees(), -60);  // a rebate
+    EXPECT_EQ(h.portfolio.open_orders(), 0u);
+    EXPECT_EQ(h.portfolio.open_quantity(Side::Buy), 0u);
+    EXPECT_EQ(h.execution.open_orders(), 0u);
+}
+
+// Re-sends an IOC that never fills on every report, forever, and re-arms a
+// timer on every timer.
+struct PingPong
+{
+    std::uint64_t reports{0};
+    std::uint64_t timers{0};
+    bool rearmed{true};
+
+    void send(StrategyContext& ctx) noexcept
+    {
+        OrderId id{0};
+        ctx.gateway.send(Side::Buy, Price{1}, Quantity{1}, TimeInForce::Ioc, id);
+    }
+    void on_market(StrategyContext& ctx, const MarketEvent& event) noexcept
+    {
+        if (event.timestamp == 300) {
+            send(ctx);
+            ctx.set_timer(ctx.now(), 1);
+        }
+    }
+    void on_report(StrategyContext& ctx, const ExecutionReport&) noexcept
+    {
+        ++reports;
+        send(ctx);
+    }
+    void on_timer(StrategyContext& ctx, std::uint64_t) noexcept
+    {
+        ++timers;
+        rearmed = ctx.set_timer(ctx.now() + 1, 1);
+    }
+};
+
+static_assert(Strategy<PingPong>);
+
+TEST(EventLoopTest, DrainRefusesNewTimersAndStopsAtItsCap)
+{
+    const std::vector<MarketEvent> events = round_trip_events();
+    VectorSource source{events};
+    MarketBook book{kSymbol, 64};
+    ExecutionSimulator execution;
+    Portfolio portfolio{kEquity, kWide, FeeSchedule{}};
+    PingPong strategy;
+    EventLoop<PingPong> loop{source, book, execution, portfolio, strategy, {.order_latency = 1, .report_latency = 1}};
+
+    const LoopReport report = loop.run();
+
+    ASSERT_TRUE(report.replay.succeeded());
+    EXPECT_EQ(strategy.timers, 1u);  // armed before the end, fired in the drain
+    EXPECT_FALSE(strategy.rearmed);  // refused after the end
+    EXPECT_EQ(report.drained_sim_events, max_drain_events);
+    EXPECT_EQ(report.sim_events, max_drain_events);
+    EXPECT_EQ(report.discarded_sim_events, 1u);  // the ping-pong's next event
+    EXPECT_EQ(strategy.reports, max_drain_events / 2 - 1);  // every other event, minus the timer
 }
 
 // A fixed-seed stream of valid and rejected events, like MarketReplayTest's.
@@ -363,6 +484,31 @@ TEST(EventLoopTest, FatalFailuresMatchMarketReplay)
     compare([](std::span<const MarketEvent> e) { return VectorSource{e}; }, out_of_order,
             ReplayFailure::OutOfOrderTimestamp);
     compare([](std::span<const MarketEvent> e) { return FailingSource{e}; }, clean, ReplayFailure::SourceError);
+}
+
+TEST(EventLoopTest, NoDrainAfterAFatalFailure)
+{
+    const std::vector<MarketEvent> events = round_trip_events();
+    FailingSource source{events};
+    MarketBook book{kSymbol, 64};
+    ExecutionSimulator execution;
+    Portfolio portfolio{kEquity, kWide, FeeSchedule{}};
+    Recorder strategy;
+    strategy.act = [](StrategyContext& ctx, const MarketEvent& event) {
+        if (event.timestamp == 300) {
+            OrderId id{0};
+            ctx.gateway.send(Side::Sell, Price{999'950}, Quantity{10}, TimeInForce::Ioc, id);
+        }
+    };
+    EventLoop<Recorder> loop{source, book, execution, portfolio, strategy, {.order_latency = 100, .report_latency = 100}};
+
+    const LoopReport report = loop.run();
+
+    EXPECT_EQ(report.replay.failure, ReplayFailure::SourceError);
+    EXPECT_EQ(report.sim_events, 0u);
+    EXPECT_EQ(report.drained_sim_events, 0u);
+    EXPECT_EQ(report.discarded_sim_events, 1u);
+    EXPECT_EQ(portfolio.position(), 0);
 }
 
 } // namespace

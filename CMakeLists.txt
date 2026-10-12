@@ -140,6 +140,7 @@ add_executable(simulator_tests
     tests/engine/event_loop_test.cpp
     tests/engine/backtest_determinism_test.cpp
     tests/strategies/imbalance_taker_test.cpp
+    tests/strategies/market_maker_test.cpp
 )
 
 target_compile_definitions(simulator_tests

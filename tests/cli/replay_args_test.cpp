@@ -155,6 +155,49 @@ TEST(ReplayArgsTest, BacktestDefaultsAndFlagsOnlyForBacktest)
     EXPECT_TRUE(with("--max-position", "0"));
 }
 
+TEST(ReplayArgsTest, ParsesMarketMakerOptions)
+{
+    const Parsed p = parse({"backtest", "day.bin", "--symbol", "SPY", "--date", "2019-12-30", "--strategy", "mm",
+                            "--quote-size", "200", "--max-position", "800", "--requote-ms", "250",
+                            "--maker-fee-ticks", "-20", "--taker-fee-ticks", "30", "--max-open-orders", "4"});
+
+    ASSERT_TRUE(p.ok) << p.error;
+    const BacktestArgs& b = p.args.backtest;
+    EXPECT_EQ(b.strategy, StrategyKind::MarketMaker);
+    EXPECT_EQ(b.quote_size, 200u);
+    EXPECT_EQ(b.max_position, 800);
+    EXPECT_EQ(b.requote_ms, 250u);
+    EXPECT_EQ(b.maker_fee_ticks, -20);  // a rebate
+    EXPECT_EQ(b.taker_fee_ticks, 30u);
+    EXPECT_EQ(b.max_open_orders, 4u);
+}
+
+TEST(ReplayArgsTest, StrategyDefaultsAndBadValues)
+{
+    const Parsed p = parse({"backtest", "day.bin", "--symbol", "SPY", "--date", "2019-12-30"});
+    ASSERT_TRUE(p.ok) << p.error;
+    const BacktestArgs& b = p.args.backtest;
+    EXPECT_EQ(b.strategy, StrategyKind::Imbalance);
+    EXPECT_EQ(b.quote_size, 100u);
+    EXPECT_EQ(b.requote_ms, 100u);
+    EXPECT_EQ(b.maker_fee_ticks, 0);
+    EXPECT_EQ(b.max_open_orders, 0u);  // the strategy's own default
+    EXPECT_EQ(default_max_open_orders(StrategyKind::Imbalance), 1u);
+    EXPECT_EQ(default_max_open_orders(StrategyKind::MarketMaker), 2u);
+
+    auto with = [](std::string_view flag, std::string_view value) {
+        return parse({"backtest", "day.bin", "--symbol", "SPY", "--date", "2019-12-30", flag, value}).ok;
+    };
+    EXPECT_TRUE(with("--strategy", "imbalance"));
+    EXPECT_FALSE(with("--strategy", "MM"));
+    EXPECT_FALSE(with("--quote-size", "0"));
+    EXPECT_FALSE(with("--requote-ms", "1000000001"));
+    EXPECT_FALSE(with("--maker-fee-ticks", "-1000001"));
+    EXPECT_FALSE(with("--maker-fee-ticks", "+5"));
+    EXPECT_FALSE(with("--max-open-orders", "0"));
+    EXPECT_FALSE(parse({"replay", "day.bin", "--symbol", "SPY", "--date", "2019-12-30", "--strategy", "mm"}).ok);
+}
+
 TEST(ReplayArgsTest, ParsesDatesAndOffsets)
 {
     year_month_day date{};

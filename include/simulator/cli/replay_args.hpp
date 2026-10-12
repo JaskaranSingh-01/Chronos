@@ -14,8 +14,10 @@ inline constexpr std::string_view usage =
     "                        [--utc-offset -05:00] [--allow-truncated-tail] [--depth 5]\n"
     "                        [--check-invariants N] [--capacity N]\n"
     "       simulator backtest <itch-file> --symbol AAPL --date 2019-12-30 [replay options]\n"
-    "                        [--order-latency-us 50] [--report-latency-us 50] [--threshold 3]\n"
-    "                        [--clip 100] [--max-position 500] [--cooldown-ms 100] [--taker-fee-ticks 0]\n"
+    "                        [--strategy imbalance|mm] [--order-latency-us 50] [--report-latency-us 50]\n"
+    "                        [--max-position 500] [--max-open-orders N] [--taker-fee-ticks 0]\n"
+    "                        [--threshold 3] [--clip 100] [--cooldown-ms 100]\n"
+    "                        [--quote-size 100] [--requote-ms 100] [--maker-fee-ticks 0]\n"
     "\n"
     "  --utc-offset            exchange-local offset; default US Eastern for --date\n"
     "  --allow-truncated-tail  a file cut mid-message ends there instead of failing\n"
@@ -23,28 +25,49 @@ inline constexpr std::string_view usage =
     "  --check-invariants N    check the book every N applied events (default 0 = only at the end)\n"
     "  --capacity N            order slots reserved for the book (default 1048576)\n"
     "\n"
-    "backtest runs the ImbalanceTaker toy strategy (IOC only) against the replayed book:\n"
+    "backtest runs a toy strategy against the replayed book, which our orders never change:\n"
+    "  --strategy S            imbalance (default): IOCs on top-of-book imbalance;\n"
+    "                          mm: post-only quotes at the best bid and ask\n"
     "  --order-latency-us N    strategy to exchange, in microseconds (default 50)\n"
     "  --report-latency-us N   exchange back to strategy and portfolio (default 50)\n"
+    "  --max-position N        |position| limit in shares (default 500)\n"
+    "  --max-open-orders N     risk limit on live orders (default 1 for imbalance, 2 for mm)\n"
+    "  --taker-fee-ticks N     taker fee per share in price ticks, $0.0001 for ITCH (default 0)\n"
+    "imbalance only:\n"
     "  --threshold X           trade when one top-of-book size >= X times the other (>= 1, default 3)\n"
     "  --clip N                shares per order (default 100)\n"
-    "  --max-position N        |position| limit in shares (default 500)\n"
     "  --cooldown-ms N         wait after each order (default 100)\n"
-    "  --taker-fee-ticks N     taker fee per share in price ticks, $0.0001 for ITCH (default 0)\n";
+    "mm only:\n"
+    "  --quote-size N          shares per quote (default 100)\n"
+    "  --requote-ms N          a quote lives at least this long before it is moved (default 100)\n"
+    "  --maker-fee-ticks N     maker fee per share in price ticks; negative = rebate (default 0)\n";
 
 enum class CliCommand : std::uint8_t { Replay, Backtest };
+
+enum class StrategyKind : std::uint8_t { Imbalance, MarketMaker };
 
 // backtest only.
 struct BacktestArgs
 {
+    StrategyKind strategy{StrategyKind::Imbalance};
     std::uint64_t order_latency_us{50};
     std::uint64_t report_latency_us{50};
-    double threshold{3.0};
-    std::uint64_t clip{100};
     std::int64_t max_position{500};
-    std::uint64_t cooldown_ms{100};
+    std::size_t max_open_orders{0};  // 0 = default_max_open_orders(strategy)
     std::uint64_t taker_fee_ticks{0};
+    double threshold{3.0};           // imbalance
+    std::uint64_t clip{100};
+    std::uint64_t cooldown_ms{100};
+    std::uint64_t quote_size{100};   // mm
+    std::uint64_t requote_ms{100};
+    std::int64_t maker_fee_ticks{0};
 };
+
+// One IOC in flight for imbalance; one quote per side for mm.
+constexpr std::size_t default_max_open_orders(StrategyKind strategy) noexcept
+{
+    return strategy == StrategyKind::MarketMaker ? 2 : 1;
+}
 
 struct ReplayArgs
 {

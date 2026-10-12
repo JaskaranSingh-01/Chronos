@@ -20,7 +20,7 @@ struct LatencyConfig
 
 enum class TimeInForce : std::uint8_t {
     Ioc,  // fill what crosses now, expire the rest
-    Day   // post-only passive; not supported until ExecutionSimulator increment 2
+    Day   // post-only passive: rests until filled or cancelled; rejected if it would cross
 };
 
 // One of our orders. Our ids are their own sequence and never reach MarketBook.
@@ -37,9 +37,8 @@ enum class ReportType : std::uint8_t { Accepted, Rejected, Fill, Cancelled, Canc
 
 enum class RejectReason : std::uint8_t {
     None,
-    WouldCross,              // a post-only order that would take liquidity
-    InvalidOrder,            // zero quantity
-    UnsupportedTimeInForce   // until the execution model implements it
+    WouldCross,   // a post-only order that would take liquidity
+    InvalidOrder  // zero quantity
 };
 
 enum class Liquidity : std::uint8_t { None, Maker, Taker };
