@@ -103,6 +103,12 @@ public:
     {
         return statistics_;
     }
+
+    // What the ticker's R registers; complete from construction, before the R.
+    const Instrument& instrument() const noexcept
+    {
+        return instrument_;
+    }
 };
 
 } // namespace simulator

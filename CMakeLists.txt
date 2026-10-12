@@ -52,6 +52,8 @@ add_library(simulator_lib
     src/itch/itch_source.cpp
     src/market/market_replay.cpp
     src/cli/replay_args.cpp
+    src/portfolio/portfolio.cpp
+    src/sim/execution_simulator.cpp
 )
 
 target_include_directories(simulator_lib
@@ -131,6 +133,13 @@ add_executable(simulator_tests
     tests/market/market_replay_test.cpp
     tests/cli/replay_args_test.cpp
     tests/itch/itch_real_data_test.cpp
+    tests/sim/sim_queue_test.cpp
+    tests/sim/execution_simulator_test.cpp
+    tests/portfolio/portfolio_test.cpp
+    tests/sim/order_gateway_test.cpp
+    tests/engine/event_loop_test.cpp
+    tests/engine/backtest_determinism_test.cpp
+    tests/strategies/imbalance_taker_test.cpp
 )
 
 target_compile_definitions(simulator_tests

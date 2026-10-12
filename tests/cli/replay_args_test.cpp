@@ -101,6 +101,60 @@ TEST(ReplayArgsTest, RejectsBadValues)
     EXPECT_FALSE(parse({"replay", "a.bin", "b.bin", "--symbol", "AAPL", "--date", "2019-12-30"}).ok);
 }
 
+TEST(ReplayArgsTest, ParsesBacktestOptions)
+{
+    const Parsed p = parse({"backtest", "day.bin", "--symbol", "SPY", "--date", "2019-12-30",
+                            "--allow-truncated-tail", "--capacity", "4096", "--order-latency-us", "20",
+                            "--report-latency-us", "30", "--threshold", "2.5", "--clip", "200",
+                            "--max-position", "1000", "--cooldown-ms", "5", "--taker-fee-ticks", "30"});
+
+    ASSERT_TRUE(p.ok) << p.error;
+    EXPECT_EQ(p.args.command, CliCommand::Backtest);
+    EXPECT_EQ(p.args.symbol, "SPY");
+    EXPECT_TRUE(p.args.allow_truncated_tail);
+    EXPECT_EQ(p.args.capacity, 4'096u);
+    EXPECT_EQ(p.args.backtest.order_latency_us, 20u);
+    EXPECT_EQ(p.args.backtest.report_latency_us, 30u);
+    EXPECT_EQ(p.args.backtest.threshold, 2.5);
+    EXPECT_EQ(p.args.backtest.clip, 200u);
+    EXPECT_EQ(p.args.backtest.max_position, 1'000);
+    EXPECT_EQ(p.args.backtest.cooldown_ms, 5u);
+    EXPECT_EQ(p.args.backtest.taker_fee_ticks, 30u);
+}
+
+TEST(ReplayArgsTest, BacktestDefaultsAndFlagsOnlyForBacktest)
+{
+    const Parsed p = parse({"backtest", "day.bin", "--symbol", "SPY", "--date", "2019-12-30"});
+    ASSERT_TRUE(p.ok) << p.error;
+    EXPECT_EQ(p.args.backtest.order_latency_us, 50u);
+    EXPECT_EQ(p.args.backtest.report_latency_us, 50u);
+    EXPECT_EQ(p.args.backtest.threshold, 3.0);
+    EXPECT_EQ(p.args.backtest.clip, 100u);
+    EXPECT_EQ(p.args.backtest.max_position, 500);
+    EXPECT_EQ(p.args.backtest.cooldown_ms, 100u);
+    EXPECT_EQ(p.args.backtest.taker_fee_ticks, 0u);
+
+    const Parsed replay = parse({"replay", "day.bin", "--symbol", "SPY", "--date", "2019-12-30"});
+    ASSERT_TRUE(replay.ok) << replay.error;
+    EXPECT_EQ(replay.args.command, CliCommand::Replay);
+    EXPECT_FALSE(parse({"replay", "day.bin", "--symbol", "SPY", "--date", "2019-12-30", "--clip", "100"}).ok);
+
+    auto with = [](std::string_view flag, std::string_view value) {
+        return parse({"backtest", "day.bin", "--symbol", "SPY", "--date", "2019-12-30", flag, value}).ok;
+    };
+    EXPECT_FALSE(with("--clip", "0"));
+    EXPECT_FALSE(with("--threshold", "0.5"));  // below 1 both sides would trigger
+    EXPECT_FALSE(with("--threshold", "three"));
+    EXPECT_FALSE(with("--threshold", "nan"));
+    EXPECT_FALSE(with("--threshold", "3x"));
+    EXPECT_FALSE(with("--max-position", "-1"));
+    EXPECT_FALSE(with("--order-latency-us", "1000000001"));  // ns would overflow past this
+    EXPECT_FALSE(with("--cooldown-ms", "1000000001"));
+    EXPECT_FALSE(with("--taker-fee-ticks", "-30"));
+    EXPECT_TRUE(with("--threshold", "1"));
+    EXPECT_TRUE(with("--max-position", "0"));
+}
+
 TEST(ReplayArgsTest, ParsesDatesAndOffsets)
 {
     year_month_day date{};

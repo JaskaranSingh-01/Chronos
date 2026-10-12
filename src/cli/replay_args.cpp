@@ -1,6 +1,8 @@
 #include "simulator/cli/replay_args.hpp"
 
 #include <charconv>
+#include <cmath>
+#include <cstdlib>
 
 #include "simulator/types/timestamp.hpp"
 
@@ -8,7 +10,7 @@ namespace simulator {
 
 namespace {
 
-// All of `text` as a base-10 unsigned number; no sign, no spaces.
+// All of `text` as a base-10 T; no spaces, and a '-' only for a signed T.
 template <class T>
 bool parse_number(std::string_view text, T& value) noexcept
 {
@@ -21,6 +23,26 @@ bool parse_digits(std::string_view text, unsigned& value) noexcept
 {
     return text.find_first_not_of("0123456789") == std::string_view::npos && parse_number(text, value);
 }
+
+// A finite decimal >= 1, all of `text`, e.g. "3" or "2.5".
+bool parse_threshold(std::string_view text, double& value)
+{
+    if (text.empty() || text[0] < '0' || text[0] > '9') {  // no sign, space, nan or inf
+        return false;
+    }
+    const std::string copy{text};
+    char* end = nullptr;
+    const double parsed = std::strtod(copy.c_str(), &end);
+    if (end != copy.c_str() + copy.size() || !std::isfinite(parsed) || parsed < 1.0) {
+        return false;
+    }
+    value = parsed;
+    return true;
+}
+
+// Bounds the backtest numbers so that scaled to ns (latencies, cooldown) or
+// multiplied by a price (clip, position) they stay far below int64 overflow.
+constexpr std::uint64_t max_value = 1'000'000'000;
 
 } // namespace
 
@@ -63,12 +85,15 @@ bool parse_utc_offset(std::string_view text, std::chrono::minutes& offset) noexc
 
 bool parse_replay_args(std::span<const std::string_view> args, ReplayArgs& out, std::string& error)
 {
-    if (args.empty() || args[0] != "replay") {
-        error = "expected the command 'replay'";
+    if (args.empty() || (args[0] != "replay" && args[0] != "backtest")) {
+        error = "expected the command 'replay' or 'backtest'";
         return false;
     }
 
     ReplayArgs parsed;
+    parsed.command = args[0] == "backtest" ? CliCommand::Backtest : CliCommand::Replay;
+    const bool backtest = parsed.command == CliCommand::Backtest;
+    BacktestArgs& b = parsed.backtest;
     bool has_date = false;
     bool has_offset = false;
 
@@ -109,6 +134,21 @@ bool parse_replay_args(std::span<const std::string_view> args, ReplayArgs& out, 
             ok = parse_number(value, parsed.check_invariants_every);
         } else if (arg == "--capacity") {
             ok = parse_number(value, parsed.capacity) && parsed.capacity > 0;
+        } else if (backtest && arg == "--order-latency-us") {
+            ok = parse_number(value, b.order_latency_us) && b.order_latency_us <= max_value;
+        } else if (backtest && arg == "--report-latency-us") {
+            ok = parse_number(value, b.report_latency_us) && b.report_latency_us <= max_value;
+        } else if (backtest && arg == "--threshold") {
+            ok = parse_threshold(value, b.threshold);
+        } else if (backtest && arg == "--clip") {
+            ok = parse_number(value, b.clip) && b.clip > 0 && b.clip <= max_value;
+        } else if (backtest && arg == "--max-position") {
+            ok = parse_number(value, b.max_position) && b.max_position >= 0 &&
+                 static_cast<std::uint64_t>(b.max_position) <= max_value;
+        } else if (backtest && arg == "--cooldown-ms") {
+            ok = parse_number(value, b.cooldown_ms) && b.cooldown_ms <= max_value;
+        } else if (backtest && arg == "--taker-fee-ticks") {
+            ok = parse_number(value, b.taker_fee_ticks) && b.taker_fee_ticks <= 1'000'000;
         } else {
             error = "unknown option " + std::string{arg};
             return false;
