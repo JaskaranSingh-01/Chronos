@@ -6,11 +6,12 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <vector>
 
 namespace simulator {
 
 inline constexpr std::string_view usage =
-    "usage: simulator replay <itch-file> --symbol AAPL --date 2019-12-30\n"
+    "usage: simulator replay <itch-file> (--symbol AAPL | --symbols AAPL,MSFT | --all) --date 2019-12-30\n"
     "                        [--utc-offset -05:00] [--allow-truncated-tail] [--depth 5]\n"
     "                        [--check-invariants N] [--capacity N]\n"
     "       simulator backtest <itch-file> --symbol AAPL --date 2019-12-30 [replay options]\n"
@@ -19,11 +20,14 @@ inline constexpr std::string_view usage =
     "                        [--threshold 3] [--clip 100] [--cooldown-ms 100]\n"
     "                        [--quote-size 100] [--requote-ms 100] [--maker-fee-ticks 0]\n"
     "\n"
+    "  --symbols A,B,C         replay several symbols in one pass, each into its own book\n"
+    "  --all                   replay every symbol in the file\n"
     "  --utc-offset            exchange-local offset; default US Eastern for --date\n"
     "  --allow-truncated-tail  a file cut mid-message ends there instead of failing\n"
     "  --depth N               book levels to print per side (default 5)\n"
     "  --check-invariants N    check the book every N applied events (default 0 = only at the end)\n"
-    "  --capacity N            order slots reserved for the book (default 1048576)\n"
+    "  --capacity N            order slots reserved for the book (default 1048576); with --symbols\n"
+    "                          or --all, shared by every book (default 4194304)\n"
     "\n"
     "backtest runs a toy strategy against the replayed book, which our orders never change:\n"
     "  --strategy S            imbalance (default): IOCs on top-of-book imbalance;\n"
@@ -69,11 +73,18 @@ constexpr std::size_t default_max_open_orders(StrategyKind strategy) noexcept
     return strategy == StrategyKind::MarketMaker ? 2 : 1;
 }
 
+// The default --capacity of the order pool every book shares (--symbols, --all):
+// 2^22, over twice the 1,924,078 live orders the 2019-12-30 full day peaks at,
+// all symbols together. A full pool rejects Adds as PoolExhausted.
+inline constexpr std::size_t default_books_capacity = 4'194'304;
+
 struct ReplayArgs
 {
     CliCommand command{CliCommand::Replay};
     std::string_view file;
-    std::string_view symbol;  // 1-8 chars, an ITCH ticker
+    std::string_view symbol;                // 1-8 chars, an ITCH ticker
+    std::vector<std::string_view> symbols;  // --symbols, each like symbol
+    bool all_symbols{false};                // --all
     std::chrono::year_month_day date{};
     std::chrono::minutes utc_offset{0};  // --utc-offset, else us_eastern_utc_offset(date)
     bool allow_truncated_tail{false};
@@ -84,8 +95,9 @@ struct ReplayArgs
 };
 
 // `args` is argv without the program name: "replay" or "backtest", then the
-// file and the flags in any order. The backtest flags are rejected for
-// replay. On false, `error` says what is wrong.
+// file and the flags in any order. Exactly one of --symbol, --symbols and
+// --all; backtest takes only --symbol, and the backtest flags are rejected
+// for replay. On false, `error` says what is wrong.
 bool parse_replay_args(std::span<const std::string_view> args, ReplayArgs& out, std::string& error);
 
 // "YYYY-MM-DD", a real calendar date.

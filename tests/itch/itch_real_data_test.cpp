@@ -10,6 +10,7 @@
 #include "simulator/cli/replay_args.hpp"
 #include "simulator/io/mapped_file.hpp"
 #include "simulator/itch/itch_source.hpp"
+#include "simulator/market/market_books.hpp"
 #include "simulator/market/market_replay.hpp"
 
 namespace simulator {
@@ -109,6 +110,79 @@ TEST(ItchRealDataTest, ReplaysOneSymbolWithoutRejections)
     const Outcome again = replay();
     EXPECT_EQ(again.digest, run.digest);
     EXPECT_EQ(again.report, report);
+}
+
+TEST(ItchRealDataTest, ReplaysEverySymbolWithoutRejections)
+{
+    const char* path = std::getenv("CHRONOS_ITCH_FILE");
+    if (path == nullptr || *path == '\0') {
+        GTEST_SKIP() << "set CHRONOS_ITCH_FILE to a NASDAQ ITCH 5.0 file";
+    }
+
+    std::chrono::year_month_day date{};
+    ASSERT_TRUE(parse_date(env_or("CHRONOS_ITCH_DATE", "2019-12-30"), date));
+
+    MappedFile file;
+    ASSERT_TRUE(file.open(path)) << file.error();
+
+    const ItchSourceConfig config{.all_tickers = true,
+                                  .session_date = date,
+                                  .utc_offset = us_eastern_utc_offset(date),
+                                  .allow_truncated_tail = true};
+    const Timestamp midnight = session_midnight_ns(date, config.utc_offset);
+    const ReplayOptions options{.check_invariants_every = 100'000, .session_midnight = midnight};
+
+    struct AllOutcome
+    {
+        BooksReplayReport report;
+        std::uint64_t digest{0};
+        bool final_invariants{false};
+        InvariantError final_error{InvariantError::None};
+        SymbolId final_symbol{0};
+        std::size_t crossed{0};
+    };
+
+    auto replay = [&] {
+        InstrumentRegistry registry{65'536};  // one per locate at most
+        ItchSource source{file.bytes(), config, registry};
+        OrderPool pool{default_books_capacity};
+        MarketBooks books{registry, pool};
+
+        AllOutcome run;
+        run.report = MarketReplay::run(source, books, options);
+        run.digest = books.digest();
+        // CrossedInRth is left out at the end: NASDAQ queues orders for a
+        // halted or IPO-pending stock without matching them, so its book may
+        // cross in RTH, and Chronos does not track trading state (H) yet. The
+        // 2019-12-30 slice ends at 09:30:10 with 6 crossed books, all halted.
+        run.final_invariants = books.check_invariants(run.final_error, run.final_symbol);
+        for (SymbolId id = 0; id < books.size(); ++id) {
+            run.crossed += books[id].is_crossed();
+        }
+        return run;
+    };
+
+    const AllOutcome run = replay();
+    const ReplayReport& total = run.report.total;
+
+    std::printf("[ RealData ] all: %zu books (%zu crossed at the end), %llu events, %llu rejected, peak %zu live "
+                "orders, digest %016llx\n",
+                run.report.symbols.size(), run.crossed, static_cast<unsigned long long>(total.events),
+                static_cast<unsigned long long>(total.rejected()), run.report.peak_live_orders,
+                static_cast<unsigned long long>(run.digest));
+
+    ASSERT_TRUE(total.succeeded()) << total.message << " at position " << total.failed_position
+                                   << ", symbol " << run.report.failed_symbol;
+    EXPECT_GT(run.report.symbols.size(), 1u);
+    EXPECT_GT(total.events, 0u);
+    for (std::size_t result = 1; result < apply_result_count; ++result) {
+        EXPECT_EQ(total.by_result[result], 0u) << to_string(static_cast<ApplyResult>(result));
+    }
+    EXPECT_TRUE(run.final_invariants) << to_string(run.final_error) << " in symbol " << run.final_symbol;
+
+    const AllOutcome again = replay();
+    EXPECT_EQ(again.digest, run.digest);
+    EXPECT_EQ(again.report, run.report);
 }
 
 } // namespace

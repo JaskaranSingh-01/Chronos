@@ -3,6 +3,7 @@
 #include <cinttypes>
 #include <cstdio>
 #include <cstdlib>
+#include <numeric>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -11,6 +12,7 @@
 #include "simulator/engine/event_loop.hpp"
 #include "simulator/io/mapped_file.hpp"
 #include "simulator/itch/itch_source.hpp"
+#include "simulator/market/market_books.hpp"
 #include "simulator/market/market_replay.hpp"
 #include "simulator/strategies/imbalance_taker.hpp"
 #include "simulator/strategies/market_maker.hpp"
@@ -96,7 +98,17 @@ void print_config(const char* command, const ReplayArgs& args, const MappedFile&
     std::printf("Chronos %s\n", command);
     std::printf("  file             %.*s (%zu bytes)\n", static_cast<int>(args.file.size()),
                 args.file.data(), file.bytes().size());
-    std::printf("  symbol           %.*s\n", static_cast<int>(args.symbol.size()), args.symbol.data());
+    if (args.all_symbols) {
+        std::printf("  symbols          all\n");
+    } else if (!args.symbols.empty()) {
+        std::printf("  symbols         ");
+        for (const std::string_view symbol : args.symbols) {
+            std::printf(" %.*s", static_cast<int>(symbol.size()), symbol.data());
+        }
+        std::printf("\n");
+    } else {
+        std::printf("  symbol           %.*s\n", static_cast<int>(args.symbol.size()), args.symbol.data());
+    }
     std::printf("  session          %04d-%02u-%02u, UTC%c%02lld:%02lld\n",
                 static_cast<int>(args.date.year()), static_cast<unsigned>(args.date.month()),
                 static_cast<unsigned>(args.date.day()), offset < 0 ? '-' : '+',
@@ -108,7 +120,7 @@ void print_config(const char* command, const ReplayArgs& args, const MappedFile&
         std::printf("  invariant checks every %" PRIu64 " applied events, and at the end\n",
                     args.check_invariants_every);
     }
-    std::printf("  capacity         %zu orders\n", args.capacity);
+    std::printf("  capacity         %zu orders%s\n", args.capacity, args.symbol.empty() ? ", shared by every book" : "");
 }
 
 // "Applied N, rejected M" (after `indent`) and the rejections by reason.
@@ -213,6 +225,176 @@ int replay(const ReplayArgs& args)
     return report.succeeded() && invariants ? 0 : 1;
 }
 
+// The NUL-padded native symbol without its padding.
+std::string_view name(const Instrument& instrument)
+{
+    const auto& symbol = instrument.native_symbol;
+    return {symbol.data(), static_cast<std::size_t>(std::find(symbol.begin(), symbol.end(), '\0') - symbol.begin())};
+}
+
+void print_symbol_row(std::string_view symbol, const SymbolReport& s)
+{
+    std::printf("  %-8.*s %12" PRIu64 " %12" PRIu64 " %10" PRIu64 " %12zu %12zu", static_cast<int>(symbol.size()),
+                symbol.data(), s.events, s.applied(), s.rejected(), s.peak_orders, s.orders_left);
+    for (std::size_t result = 1; result < apply_result_count; ++result) {
+        if (s.by_result[result] != 0) {
+            const std::string_view reason = to_string(static_cast<ApplyResult>(result));
+            std::printf("  %.*s %" PRIu64, static_cast<int>(reason.size()), reason.data(), s.by_result[result]);
+        }
+    }
+    std::printf("\n");
+}
+
+// --symbols or --all: one pass over the file, every symbol into its own book,
+// all books on one shared OrderPool of --capacity slots.
+int replay_books(const ReplayArgs& args)
+{
+    MappedFile file;
+    if (!file.open(std::string{args.file}.c_str())) {
+        std::fprintf(stderr, "error: %s\n", file.error());
+        return 2;
+    }
+
+    const ItchSourceConfig config{.tickers = args.symbols, .all_tickers = args.all_symbols,
+                                  .session_date = args.date, .utc_offset = args.utc_offset,
+                                  .allow_truncated_tail = args.allow_truncated_tail};
+    const Timestamp midnight = session_midnight_ns(args.date, args.utc_offset);
+
+    print_config("replay", args, file);
+
+    // ITCH locates are 16-bit, so a day has at most 65,536 instruments.
+    InstrumentRegistry registry{args.all_symbols ? std::size_t{1} << 16 : args.symbols.size()};
+    ItchSource source{file.bytes(), config, registry};
+    OrderPool pool{args.capacity};
+    MarketBooks books{registry, pool};
+
+    const auto start = std::chrono::steady_clock::now();
+    const BooksReplayReport report = MarketReplay::run(
+        source, books, {.check_invariants_every = args.check_invariants_every, .session_midnight = midnight});
+    const std::chrono::duration<double> elapsed = std::chrono::steady_clock::now() - start;
+    const ReplayReport& total = report.total;
+
+    const ItchSourceStatistics& stats = source.statistics();
+    std::printf("\nSource\n");
+    std::printf("  messages %" PRIu64 ": %" PRIu64 " other symbols, %" PRIu64 " unused types, %" PRIu64 " events\n",
+                stats.messages, stats.filtered, stats.skipped, stats.events);
+    std::printf("  truncated tail   %s\n", source.truncated_tail() ? "yes (last partial message ignored)" : "no");
+    for (const std::string_view symbol : args.symbols) {
+        bool found = false;
+        for (SymbolId id = 0; id < registry.size() && !found; ++id) {
+            found = name(*registry.find(id)) == symbol;
+        }
+        if (!found) {
+            std::printf("  not found        %.*s (no stock directory (R) message)\n", static_cast<int>(symbol.size()),
+                        symbol.data());
+        }
+    }
+
+    std::printf("\nEvents %" PRIu64, total.events);
+    if (total.events != 0) {
+        std::printf(", %s to %s local", clock_time(total.first_timestamp, midnight).c_str(),
+                    clock_time(total.last_timestamp, midnight).c_str());
+    }
+    std::printf("\n");
+    for (std::size_t type = 0; type < market_event_type_count; ++type) {
+        const std::string_view type_name = to_string(static_cast<MarketEventType>(type));
+        std::printf("  %-16.*s %" PRIu64 "\n", static_cast<int>(type_name.size()), type_name.data(),
+                    total.by_type[type]);
+    }
+
+    std::printf("\n");
+    print_applied(total, "");
+    print_failure(total, args);
+    if (total.failure == ReplayFailure::InvariantViolation) {
+        const std::string_view failed = name(*registry.find(report.failed_symbol));
+        std::printf("  in symbol %.*s\n", static_cast<int>(failed.size()), failed.data());
+    }
+
+    std::size_t non_empty = 0;
+    for (const SymbolReport& symbol : report.symbols) {
+        non_empty += symbol.orders_left != 0;
+    }
+    std::printf("\nBooks %zu: %zu empty at the end, %zu not empty\n", books.size(), books.size() - non_empty,
+                non_empty);
+
+    // --all: the 10 busiest, then others with rejections or orders left, in
+    // SymbolId order: at most 40, since a file cut before 20:00 leaves most books non-empty.
+    constexpr std::size_t max_others = 40;
+    std::vector<SymbolId> rows(books.size());
+    std::iota(rows.begin(), rows.end(), SymbolId{0});
+    std::size_t hidden = 0;
+    if (args.all_symbols) {
+        std::stable_sort(rows.begin(), rows.end(), [&](SymbolId a, SymbolId b) {
+            return report.symbols[a].events > report.symbols[b].events;
+        });
+        const std::size_t top = std::min<std::size_t>(10, rows.size());
+        std::vector<SymbolId> others(rows.begin() + static_cast<std::ptrdiff_t>(top), rows.end());
+        std::sort(others.begin(), others.end());
+        rows.resize(top);
+        for (const SymbolId id : others) {
+            if (report.symbols[id].rejected() != 0 || report.symbols[id].orders_left != 0) {
+                rows.size() < top + max_others ? rows.push_back(id) : void(++hidden);
+            }
+        }
+        std::printf("Per symbol: the 10 with most events, then others with rejections or orders left\n");
+    } else {
+        std::printf("Per symbol\n");
+    }
+    std::printf("  %-8s %12s %12s %10s %12s %12s\n", "symbol", "events", "applied", "rejected", "peak orders",
+                "orders left");
+    for (const SymbolId id : rows) {
+        print_symbol_row(name(*registry.find(id)), report.symbols[id]);
+    }
+    if (hidden != 0) {
+        std::printf("  ... and %zu more with rejections or orders left\n", hidden);
+    }
+
+    std::printf("\nLive orders       peak %zu, %zu at the end, all books together (capacity %zu)\n",
+                report.peak_live_orders, pool.in_use(), pool.capacity());
+
+    // Every book's structure first, so one crossed book cannot hide another
+    // problem; then every book crossed in RTH, not only the first.
+    InvariantError invariant_error{InvariantError::None};
+    SymbolId invariant_symbol{0};
+    const bool structure = books.check_invariants(invariant_error, invariant_symbol);
+    std::vector<SymbolId> crossed;
+    if (in_rth(total.last_timestamp, midnight)) {
+        for (SymbolId id = 0; id < books.size(); ++id) {
+            if (books[id].is_crossed()) {
+                crossed.push_back(id);
+            }
+        }
+    }
+
+    if (!structure) {
+        const std::string_view error_name = to_string(invariant_error);
+        const std::string_view failed =
+            invariant_symbol < books.size() ? name(*registry.find(invariant_symbol)) : "(the shared pool)";
+        std::printf("Invariants at end: FAILED %.*s in %.*s\n", static_cast<int>(error_name.size()),
+                    error_name.data(), static_cast<int>(failed.size()), failed.data());
+    } else if (!crossed.empty()) {
+        std::printf("Invariants at end: FAILED CrossedInRth in %zu books:", crossed.size());
+        for (std::size_t i = 0; i < crossed.size() && i < 20; ++i) {
+            const std::string_view symbol = name(*registry.find(crossed[i]));
+            std::printf(" %.*s", static_cast<int>(symbol.size()), symbol.data());
+        }
+        std::printf("%s; every other invariant ok in all %zu books\n", crossed.size() > 20 ? " ..." : "",
+                    books.size());
+    } else {
+        std::printf("Invariants at end: ok, all %zu books\n", books.size());
+    }
+    std::printf("                   %" PRIu64 " periodic checks passed\n", total.invariant_checks);
+    const bool invariants = structure && crossed.empty();
+    std::printf("Digest (combined) %016" PRIx64 "\n", books.digest());
+
+    const double seconds = elapsed.count();
+    std::printf("Elapsed           %.2f s, %.0f events/s, %.0f messages/s, %.1f MB/s\n", seconds,
+                static_cast<double>(total.events) / seconds, static_cast<double>(stats.messages) / seconds,
+                static_cast<double>(file.bytes().size()) / 1e6 / seconds);
+
+    return total.succeeded() && invariants ? 0 : 1;
+}
+
 void print_strategy(const ImbalanceTakerStats& stats)
 {
     std::printf("\nStrategy\n");
@@ -250,6 +432,43 @@ void print_execution(const ExecutionStatistics& stats)
                 stats.cancel_rejects);
     std::printf("  would cross      %" PRIu64 " rejected\n", stats.would_cross_rejects);
     std::printf("  FIFO anomalies   %" PRIu64 "\n", stats.fifo_anomalies);
+}
+
+// Maker fills / FIFO anomalies by rule, historical message and session phase.
+void print_attribution(const ExecutionStatistics& stats)
+{
+    static constexpr const char* causes[fill_cause_count] = {"(a) E", "(a) C", "(d) E", "(d) C", "(c) Add",
+                                                             "(c) Replace"};
+    std::printf("\nFill attribution (maker fills/FIFO anomalies; crosses = first second of 09:30, 16:00)\n");
+    std::printf("  %-12s %13s %13s %13s %13s %13s\n", "rule, msg", "pre-open", "open cross", "regular",
+                "close cross", "post-close");
+    for (std::size_t cause = 0; cause < fill_cause_count; ++cause) {
+        std::printf("  %-12s", causes[cause]);
+        for (std::size_t phase = 0; phase < session_phase_count; ++phase) {
+            char cell[32];
+            std::snprintf(cell, sizeof cell, "%" PRIu64 "/%" PRIu64, stats.fills_by[cause][phase],
+                          stats.anomalies_by[cause][phase]);
+            std::printf(" %13s", cell);
+        }
+        std::printf("\n");
+    }
+}
+
+// The first FIFO anomalies with their context, on stderr.
+void print_anomaly_samples(const ExecutionSimulator& execution, Timestamp midnight, unsigned scale)
+{
+    for (const FifoAnomaly& a : execution.fifo_anomaly_samples()) {
+        const ShadowOrder& o = a.order;
+        std::fprintf(stderr,
+                     "FIFO anomaly %s: %c id %" PRIu64 " x%" PRIu64 " exec price %s | h %s %s seq %" PRIu64
+                     " remaining %" PRIu64 " | ours %" PRIu64 " %s %s anchor %" PRIu64 " ahead %" PRIu64
+                     " remaining %" PRIu64 " | level %" PRIu64 "\n",
+                     clock_time(a.event.timestamp, midnight).c_str(), a.event.price.ticks != 0 ? 'C' : 'E',
+                     a.event.order_id, a.event.quantity.value(), dollars(a.event.price.ticks, scale).c_str(),
+                     a.h_side == Side::Buy ? "buy" : "sell", dollars(a.h_price.ticks, scale).c_str(), a.h_sequence,
+                     a.h_remaining, o.id, o.side == Side::Buy ? "buy" : "sell", dollars(o.price.ticks, scale).c_str(),
+                     o.anchor_sequence, o.ahead_quantity, o.remaining, a.level_quantity);
+    }
 }
 
 // MarketReplay plus a toy strategy through EventLoop: our orders filled
@@ -307,7 +526,7 @@ int backtest(const ReplayArgs& args)
     std::printf("  fees             maker %s, taker %s per share\n",
                 usd(fees.maker_fee_per_share, price_scale).c_str(), usd(fees.taker_fee_per_share, price_scale).c_str());
 
-    ExecutionSimulator execution;
+    ExecutionSimulator execution{midnight};
     Portfolio portfolio{instrument, limits, fees};
     const ReplayOptions options{.check_invariants_every = args.check_invariants_every, .session_midnight = midnight};
 
@@ -334,6 +553,8 @@ int backtest(const ReplayArgs& args)
 
         print_strategy(strategy.stats());
         print_execution(execution.statistics());
+        print_attribution(execution.statistics());
+        print_anomaly_samples(execution, midnight, price_scale);
 
         std::printf("\nPortfolio\n");
         std::printf("  position         %" PRId64 " shares\n", portfolio.position());
@@ -376,5 +597,8 @@ int main(int argc, char** argv)
         std::fprintf(stderr, "error: %s\n\n%.*s", error.c_str(), static_cast<int>(usage.size()), usage.data());
         return 2;
     }
-    return parsed.command == CliCommand::Backtest ? backtest(parsed) : replay(parsed);
+    if (parsed.command == CliCommand::Backtest) {
+        return backtest(parsed);
+    }
+    return parsed.symbol.empty() ? replay_books(parsed) : replay(parsed);
 }

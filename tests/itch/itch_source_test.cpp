@@ -1,7 +1,9 @@
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <chrono>
 #include <cstddef>
+#include <string_view>
 #include <tuple>
 #include <vector>
 
@@ -287,6 +289,122 @@ TEST(ItchSourceTest, ErrorsAreSticky)
         EXPECT_EQ(source.error(), SourceError::InvalidSide);
         EXPECT_EQ(source.position(), 41u);
     }
+}
+
+// ---------------------------------------------------------------------------
+// Several tickers, or all of them
+// ---------------------------------------------------------------------------
+
+Instrument xnas(std::string_view ticker)
+{
+    Instrument instrument = xnas_aapl;
+    instrument.native_symbol = {};
+    std::copy(ticker.begin(), ticker.end(), instrument.native_symbol.begin());
+    return instrument;
+}
+
+TEST(ItchSourceTest, EachSelectedTickerGetsItsOwnSymbol)
+{
+    ItchBuilder itch;
+    itch.stock_directory(1, 1, "AAPL")
+        .stock_directory(2, 2, "MSFT")
+        .stock_directory(3, 3, "SPY")
+        .add_order(3, 4, 1, 'Z', 100, "SPY", 3'200'000)  // bad side, but not selected
+        .add_order(2, 5, 2, 'S', 100, "MSFT", 1'500'000)
+        .add_order(1, 6, 3, 'B', 100, "AAPL", 2'900'000);
+
+    const std::string_view tickers[] = {"MSFT", "AAPL"};
+    ItchSourceConfig config = aapl;
+    config.ticker = {};
+    config.tickers = tickers;
+
+    InstrumentRegistry registry{4};
+    ItchSource source{itch.bytes(), config, registry};
+    SourceResult end{};
+    const auto events = drain(source, end);
+
+    EXPECT_EQ(end, SourceResult::EndOfStream);
+    ASSERT_EQ(registry.size(), 2u);  // in R order
+    EXPECT_EQ(*registry.find(0), xnas("AAPL"));
+    EXPECT_EQ(*registry.find(1), xnas("MSFT"));
+
+    ASSERT_EQ(events.size(), 2u);
+    EXPECT_EQ(events[0].order_id, 2u);
+    EXPECT_EQ(events[0].symbol, 1u);
+    EXPECT_EQ(events[1].order_id, 3u);
+    EXPECT_EQ(events[1].symbol, 0u);
+
+    const ItchSourceStatistics& stats = source.statistics();
+    EXPECT_EQ(stats.filtered, 2u);  // R SPY, A SPY
+    EXPECT_EQ(stats.events, 2u);
+}
+
+TEST(ItchSourceTest, AllTickersRegistersEveryR)
+{
+    ItchBuilder itch;
+    itch.stock_directory(1, 1, "AAPL")
+        .stock_directory(2, 2, "MSFT")
+        .add_order(9, 3, 1, 'Z', 100, "XYZ", 1'000'000)  // a locate without an R
+        .add_order(2, 4, 2, 'S', 100, "MSFT", 1'500'000)
+        .add_order(1, 5, 3, 'B', 100, "AAPL", 2'900'000);
+
+    ItchSourceConfig config = aapl;
+    config.ticker = {};
+    config.all_tickers = true;
+
+    InstrumentRegistry registry{4};
+    ItchSource source{itch.bytes(), config, registry};
+    SourceResult end{};
+    const auto events = drain(source, end);
+
+    EXPECT_EQ(end, SourceResult::EndOfStream);
+    ASSERT_EQ(registry.size(), 2u);
+    EXPECT_EQ(*registry.find(0), xnas("AAPL"));
+    EXPECT_EQ(*registry.find(1), xnas("MSFT"));
+
+    ASSERT_EQ(events.size(), 2u);
+    EXPECT_EQ(events[0].symbol, 1u);
+    EXPECT_EQ(events[1].symbol, 0u);
+    EXPECT_EQ(source.statistics().filtered, 1u);  // the A for locate 9
+}
+
+TEST(ItchSourceTest, ATickerFromAListWithoutAnRIsNeverRegisteredNotAnError)
+{
+    ItchBuilder itch;
+    itch.stock_directory(1, 1, "AAPL").add_order(1, 2, 1, 'B', 100, "AAPL", 2'900'000);
+
+    const std::string_view tickers[] = {"AAPL", "ZZZZ"};
+    ItchSourceConfig config = aapl;
+    config.tickers = tickers;  // used instead of .ticker
+
+    InstrumentRegistry registry{4};
+    ItchSource source{itch.bytes(), config, registry};
+    SourceResult end{};
+    const auto events = drain(source, end);
+
+    EXPECT_EQ(end, SourceResult::EndOfStream);
+    EXPECT_EQ(source.error(), SourceError::None);
+    EXPECT_EQ(events.size(), 1u);
+    ASSERT_EQ(registry.size(), 1u);
+    EXPECT_EQ(*registry.find(0), xnas("AAPL"));
+}
+
+TEST(ItchSourceTest, NoSelectedRAtAllIsStillAnEmptyStreamForAList)
+{
+    ItchBuilder itch;
+    itch.stock_directory(2, 1, "MSFT").add_order(2, 2, 1, 'B', 100, "MSFT", 1'500'000);
+
+    const std::string_view tickers[] = {"AAPL", "TOOLONGSYM"};  // the second can never match
+    ItchSourceConfig config = aapl;
+    config.tickers = tickers;
+
+    InstrumentRegistry registry{4};
+    ItchSource source{itch.bytes(), config, registry};
+    MarketEvent event;
+
+    EXPECT_EQ(source.next(event), SourceResult::EndOfStream);
+    EXPECT_EQ(registry.size(), 0u);
+    EXPECT_EQ(source.statistics().filtered, 2u);
 }
 
 } // namespace

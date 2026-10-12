@@ -20,18 +20,20 @@ const ShadowOrder* ExecutionSimulator::find(OrderId id) const noexcept
     return it == orders_.end() ? nullptr : &*it;
 }
 
-void ExecutionSimulator::fill(ShadowOrder& order, std::uint64_t quantity, Timestamp now,
+void ExecutionSimulator::fill(ShadowOrder& order, std::uint64_t quantity, Timestamp now, FillCause cause,
                               std::vector<ExecutionReport>& out) noexcept
 {
     order.remaining -= quantity;
     ++statistics_.maker_fills;
+    ++statistics_.fills_by[static_cast<std::size_t>(cause)]
+                          [static_cast<std::size_t>(session_phase(now, session_midnight_))];
     statistics_.maker_quantity += quantity;
     out.push_back(ExecutionReport{.exchange_time = now, .order_id = order.id, .price = order.price,
                                   .quantity = Quantity{quantity}, .leaves = Quantity{order.remaining},
                                   .type = ReportType::Fill, .liquidity = Liquidity::Maker, .side = order.side});
 }
 
-void ExecutionSimulator::cross(Side side, Price price, std::uint64_t quantity, Timestamp now,
+void ExecutionSimulator::cross(Side side, Price price, std::uint64_t quantity, Timestamp now, FillCause cause,
                                std::vector<ExecutionReport>& out) noexcept
 {
     for (ShadowOrder& o : orders_) {
@@ -42,7 +44,7 @@ void ExecutionSimulator::cross(Side side, Price price, std::uint64_t quantity, T
         if (o.side != side && (o.side == Side::Buy ? price <= o.price : price >= o.price)) {
             const std::uint64_t filled = std::min(o.remaining, quantity);
             quantity -= filled;
-            fill(o, filled, now, out);
+            fill(o, filled, now, cause, out);
         }
     }
 }
@@ -57,7 +59,7 @@ void ExecutionSimulator::on_market(const MarketEvent& event, const MarketBook& b
 
     if (event.type == MarketEventType::Add) {
         if (book.find(event.order_id) == nullptr) {  // else a duplicate the book rejects
-            cross(event.side, event.price, event.quantity.value(), event.timestamp, out);
+            cross(event.side, event.price, event.quantity.value(), event.timestamp, FillCause::RuleCAdd, out);
         }
     } else if (event.type == MarketEventType::Execute || event.type == MarketEventType::Cancel ||
                event.type == MarketEventType::Delete || event.type == MarketEventType::Replace) {
@@ -77,6 +79,10 @@ void ExecutionSimulator::on_market(const MarketEvent& event, const MarketBook& b
         const Side side = h->side();
         const std::uint64_t removed = reduce ? event.quantity.value() : h->remaining_quantity().value();
         std::uint64_t left = event.type == MarketEventType::Execute ? removed : 0;  // can fill us: (a), (d)
+        // ITCH C carries the trade's own price, which can beat h's displayed
+        // one: a price-slid order ranks at a better, non-displayed price.
+        const bool with_price = left != 0 && event.price.ticks != 0;
+        const Price traded = with_price ? event.price : h->price();
 
         for (ShadowOrder& o : orders_) {
             if (o.side != side || better(side, h->price(), o.price)) {
@@ -84,15 +90,30 @@ void ExecutionSimulator::on_market(const MarketEvent& event, const MarketBook& b
             }
             if (o.price == h->price() && h->sequence() <= o.anchor_sequence) {
                 o.ahead_quantity -= std::min(o.ahead_quantity, removed);  // (b)
-            } else if (left != 0) {  // h behind us (a), or worse (d)
+            } else if (left != 0 && !better(side, traded, o.price)) {  // h behind us (a), or worse (d)
                 const std::uint64_t filled = std::min(o.remaining, left);
                 left -= filled;
-                statistics_.fifo_anomalies += o.ahead_quantity != 0 ? 1 : 0;
-                fill(o, filled, event.timestamp, out);
+                const FillCause cause = o.price == h->price()
+                    ? (with_price ? FillCause::RuleAExecuteWithPrice : FillCause::RuleAExecute)
+                    : (with_price ? FillCause::RuleDExecuteWithPrice : FillCause::RuleDExecute);
+                if (o.ahead_quantity != 0) {
+                    ++statistics_.fifo_anomalies;
+                    ++statistics_.anomalies_by[static_cast<std::size_t>(cause)]
+                                              [static_cast<std::size_t>(session_phase(event.timestamp,
+                                                                                      session_midnight_))];
+                    if (anomalies_.size() < max_fifo_anomaly_samples) {
+                        anomalies_.push_back(FifoAnomaly{.event = event, .h_price = h->price(), .h_side = side,
+                                                         .h_sequence = h->sequence(),
+                                                         .h_remaining = h->remaining_quantity().value(),
+                                                         .order = o,
+                                                         .level_quantity = book.quantity_at(o.side, o.price)});
+                    }
+                }
+                fill(o, filled, event.timestamp, cause, out);
             }
         }
         if (replace) {
-            cross(side, event.price, event.quantity.value(), event.timestamp, out);
+            cross(side, event.price, event.quantity.value(), event.timestamp, FillCause::RuleCReplace, out);
         }
     }
 

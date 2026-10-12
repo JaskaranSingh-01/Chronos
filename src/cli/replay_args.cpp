@@ -1,5 +1,6 @@
 #include "simulator/cli/replay_args.hpp"
 
+#include <algorithm>
 #include <charconv>
 #include <cmath>
 #include <cstdlib>
@@ -37,6 +38,21 @@ bool parse_threshold(std::string_view text, double& value)
         return false;
     }
     value = parsed;
+    return true;
+}
+
+// "A,B,C": each 1-8 chars, none empty.
+bool parse_symbols(std::string_view text, std::vector<std::string_view>& symbols)
+{
+    for (std::size_t start = 0; start <= text.size();) {
+        const std::size_t comma = std::min(text.find(',', start), text.size());
+        const std::string_view symbol = text.substr(start, comma - start);
+        if (symbol.empty() || symbol.size() > 8) {
+            return false;
+        }
+        symbols.push_back(symbol);
+        start = comma + 1;
+    }
     return true;
 }
 
@@ -96,6 +112,7 @@ bool parse_replay_args(std::span<const std::string_view> args, ReplayArgs& out, 
     BacktestArgs& b = parsed.backtest;
     bool has_date = false;
     bool has_offset = false;
+    bool has_capacity = false;
 
     for (std::size_t i = 1; i < args.size(); ++i) {
         const std::string_view arg = args[i];
@@ -113,6 +130,10 @@ bool parse_replay_args(std::span<const std::string_view> args, ReplayArgs& out, 
             parsed.allow_truncated_tail = true;
             continue;
         }
+        if (arg == "--all") {
+            parsed.all_symbols = true;
+            continue;
+        }
 
         if (i + 1 == args.size()) {
             error = std::string{arg} + " needs a value";
@@ -124,6 +145,8 @@ bool parse_replay_args(std::span<const std::string_view> args, ReplayArgs& out, 
         if (arg == "--symbol") {
             parsed.symbol = value;
             ok = !value.empty() && value.size() <= 8;
+        } else if (arg == "--symbols") {
+            ok = parse_symbols(value, parsed.symbols);
         } else if (arg == "--date") {
             ok = has_date = parse_date(value, parsed.date);
         } else if (arg == "--utc-offset") {
@@ -133,7 +156,7 @@ bool parse_replay_args(std::span<const std::string_view> args, ReplayArgs& out, 
         } else if (arg == "--check-invariants") {
             ok = parse_number(value, parsed.check_invariants_every);
         } else if (arg == "--capacity") {
-            ok = parse_number(value, parsed.capacity) && parsed.capacity > 0;
+            ok = has_capacity = parse_number(value, parsed.capacity) && parsed.capacity > 0;
         } else if (backtest && arg == "--order-latency-us") {
             ok = parse_number(value, b.order_latency_us) && b.order_latency_us <= max_value;
         } else if (backtest && arg == "--report-latency-us") {
@@ -172,15 +195,25 @@ bool parse_replay_args(std::span<const std::string_view> args, ReplayArgs& out, 
         }
     }
 
+    const bool many = !parsed.symbols.empty() || parsed.all_symbols;
+    const int selections = !parsed.symbol.empty() + !parsed.symbols.empty() + parsed.all_symbols;
+
     if (parsed.file.empty()) {
         error = "missing <itch-file>";
-    } else if (parsed.symbol.empty()) {
-        error = "missing --symbol";
+    } else if (selections == 0) {
+        error = backtest ? "missing --symbol" : "missing --symbol (or --symbols A,B,C or --all)";
+    } else if (selections > 1) {
+        error = "--symbol, --symbols and --all are mutually exclusive";
+    } else if (backtest && many) {
+        error = "backtest runs one symbol: use --symbol, not --symbols or --all";
     } else if (!has_date) {
         error = "missing --date";
     } else {
         if (!has_offset) {
             parsed.utc_offset = us_eastern_utc_offset(parsed.date);
+        }
+        if (many && !has_capacity) {
+            parsed.capacity = default_books_capacity;
         }
         out = parsed;
         return true;

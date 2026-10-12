@@ -1,12 +1,18 @@
 #include "simulator/market/market_replay.hpp"
 
+#include <algorithm>
+
 namespace simulator {
 
-ReplayReport MarketReplay::run(MarketEventSource& source, MarketBook& book,
-                               const ReplayOptions& options) noexcept
+namespace {
+
+// The loop both run()s share. `route(event)` gives the event's book, nullptr
+// for none (counted as WrongSymbol); `count(event, result)` sees every result.
+// On return `event` is the last event read.
+template <class Route, class Count>
+void replay(MarketEventSource& source, const ReplayOptions& options, ReplayReport& report,
+            MarketEvent& event, Route&& route, Count&& count) noexcept
 {
-    ReplayReport report;
-    MarketEvent event;
     std::uint64_t until_check = options.check_invariants_every;
 
     auto fail = [&](ReplayFailure failure, std::string_view message) {
@@ -36,9 +42,11 @@ ReplayReport MarketReplay::run(MarketEventSource& source, MarketBook& book,
         report.last_timestamp = event.timestamp;
         ++report.events;
 
-        const ApplyResult applied = book.apply(event);
+        MarketBook* book = route(event);
+        const ApplyResult applied = book != nullptr ? book->apply(event) : ApplyResult::WrongSymbol;
         ++report.by_type[static_cast<std::size_t>(event.type)];
         ++report.by_result[static_cast<std::size_t>(applied)];
+        count(event, applied);
 
         if (applied != ApplyResult::Applied || until_check == 0 || --until_check != 0) {
             continue;
@@ -46,13 +54,59 @@ ReplayReport MarketReplay::run(MarketEventSource& source, MarketBook& book,
         until_check = options.check_invariants_every;
         ++report.invariant_checks;
 
-        if (!book.check_invariants(report.invariant_error,
-                                   in_rth(event.timestamp, options.session_midnight))) {
+        if (!book->check_invariants(report.invariant_error,
+                                    in_rth(event.timestamp, options.session_midnight))) {
             fail(ReplayFailure::InvariantViolation, to_string(report.invariant_error));
             break;
         }
     }
+}
 
+} // namespace
+
+ReplayReport MarketReplay::run(MarketEventSource& source, MarketBook& book,
+                               const ReplayOptions& options) noexcept
+{
+    ReplayReport report;
+    MarketEvent event;
+    replay(source, options, report, event,
+           [&book](const MarketEvent&) { return &book; },
+           [](const MarketEvent&, ApplyResult) {});
+    return report;
+}
+
+BooksReplayReport MarketReplay::run(MarketEventSource& source, MarketBooks& books,
+                                    const ReplayOptions& options) noexcept
+{
+    BooksReplayReport report;
+    MarketEvent event;
+    std::vector<SymbolReport>& symbols = report.symbols;
+
+    replay(source, options, report.total, event,
+           [&](const MarketEvent& e) {
+               MarketBook* book = books.find(e.symbol);
+               if (symbols.size() < books.size()) {
+                   symbols.resize(books.size());
+               }
+               return book;
+           },
+           [&](const MarketEvent& e, ApplyResult result) {
+               if (e.symbol < symbols.size()) {
+                   ++symbols[e.symbol].events;
+                   ++symbols[e.symbol].by_result[static_cast<std::size_t>(result)];
+               }
+               report.peak_live_orders = std::max(report.peak_live_orders, books.pool().in_use());
+           });
+
+    books.sync();
+    symbols.resize(books.size());
+    for (SymbolId id = 0; id < books.size(); ++id) {
+        symbols[id].peak_orders = books[id].peak_order_count();
+        symbols[id].orders_left = books[id].order_count();
+    }
+    if (report.total.failure == ReplayFailure::InvariantViolation) {
+        report.failed_symbol = event.symbol;
+    }
     return report;
 }
 

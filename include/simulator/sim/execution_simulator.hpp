@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <vector>
@@ -21,6 +22,48 @@ struct ShadowOrder
     std::uint64_t ahead_quantity{0};   // historical shares ahead of us at our price
 };
 
+// Why a resting order filled: the rule and the historical message behind it.
+// An Execute with a price is ITCH C, without one ITCH E.
+enum class FillCause : std::uint8_t {
+    RuleAExecute,           // (a): an order behind us at our price executed
+    RuleAExecuteWithPrice,
+    RuleDExecute,           // (d): an order at a worse price executed
+    RuleDExecuteWithPrice,
+    RuleCAdd,               // (c): a crossing Add
+    RuleCReplace            // (c): a crossing replacement
+};
+inline constexpr std::size_t fill_cause_count = 6;
+
+// Exchange-local session phase; a cross is the first second at 09:30 or 16:00.
+enum class SessionPhase : std::uint8_t { PreOpen, OpeningCross, Regular, ClosingCross, PostClose };
+inline constexpr std::size_t session_phase_count = 5;
+
+constexpr SessionPhase session_phase(Timestamp now, Timestamp session_midnight) noexcept
+{
+    constexpr Timestamp second = 1'000'000'000;
+    const Timestamp t = now - session_midnight;
+    return t < RTH_OPEN_NS            ? SessionPhase::PreOpen
+         : t < RTH_OPEN_NS + second  ? SessionPhase::OpeningCross
+         : t < RTH_CLOSE_NS          ? SessionPhase::Regular
+         : t < RTH_CLOSE_NS + second ? SessionPhase::ClosingCross
+                                     : SessionPhase::PostClose;
+}
+
+// Counts by [FillCause][SessionPhase].
+using FillAttribution = std::array<std::array<std::uint64_t, session_phase_count>, fill_cause_count>;
+
+// One FIFO anomaly with its context, for diagnosis.
+struct FifoAnomaly
+{
+    MarketEvent event;             // the historical Execute
+    Price h_price{};               // its order's displayed price, side and sequence, pre-event
+    Side h_side{Side::Buy};
+    std::uint64_t h_sequence{0};
+    std::uint64_t h_remaining{0};
+    ShadowOrder order;             // ours, before the fill
+    std::uint64_t level_quantity{0};  // historical shares at our price, pre-event
+};
+
 struct ExecutionStatistics
 {
     std::uint64_t maker_fills{0};          // Fill reports of resting orders
@@ -32,6 +75,8 @@ struct ExecutionStatistics
     std::uint64_t cancelled{0};
     std::uint64_t cancel_rejects{0};
     std::uint64_t fifo_anomalies{0};       // rule (a) or (d) filled us while ahead_quantity > 0
+    FillAttribution fills_by{};            // maker_fills by cause and phase
+    FillAttribution anomalies_by{};        // fifo_anomalies likewise
 
     bool operator==(const ExecutionStatistics&) const = default;
 };
@@ -59,7 +104,10 @@ struct ExecutionStatistics
 //   h at o's price with sequence <= anchor (ahead of o): an Execute, Cancel,
 //     Delete or Replace removes its shares from ahead_quantity (rule b);
 //   Execute of h at o's price behind o (rule a), or at a worse price (rule d,
-//     §11 Q1: a trade-through would have hit o first): o fills at its price.
+//     §11 Q1: a trade-through would have hit o first): o fills at its price,
+//     unless the Execute carries a trade price (ITCH C) better than o's. Such
+//     an h is price-slid: displayed at o's price or worse, it ranks and trades
+//     at a better, non-displayed one, so the aggressor never reached o.
 // An Add, or a Replace's replacement, that crosses o on the opposite side
 // (sell at <= our bid, buy at >= our ask) fills o at its price (rule c).
 // Every such fill is Maker. One event fills ours in our priority order (best
@@ -73,13 +121,25 @@ private:
     // side; per-price buckets if a strategy ever keeps hundreds live.
     std::vector<ShadowOrder> orders_;
     ExecutionStatistics statistics_{};
+    Timestamp session_midnight_{0};
+    std::vector<FifoAnomaly> anomalies_;  // the first max_fifo_anomaly_samples
 
-    void fill(ShadowOrder& order, std::uint64_t quantity, Timestamp now, std::vector<ExecutionReport>& out) noexcept;
+    void fill(ShadowOrder& order, std::uint64_t quantity, Timestamp now, FillCause cause,
+              std::vector<ExecutionReport>& out) noexcept;
     // Rule (c) for a historical order of `side` at `price` for `quantity`.
-    void cross(Side side, Price price, std::uint64_t quantity, Timestamp now,
+    void cross(Side side, Price price, std::uint64_t quantity, Timestamp now, FillCause cause,
                std::vector<ExecutionReport>& out) noexcept;
 
 public:
+    static constexpr std::size_t max_fifo_anomaly_samples = 10;
+
+    // session_midnight only places fills in a SessionPhase.
+    explicit ExecutionSimulator(Timestamp session_midnight = 0)
+        : session_midnight_(session_midnight)
+    {
+        anomalies_.reserve(max_fifo_anomaly_samples);
+    }
+
     // Spec step ①, called before book.apply(event). Appends our fills to `out`.
     void on_market(const MarketEvent& event, const MarketBook& book, std::vector<ExecutionReport>& out) noexcept;
 
@@ -95,6 +155,7 @@ public:
     const ShadowOrder* find(OrderId id) const noexcept;
     std::size_t open_orders() const noexcept { return orders_.size(); }
     const ExecutionStatistics& statistics() const noexcept { return statistics_; }
+    const std::vector<FifoAnomaly>& fifo_anomaly_samples() const noexcept { return anomalies_; }
 };
 
 } // namespace simulator

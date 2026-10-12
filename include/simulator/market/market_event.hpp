@@ -53,9 +53,9 @@ enum class MarketEventType : std::uint8_t {
     Delete,
 
     // A visible order traded. order_id = existing, quantity = size executed,
-    // price = execution price if the source knows it (ITCH C), else 0; informational.
-    // Book: reduce; quantity == remaining removes the order. The resting
-    // order's price is authoritative, so the book ignores price.
+    // price = execution price if the source knows it (ITCH C), else 0.
+    // Book: reduce; quantity == remaining removes the order. The book ignores
+    // price; the fill model uses it (ExecutionSimulator rules a, d).
     Execute,
 
     // Drop the whole book of `symbol`. Every other field is zero.

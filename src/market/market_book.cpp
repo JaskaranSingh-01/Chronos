@@ -6,7 +6,10 @@
 namespace simulator {
 
 MarketBook::MarketBook(SymbolId symbol, std::size_t order_capacity)
-    : symbol_(symbol), pool_(order_capacity) {}
+    : symbol_(symbol), owned_pool_(std::in_place, order_capacity), pool_(&*owned_pool_) {}
+
+MarketBook::MarketBook(SymbolId symbol, OrderPool& pool) noexcept
+    : symbol_(symbol), pool_(&pool) {}
 
 // Every case validates first and mutates second, so a rejected event leaves
 // the book (and digest()) unchanged.
@@ -57,7 +60,7 @@ ApplyResult MarketBook::add(const MarketEvent& event) noexcept
         return ApplyResult::DuplicateOrder;
     }
 
-    Order* order = pool_.acquire(event.order_id, event.side, event.price, event.quantity, event.timestamp);
+    Order* order = pool_->acquire(event.order_id, event.side, event.price, event.quantity, event.timestamp);
 
     if (order == nullptr) {
         return ApplyResult::PoolExhausted;
@@ -93,7 +96,7 @@ ApplyResult MarketBook::reduce(const MarketEvent& event) noexcept
 
     // At zero the book has already unlinked it.
     if (order->remaining_quantity().is_zero()) {
-        [[maybe_unused]] const bool released = pool_.release(*order);
+        [[maybe_unused]] const bool released = pool_->release(*order);
         assert(released);
     }
 
@@ -112,7 +115,7 @@ ApplyResult MarketBook::erase(const MarketEvent& event) noexcept
     // subtracts from its total at unlink time.
     [[maybe_unused]] const bool erased = book_.erase(event.order_id);
     [[maybe_unused]] const bool deleted = order->delete_order();
-    [[maybe_unused]] const bool released = pool_.release(*order);
+    [[maybe_unused]] const bool released = pool_->release(*order);
     assert(erased && deleted && released);
 
     return ApplyResult::Applied;
@@ -141,10 +144,10 @@ ApplyResult MarketBook::replace(const MarketEvent& event) noexcept
     const Side side = old_order->side();
 
     [[maybe_unused]] const bool erased = book_.erase(event.order_id);
-    [[maybe_unused]] const bool released = pool_.release(*old_order);
+    [[maybe_unused]] const bool released = pool_->release(*old_order);
 
     // Cannot fail: the old order's slot was just freed.
-    Order* order = pool_.acquire(event.new_order_id, side, event.price, event.quantity, event.timestamp);
+    Order* order = pool_->acquire(event.new_order_id, side, event.price, event.quantity, event.timestamp);
     assert(erased && released && order != nullptr);
 
     insert(*order);  // fresh sequence: back of the queue
@@ -249,7 +252,7 @@ bool MarketBook::check_invariants(InvariantError& error, bool rth) const noexcep
         error = InvariantError::IndexWithoutLevel;
     }
 
-    if (error == InvariantError::None && pool_.in_use() != book_.size()) {
+    if (error == InvariantError::None && owned_pool_ && pool_->in_use() != book_.size()) {
         error = InvariantError::PoolCountMismatch;
     }
 
@@ -262,15 +265,8 @@ bool MarketBook::check_invariants(InvariantError& error, bool rth) const noexcep
 
 std::uint64_t MarketBook::digest() const noexcept
 {
-    std::uint64_t hash = 14695981039346656037ULL;  // FNV-1a 64 offset basis
-
-    // Byte by byte, little-endian, so the value does not depend on the host.
-    auto mix = [&hash](std::uint64_t value) {
-        for (int byte = 0; byte < 8; ++byte) {
-            hash ^= (value >> (8 * byte)) & 0xFFU;
-            hash *= 1099511628211ULL;  // FNV-1a 64 prime
-        }
-    };
+    std::uint64_t hash = fnv1a_offset_basis;
+    auto mix = [&hash](std::uint64_t value) { fnv1a_mix(hash, value); };
 
     auto mix_side = [&mix](const auto& levels) {
         for (const auto& [price, level] : levels) {

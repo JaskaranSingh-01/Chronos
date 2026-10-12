@@ -153,20 +153,39 @@ SourceError decode(const ItchMessage& message, MarketEvent& event) noexcept
 ItchSource::ItchSource(
     std::span<const std::byte> data,
     const ItchSourceConfig& config,
-    InstrumentRegistry& registry) noexcept
+    InstrumentRegistry& registry)
     : reader_(data),
       registry_(registry),
+      all_tickers_(config.all_tickers),
+      require_ticker_(!config.all_tickers && config.tickers.empty()),
       session_midnight_(session_midnight_ns(config.session_date, config.utc_offset)),
-      allow_truncated_tail_(config.allow_truncated_tail)
+      allow_truncated_tail_(config.allow_truncated_tail),
+      symbols_(std::size_t{1} << 16, no_symbol)
 {
-    const std::string_view ticker = config.ticker;
-
-    if (ticker.empty() || ticker.size() > ticker_.size()) {
-        return;  // ticker_ stays all NUL, which no R matches
+    if (all_tickers_) {
+        return;
     }
-    ticker_.fill(' ');
-    std::copy(ticker.begin(), ticker.end(), ticker_.begin());
-    std::copy(ticker.begin(), ticker.end(), instrument_.native_symbol.begin());
+
+    const std::span<const std::string_view> tickers =
+        require_ticker_ ? std::span<const std::string_view>{&config.ticker, 1} : config.tickers;
+
+    for (const std::string_view ticker : tickers) {
+        std::array<char, 8>& padded = tickers_.emplace_back();  // all NUL, which no R matches
+
+        if (!ticker.empty() && ticker.size() <= padded.size()) {
+            padded.fill(' ');
+            std::copy(ticker.begin(), ticker.end(), padded.begin());
+        }
+    }
+
+    if (require_ticker_ && tickers_[0][0] != '\0') {
+        std::copy(config.ticker.begin(), config.ticker.end(), instrument_.native_symbol.begin());
+    }
+}
+
+bool ItchSource::selected(const std::array<char, 8>& stock) const noexcept
+{
+    return all_tickers_ || std::find(tickers_.begin(), tickers_.end(), stock) != tickers_.end();
 }
 
 SourceResult ItchSource::finish(SourceError error) noexcept
@@ -174,6 +193,11 @@ SourceResult ItchSource::finish(SourceError error) noexcept
     done_ = true;
     error_ = error;
     return error == SourceError::None ? SourceResult::EndOfStream : SourceResult::Error;
+}
+
+SourceResult ItchSource::end_of_data() noexcept
+{
+    return finish(require_ticker_ && locate_ == 0 ? SourceError::SymbolNotFound : SourceError::None);
 }
 
 SourceResult ItchSource::next(MarketEvent& event) noexcept
@@ -185,7 +209,7 @@ SourceResult ItchSource::next(MarketEvent& event) noexcept
         const ItchReadResult read = reader_.next(message);
 
         if (read == ItchReadResult::EndOfBuffer) {
-            return finish(locate_ == 0 ? SourceError::SymbolNotFound : SourceError::None);
+            return end_of_data();
         }
         if (read == ItchReadResult::Error) {
             if (reader_.error() == ItchReadError::InvalidLength) {
@@ -196,7 +220,7 @@ SourceResult ItchSource::next(MarketEvent& event) noexcept
                 return finish(SourceError::TruncatedMessage);
             }
             truncated_tail_ = true;
-            return finish(locate_ == 0 ? SourceError::SymbolNotFound : SourceError::None);
+            return end_of_data();
         }
 
         ++statistics_.messages;
@@ -208,16 +232,26 @@ SourceResult ItchSource::next(MarketEvent& event) noexcept
             if (decoder.decode_stock_directory(message, directory) != ItchDecodeResult::Success) {
                 return finish(to_source_error(decoder));
             }
-            if (directory.stock != ticker_) {
+            if (!selected(directory.stock)) {
                 ++statistics_.filtered;
                 continue;
             }
 
-            const RegisterResult added = registry_.add(instrument_, symbol_);
+            // native_symbol: the stock field without its space padding.
+            Instrument instrument = instrument_;
+            const auto& stock = directory.stock;
+            const auto end = std::find_if_not(stock.rbegin(), stock.rend(), [](char c) { return c == ' '; });
+            instrument.native_symbol = {};
+            std::copy(stock.begin(), end.base(), instrument.native_symbol.begin());
+
+            SymbolId symbol{0};
+            const RegisterResult added = registry_.add(instrument, symbol);
             if (added == RegisterResult::Conflict || added == RegisterResult::Full) {
                 return finish(SourceError::InstrumentRejected);
             }
+            symbols_[directory.stock_locate] = symbol;
             locate_ = directory.stock_locate;
+            symbol_ = symbol;
             continue;
         }
 
@@ -226,19 +260,22 @@ SourceResult ItchSource::next(MarketEvent& event) noexcept
             continue;
         }
 
-        // Before decoding: other locates are dropped unvalidated. A payload
+        // Before decoding: unmapped locates are dropped unvalidated. A payload
         // too short to hold a locate goes on to decode, which rejects it.
-        if (message.payload.size() >= 2 &&
-            (locate_ == 0 || peek_locate(message.payload) != locate_)) {
-            ++statistics_.filtered;
-            continue;
+        SymbolId symbol{0};
+        if (message.payload.size() >= 2) {
+            symbol = symbols_[peek_locate(message.payload)];
+            if (symbol == no_symbol) {
+                ++statistics_.filtered;
+                continue;
+            }
         }
 
         if (const SourceError error = decode(message, event); error != SourceError::None) {
             return finish(error);
         }
         event.timestamp += session_midnight_;
-        event.symbol = symbol_;
+        event.symbol = symbol;
         ++statistics_.events;
         return SourceResult::Event;
     }

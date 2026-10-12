@@ -476,5 +476,44 @@ TEST(MarketBookTest, RandomStreamKeepsInvariantsAndIsDeterministic)
     EXPECT_EQ(again, counts);
 }
 
+// ---------------------------------------------------------------------------
+// A shared OrderPool
+// ---------------------------------------------------------------------------
+
+MarketEvent on(SymbolId symbol, MarketEvent event)
+{
+    event.symbol = symbol;
+    return event;
+}
+
+TEST(MarketBookTest, BooksOnASharedPoolDrawFromTheSameSlots)
+{
+    OrderPool pool{3};
+    MarketBook a{1, pool};
+    MarketBook b{2, pool};
+
+    ASSERT_EQ(a.apply(on(1, add(1, Side::Buy, 100, 10))), ApplyResult::Applied);
+    ASSERT_EQ(b.apply(on(2, add(1, Side::Sell, 101, 10))), ApplyResult::Applied);  // ids are per book
+    ASSERT_EQ(a.apply(on(1, add(2, Side::Buy, 99, 10))), ApplyResult::Applied);
+    EXPECT_EQ(pool.in_use(), 3u);
+
+    EXPECT_EQ(b.apply(on(2, add(2, Side::Sell, 102, 10))), ApplyResult::PoolExhausted);
+    EXPECT_EQ(b.order_count(), 1u);
+    EXPECT_EQ(b.apply(on(1, add(2, Side::Sell, 102, 10))), ApplyResult::WrongSymbol);
+
+    // A slot one book frees, the other can use.
+    ASSERT_EQ(a.apply(on(1, erase(1))), ApplyResult::Applied);
+    EXPECT_EQ(pool.in_use(), 2u);
+    ASSERT_EQ(b.apply(on(2, add(2, Side::Sell, 102, 10))), ApplyResult::Applied);
+    ASSERT_EQ(b.apply(on(2, replace(2, 3, 103, 5))), ApplyResult::Applied);  // full pool: frees, then takes
+    ASSERT_EQ(b.apply(on(2, execute(1, 10))), ApplyResult::Applied);
+    EXPECT_EQ(pool.in_use(), 2u);
+    EXPECT_EQ(a.order_count() + b.order_count(), pool.in_use());
+
+    // A book on a shared pool cannot compare the pool with its own orders alone.
+    expect_invariants(a);
+    expect_invariants(b);
+}
+
 } // namespace
 } // namespace simulator

@@ -2,6 +2,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <span>
 
 #include "simulator/market/market_event.hpp"
@@ -46,7 +47,7 @@ enum class InvariantError : std::uint8_t {
     EmptyLevel,
     SequenceNotIncreasing,  // FIFO broken: sequence must rise from head to tail
     InactiveOrderInBook,    // not Active/PartiallyFilled, or remaining == 0
-    PoolCountMismatch,      // pool slots in use != order_count()
+    PoolCountMismatch,      // pool slots in use != order_count() (a shared pool: of all its books)
     CrossedInRth            // best bid > best ask during regular trading hours
 };
 
@@ -58,13 +59,26 @@ constexpr bool in_rth(Timestamp now, Timestamp session_midnight) noexcept
     return since_midnight >= RTH_OPEN_NS && since_midnight < RTH_CLOSE_NS;
 }
 
+// One FNV-1a 64 step per byte of `value`, little-endian, so a digest does
+// not depend on the host. Start from fnv1a_offset_basis.
+inline constexpr std::uint64_t fnv1a_offset_basis = 14695981039346656037ULL;
+
+constexpr void fnv1a_mix(std::uint64_t& hash, std::uint64_t value) noexcept
+{
+    for (int byte = 0; byte < 8; ++byte) {
+        hash ^= (value >> (8 * byte)) & 0xFFU;
+        hash *= 1099511628211ULL;  // FNV-1a 64 prime
+    }
+}
+
 // The historical L3 book of one symbol. apply() is the only mutator; every
 // other component reads it through a const MarketBook&.
 class MarketBook
 {
 private:
     SymbolId symbol_;
-    OrderPool pool_;
+    std::optional<OrderPool> owned_pool_;  // empty when the pool is shared
+    OrderPool* pool_;                      // owned_pool_ or the shared one
     OrderBook book_;
     std::uint64_t next_sequence_{1};
     std::size_t peak_order_count_{0};
@@ -76,8 +90,15 @@ private:
     void insert(Order& order) noexcept;                     // activate, sequence, link
 
 public:
-    // Reserves `order_capacity` order slots up front.
+    // Reserves `order_capacity` order slots of its own up front.
     MarketBook(SymbolId symbol, std::size_t order_capacity);
+
+    // Takes order slots from `pool`, which other books may share and which
+    // outlives the book. A full pool rejects Adds as PoolExhausted.
+    MarketBook(SymbolId symbol, OrderPool& pool) noexcept;
+
+    MarketBook(const MarketBook&) = delete;
+    MarketBook& operator=(const MarketBook&) = delete;
 
     ApplyResult apply(const MarketEvent& event) noexcept;
 
@@ -116,7 +137,8 @@ public:
     bool is_locked() const noexcept;   // best bid == best ask
 
     // O(orders). On failure writes the first broken invariant to `error`.
-    // A crossed book fails only when `rth` is true (see in_rth).
+    // A crossed book fails only when `rth` is true (see in_rth). The pool
+    // count is checked only for a pool of its own; MarketBooks checks a shared one.
     bool check_invariants(InvariantError& error, bool rth = false) const noexcept;
 
     // FNV-1a over (side, price, id, remaining, sequence) in book order: bids

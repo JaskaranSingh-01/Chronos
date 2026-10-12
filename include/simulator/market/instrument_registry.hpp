@@ -37,8 +37,9 @@ enum class RegisterResult : std::uint8_t {
 class InstrumentRegistry
 {
 private:
-    // ponytail: linear scan in add(); a run registers a handful of instruments.
-    // Hash on (venue, native_symbol) if a source ever registers every ITCH R (~9k).
+    // ponytail: linear scan in add(). Every R of a NASDAQ day (8,906 on
+    // 2019-12-30, ItchSource all_tickers) takes 45 ms once per run; hash on
+    // (venue, native_symbol) if registration ever shows up in a profile.
     std::vector<Instrument> instruments_;  // index = SymbolId
     std::size_t capacity_{0};
 

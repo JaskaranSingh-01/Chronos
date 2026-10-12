@@ -405,6 +405,99 @@ TEST_F(RestingOrderTest, RuleAWhileOrdersRemainAheadIsAFifoAnomaly)
     EXPECT_EQ(execution_.statistics().fifo_anomalies, 1u);
 }
 
+// ITCH C: an Execute that carries its own price.
+MarketEvent executed_at(OrderId id, std::uint64_t quantity, std::int64_t price)
+{
+    MarketEvent event = reduce(MarketEventType::Execute, id, quantity);
+    event.price = Price{price};
+    return event;
+}
+
+// The full-day SPY anomaly (2019-12-30, 09:30:09.776): h2, displayed at our
+// ask behind us, executes via C one tick better, at $99.99. The buyer never
+// reached $100.00, so we do not fill; the trade still shrinks the queue (b).
+TEST_F(RestingOrderTest, ExecutionAtABetterPriceThanOursNeverFillsUs)
+{
+    market(add(1, Side::Sell, kP, 200));
+    arrive(day(1, Side::Sell, kP, 100));
+    market(add(2, Side::Sell, kP, 100));  // behind us
+    arrive(day(2, Side::Buy, kP - 300, 100));
+    market(add(3, Side::Buy, kP - 300, 100));  // behind our bid
+
+    EXPECT_EQ(market(executed_at(2, 100, kP - 100)), Reports{});
+    EXPECT_EQ(market(executed_at(3, 100, kP - 200)), Reports{});  // the mirror, on the bid
+    EXPECT_EQ(market(executed_at(1, 50, kP - 100)), Reports{});   // ahead of us: rule (b) only
+    EXPECT_EQ(ahead(1), 150u);
+    EXPECT_EQ(execution_.statistics().maker_fills, 0u);
+    EXPECT_EQ(execution_.statistics().fifo_anomalies, 0u);
+}
+
+// A C at our price or worse reached us: (a) and (d) fill as for E.
+TEST_F(RestingOrderTest, ExecutionWithPriceAtOrWorseThanOursFillsUs)
+{
+    market(add(1, Side::Buy, kP, 100));
+    market(add(2, Side::Buy, kP - 100, 100));
+    arrive(day(1, Side::Buy, kP + 100, 100));
+    market(add(3, Side::Buy, kP + 100, 100));  // behind us at our price
+
+    EXPECT_EQ(market(executed_at(3, 10, kP + 100)), (Reports{maker(1, Side::Buy, kP + 100, 10, 90, 0)}));  // (a)
+    EXPECT_EQ(market(executed_at(1, 20, kP + 100)), (Reports{maker(1, Side::Buy, kP + 100, 20, 70, 0)}));  // (d), equal
+    EXPECT_EQ(market(executed_at(2, 30, kP)), (Reports{maker(1, Side::Buy, kP + 100, 30, 40, 0)}));        // (d), worse
+
+    const ExecutionStatistics& stats = execution_.statistics();
+    EXPECT_EQ(stats.fills_by[static_cast<std::size_t>(FillCause::RuleAExecuteWithPrice)]
+                            [static_cast<std::size_t>(SessionPhase::PreOpen)], 1u);
+    EXPECT_EQ(stats.fills_by[static_cast<std::size_t>(FillCause::RuleDExecuteWithPrice)]
+                            [static_cast<std::size_t>(SessionPhase::PreOpen)], 2u);
+}
+
+// Every maker fill and FIFO anomaly is attributed to its rule, message and
+// session phase, and the first anomalies are kept with their context.
+TEST_F(RestingOrderTest, AttributesFillsAndAnomaliesByCauseAndPhase)
+{
+    constexpr Timestamp midnight = 1'000'000'000'000;
+    constexpr Timestamp second = 1'000'000'000;
+    ExecutionSimulator execution{midnight};
+    static_assert(session_phase(midnight + RTH_OPEN_NS - 1, midnight) == SessionPhase::PreOpen);
+    static_assert(session_phase(midnight + RTH_OPEN_NS, midnight) == SessionPhase::OpeningCross);
+    static_assert(session_phase(midnight + RTH_OPEN_NS + second, midnight) == SessionPhase::Regular);
+    static_assert(session_phase(midnight + RTH_CLOSE_NS, midnight) == SessionPhase::ClosingCross);
+    static_assert(session_phase(midnight + RTH_CLOSE_NS + second, midnight) == SessionPhase::PostClose);
+
+    auto step = [&](const MarketEvent& event) {
+        out_.clear();
+        execution.on_market(event, book_, out_);
+        EXPECT_EQ(book_.apply(event), ApplyResult::Applied);
+        return out_.size();
+    };
+    step(add(1, Side::Buy, kP, 200));
+    out_.clear();
+    execution.on_order_arrive(day(1, Side::Buy, kP, 100), kNow, book_, out_);
+    step(add(2, Side::Buy, kP, 100));  // behind us
+
+    const Timestamp regular = midnight + RTH_OPEN_NS + 2 * second;
+    EXPECT_EQ(step(at(regular, reduce(MarketEventType::Execute, 2, 10))), 1u);  // (a) E with 200 ahead
+    EXPECT_EQ(step(at(midnight + RTH_CLOSE_NS, add(3, Side::Sell, kP, 5))), 1u);  // (c) in the closing cross
+
+    const ExecutionStatistics& stats = execution.statistics();
+    const auto a_e = static_cast<std::size_t>(FillCause::RuleAExecute);
+    const auto c_add = static_cast<std::size_t>(FillCause::RuleCAdd);
+    EXPECT_EQ(stats.fills_by[a_e][static_cast<std::size_t>(SessionPhase::Regular)], 1u);
+    EXPECT_EQ(stats.anomalies_by[a_e][static_cast<std::size_t>(SessionPhase::Regular)], 1u);
+    EXPECT_EQ(stats.fills_by[c_add][static_cast<std::size_t>(SessionPhase::ClosingCross)], 1u);
+    EXPECT_EQ(stats.anomalies_by[c_add][static_cast<std::size_t>(SessionPhase::ClosingCross)], 0u);
+    EXPECT_EQ(stats.fifo_anomalies, 1u);
+
+    ASSERT_EQ(execution.fifo_anomaly_samples().size(), 1u);
+    const FifoAnomaly& sample = execution.fifo_anomaly_samples()[0];
+    EXPECT_EQ(sample.event.timestamp, regular);
+    EXPECT_EQ(sample.h_sequence, 2u);
+    EXPECT_EQ(sample.order.anchor_sequence, 1u);
+    EXPECT_EQ(sample.order.ahead_quantity, 200u);
+    EXPECT_EQ(sample.order.remaining, 100u);  // before the fill
+    EXPECT_EQ(sample.level_quantity, 300u);
+}
+
 // Events the book will not apply never touch our orders.
 TEST_F(RestingOrderTest, IgnoresEventsTheBookRejects)
 {

@@ -3,6 +3,7 @@
 #include <chrono>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 #include "simulator/cli/replay_args.hpp"
@@ -196,6 +197,68 @@ TEST(ReplayArgsTest, StrategyDefaultsAndBadValues)
     EXPECT_FALSE(with("--maker-fee-ticks", "+5"));
     EXPECT_FALSE(with("--max-open-orders", "0"));
     EXPECT_FALSE(parse({"replay", "day.bin", "--symbol", "SPY", "--date", "2019-12-30", "--strategy", "mm"}).ok);
+}
+
+TEST(ReplayArgsTest, ParsesASymbolListOrAll)
+{
+    const Parsed list = parse({"replay", "day.bin", "--symbols", "AAPL,MSFT,SPY", "--date", "2019-12-30"});
+    ASSERT_TRUE(list.ok) << list.error;
+    EXPECT_EQ(list.args.symbols, (std::vector<std::string_view>{"AAPL", "MSFT", "SPY"}));
+    EXPECT_TRUE(list.args.symbol.empty());
+    EXPECT_FALSE(list.args.all_symbols);
+    EXPECT_EQ(list.args.capacity, default_books_capacity);  // the shared pool of every book
+
+    const Parsed one = parse({"replay", "day.bin", "--symbols", "AAPL", "--date", "2019-12-30"});
+    ASSERT_TRUE(one.ok) << one.error;
+    EXPECT_EQ(one.args.symbols, (std::vector<std::string_view>{"AAPL"}));
+
+    const Parsed all = parse({"replay", "day.bin", "--all", "--date", "2019-12-30", "--capacity", "4096"});
+    ASSERT_TRUE(all.ok) << all.error;
+    EXPECT_TRUE(all.args.all_symbols);
+    EXPECT_TRUE(all.args.symbols.empty());
+    EXPECT_EQ(all.args.capacity, 4'096u);  // an explicit --capacity wins
+
+    auto symbols = [](std::string_view value) {
+        return parse({"replay", "day.bin", "--symbols", value, "--date", "2019-12-30"}).ok;
+    };
+    EXPECT_FALSE(symbols(""));
+    EXPECT_FALSE(symbols(","));
+    EXPECT_FALSE(symbols("AAPL,"));
+    EXPECT_FALSE(symbols(",AAPL"));
+    EXPECT_FALSE(symbols("AAPL,,MSFT"));
+    EXPECT_FALSE(symbols("AAPL,TOOLONGSYM"));
+}
+
+TEST(ReplayArgsTest, SymbolSelectionsAreMutuallyExclusive)
+{
+    auto error = [](std::vector<std::string_view> argv) {
+        const Parsed p = parse(std::move(argv));
+        EXPECT_FALSE(p.ok);
+        return p.error;
+    };
+
+    for (const std::string& e :
+         {error({"replay", "day.bin", "--symbol", "AAPL", "--symbols", "MSFT", "--date", "2019-12-30"}),
+          error({"replay", "day.bin", "--symbol", "AAPL", "--all", "--date", "2019-12-30"}),
+          error({"replay", "day.bin", "--symbols", "MSFT", "--all", "--date", "2019-12-30"})}) {
+        EXPECT_NE(e.find("mutually exclusive"), std::string::npos) << e;
+    }
+
+    const std::string missing = error({"replay", "day.bin", "--date", "2019-12-30"});
+    EXPECT_NE(missing.find("--symbols"), std::string::npos) << missing;
+    EXPECT_NE(missing.find("--all"), std::string::npos) << missing;
+}
+
+TEST(ReplayArgsTest, BacktestTakesOnlyOneSymbol)
+{
+    for (const std::vector<std::string_view>& argv :
+         {std::vector<std::string_view>{"backtest", "day.bin", "--symbols", "AAPL,MSFT", "--date", "2019-12-30"},
+          std::vector<std::string_view>{"backtest", "day.bin", "--all", "--date", "2019-12-30"}}) {
+        const Parsed p = parse(argv);
+        EXPECT_FALSE(p.ok);
+        EXPECT_NE(p.error.find("backtest"), std::string::npos) << p.error;
+        EXPECT_NE(p.error.find("--symbol"), std::string::npos) << p.error;
+    }
 }
 
 TEST(ReplayArgsTest, ParsesDatesAndOffsets)
