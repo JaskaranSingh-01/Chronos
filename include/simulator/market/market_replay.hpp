@@ -16,24 +16,21 @@ class LatencyHistogram;
 
 enum class ReplayFailure : std::uint8_t {
     None,
-    SourceError,          // the source returned Error
+    SourceError,
     OutOfOrderTimestamp,  // an event earlier than the one before it; not applied
     InvariantViolation    // a periodic check_invariants() failed
 };
 
 struct ReplayOptions
 {
-    // 0 = never. Otherwise check_invariants() of the event's book after every
-    // N-th applied event.
+    // 0 = never; else checks the event's book after every N-th applied event.
     std::uint64_t check_invariants_every{0};
 
-    // session_midnight_ns() of the session: decides RTH (in_rth), where a
-    // crossed book that is Trading is a violation.
+    // From session_midnight_ns(); sets the RTH window of the crossed-book check.
     Timestamp session_midnight{0};
 
-    // When set, after every `latency_batch` events read (applied or not) the
-    // batch's mean ns per event, by steady_clock, goes into it; a partial last
-    // batch is dropped. Unset: the loop reads no clock.
+    // If set, receives the mean ns per event of every `latency_batch` events read;
+    // a partial last batch is dropped. Null: the loop reads no clock.
     LatencyHistogram* latency{nullptr};
     std::uint64_t latency_batch{1024};
 };
@@ -95,8 +92,7 @@ struct SymbolReport
 
 struct BooksReplayReport
 {
-    // Counted as the single-book run counts; an event whose symbol has no
-    // book (not registered) is WrongSymbol here and in no SymbolReport.
+    // An event of an unregistered symbol counts as WrongSymbol here and in no SymbolReport.
     ReplayReport total;
     std::vector<SymbolReport> symbols;  // index = SymbolId, one per book
     std::size_t peak_live_orders{0};    // max OrderPool::in_use(), all books together
@@ -105,16 +101,14 @@ struct BooksReplayReport
     bool operator==(const BooksReplayReport&) const = default;
 };
 
-// The M1 market-only loop: pulls events from a source into a book until
-// EndOfStream or the first fatal failure. Rejected events are counted, not
-// fatal. Deterministic and untimed: callers time run() from outside.
+// Pulls events from a source into books until EndOfStream or the first fatal failure.
+// Rejected events are counted, not fatal.
 struct MarketReplay
 {
     static ReplayReport run(MarketEventSource& source, MarketBook& book,
                             const ReplayOptions& options) noexcept;
 
-    // Every event to the book of its symbol. At the end every registered
-    // instrument has a book. Allocates only when a new symbol gets its book.
+    // Routes each event to its symbol's book; allocates only when a new symbol gets a book.
     static BooksReplayReport run(MarketEventSource& source, MarketBooks& books,
                                  const ReplayOptions& options) noexcept;
 };

@@ -7,9 +7,8 @@
 
 namespace simulator {
 
-// A MarketEventSource over events already in memory, for tests and synthetic
-// benchmarks. It never fails. The caller keeps `events` alive and registers
-// their symbols.
+// In-memory source for tests and benchmarks; never fails. The caller keeps
+// `events` alive and registers their symbols.
 class VectorSource final : public MarketEventSource
 {
 private:
@@ -20,7 +19,6 @@ public:
     explicit VectorSource(std::span<const MarketEvent> events) noexcept
         : events_(events) {}
 
-    // Never Error; EndOfStream is sticky.
     SourceResult next(MarketEvent& event) noexcept override
     {
         if (position_ == events_.size()) {
@@ -30,7 +28,6 @@ public:
         return SourceResult::Event;
     }
 
-    // 1-based index of the last event; 0 before the first.
     std::uint64_t position() const noexcept override
     {
         return position_;

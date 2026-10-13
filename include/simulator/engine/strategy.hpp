@@ -11,9 +11,7 @@
 
 namespace simulator {
 
-// What a strategy callback may touch. The book and the portfolio are
-// read-only; every action goes through the gateway, so a strategy can never
-// change historical state (D1).
+// What a strategy callback may touch: a read-only book and portfolio, and the gateway for every action.
 struct StrategyContext
 {
     const MarketBook& book;
@@ -21,15 +19,11 @@ struct StrategyContext
     OrderGateway& gateway;
 
     Timestamp now() const noexcept { return gateway.now(); }
-
-    // See OrderGateway::set_timer.
     bool set_timer(Timestamp at, std::uint64_t timer_id) const noexcept { return gateway.set_timer(at, timer_id); }
 };
 
-// Spec §4.11, with the context in place of (book, gateway). on_market runs
-// only for events the book Applied (Trade and Status included) and sees the
-// post-event book; on_report runs at delivery, after the Portfolio has the report.
-// A strategy keeps its own state and calls the gateway only inside callbacks.
+// on_market runs only for events the book applied and sees the post-event book; on_report runs
+// after the Portfolio has the report. A strategy calls the gateway only inside callbacks.
 template <class S>
 concept Strategy = requires(S& s, StrategyContext& ctx, const MarketEvent& event, const ExecutionReport& report,
                             std::uint64_t timer_id) {
@@ -38,7 +32,7 @@ concept Strategy = requires(S& s, StrategyContext& ctx, const MarketEvent& event
     { s.on_timer(ctx, timer_id) } noexcept -> std::same_as<void>;
 };
 
-// Replay only: the callbacks inline away and the SimQueue stays empty.
+// Does nothing; for pure market replay.
 struct NullStrategy
 {
     void on_market(StrategyContext&, const MarketEvent&) noexcept {}

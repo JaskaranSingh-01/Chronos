@@ -10,10 +10,8 @@ namespace simulator {
 
 namespace {
 
-/*
- * ITCH 5.0 payload sizes, excluding the type byte. Every payload
- * starts with stock locate (2), tracking number (2), timestamp (6).
- */
+// ITCH 5.0 payload sizes without the type byte. Each payload starts with
+// stock locate (2), tracking number (2) and a 48-bit timestamp (6).
 constexpr std::size_t AddOrderPayloadSize = 35;
 constexpr std::size_t AddOrderMpidPayloadSize = 39;
 constexpr std::size_t OrderExecutedPayloadSize = 30;
@@ -124,10 +122,7 @@ ItchDecodeResult ItchDecoder::decode_add_order_mpid(
         message.payload
     };
 
-    /*
-     * 'F' is 'A' plus a trailing 4-byte MPID attribution. The
-     * length check above accounts for it; Chronos doesn't keep it.
-     */
+    // 'F' is 'A' plus a trailing 4-byte MPID, which is not kept.
     return read_add_order(reader, order);
 }
 
@@ -168,13 +163,7 @@ ItchDecodeResult ItchDecoder::read_add_order(
         return ItchDecodeResult::InvalidMessage;
     }
 
-    /*
-     * Stock symbol.
-     *
-     * We don't need it for the simulator yet.
-     *
-     * Consume the eight bytes but don't copy them.
-     */
+    // The stock field is skipped: the locate identifies the symbol.
     std::span<const std::byte> stock;
 
     if (!reader.read_bytes(8, stock)) {
@@ -188,12 +177,7 @@ ItchDecodeResult ItchDecoder::read_add_order(
         return ItchDecodeResult::InvalidMessage;
     }
 
-    /*
-     * ITCH prices are represented as fixed-point integers.
-     *
-     * We currently keep Price as integer ticks, so the
-     * decoder passes the raw ITCH price integer through.
-     */
+    // The raw fixed-point ITCH price is used as ticks.
     order.timestamp = timestamp;
     order.stock_locate = stock_locate;
     order.order_id = OrderId{order_id};
@@ -516,10 +500,7 @@ ItchDecodeResult ItchDecoder::decode_stock_directory(const ItchMessage& message,
         return ItchDecodeResult::InvalidMessage;
     }
 
-    /*
-     * The remaining 20 bytes (market category, round lot size,
-     * flags, ...) are not used by Chronos and are left unread.
-     */
+    // The remaining 20 bytes (market category, round lot size, flags, ...) are left unread.
     directory.timestamp = timestamp;
     directory.stock_locate = stock_locate;
 

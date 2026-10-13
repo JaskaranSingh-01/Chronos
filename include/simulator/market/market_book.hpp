@@ -11,10 +11,9 @@
 
 namespace simulator {
 
-// Why apply() accepted or rejected an event. Every rejection leaves the book
-// unchanged; the caller counts results by reason.
+// Outcome of MarketBook::apply(). Every rejection leaves the book unchanged.
 enum class ApplyResult : std::uint8_t {
-    Applied,           // also Trade and Status, which never touch its orders
+    Applied,           // includes Trade and Status, which touch no order
     WrongSymbol,       // event.symbol is not this book's symbol
     UnknownOrder,      // Execute/Cancel/Delete/Replace of an id not in the book
     DuplicateOrder,    // Add (or Replace's new id) already in the book
@@ -22,7 +21,7 @@ enum class ApplyResult : std::uint8_t {
     ExceedsRemaining,  // Execute/Cancel of more than the order's remaining
     InvalidReplace,    // Replace with new_order_id == order_id
     PoolExhausted,     // Add with no free order slot
-    Unsupported        // Modify, Clear: until the first source that emits them lands
+    Unsupported        // Modify, Clear
 };
 
 inline constexpr std::size_t apply_result_count = 9;
@@ -47,22 +46,21 @@ enum class InvariantError : std::uint8_t {
     EmptyLevel,
     SequenceNotIncreasing,  // FIFO broken: sequence must rise from head to tail
     InactiveOrderInBook,    // not Active/PartiallyFilled, or remaining == 0
-    PoolCountMismatch,      // pool slots in use != order_count() (a shared pool: of all its books)
+    PoolCountMismatch,      // pool slots in use != order_count() (of all books, for a shared pool)
     CrossedInRth            // best bid > best ask during regular trading hours, while Trading
 };
 
-// Regular trading hours, [09:30, 16:00) exchange-local; session_midnight from
-// session_midnight_ns(). Pre-market books may legitimately lock or cross.
+// True in [09:30, 16:00) exchange-local; session_midnight comes from session_midnight_ns().
 constexpr bool in_rth(Timestamp now, Timestamp session_midnight) noexcept
 {
     const Timestamp since_midnight = now - session_midnight;
     return since_midnight >= RTH_OPEN_NS && since_midnight < RTH_CLOSE_NS;
 }
 
-// One FNV-1a 64 step per byte of `value`, little-endian, so a digest does
-// not depend on the host. Start from fnv1a_offset_basis.
+// Initial value of an FNV-1a 64 hash.
 inline constexpr std::uint64_t fnv1a_offset_basis = 14695981039346656037ULL;
 
+// Mixes `value` into `hash` byte by byte, little-endian, so digests do not depend on the host.
 constexpr void fnv1a_mix(std::uint64_t& hash, std::uint64_t value) noexcept
 {
     for (int byte = 0; byte < 8; ++byte) {
@@ -71,8 +69,7 @@ constexpr void fnv1a_mix(std::uint64_t& hash, std::uint64_t value) noexcept
     }
 }
 
-// The historical L3 book of one symbol. apply() is the only mutator; every
-// other component reads it through a const MarketBook&.
+// L3 book of one symbol, rebuilt from market events. apply() is the only mutator.
 class MarketBook
 {
 private:
@@ -94,8 +91,7 @@ public:
     // Reserves `order_capacity` order slots of its own up front.
     MarketBook(SymbolId symbol, std::size_t order_capacity);
 
-    // Takes order slots from `pool`, which other books may share and which
-    // outlives the book. A full pool rejects Adds as PoolExhausted.
+    // Takes order slots from `pool`, which other books may share and which outlives the book.
     MarketBook(SymbolId symbol, OrderPool& pool) noexcept;
 
     MarketBook(const MarketBook&) = delete;
@@ -140,17 +136,12 @@ public:
     bool is_crossed() const noexcept;  // best bid >  best ask
     bool is_locked() const noexcept;   // best bid == best ask
 
-    // O(orders). On failure writes the first broken invariant to `error`.
-    // A crossed book fails only when `rth` is true (see in_rth) and the book is
-    // Trading: a halted, paused or quotation-only book queues orders without
-    // matching them, so it may cross. The pool count is checked only for a
-    // pool of its own; MarketBooks checks a shared one.
+    // O(orders); on failure writes the first broken invariant to `error`. A crossed book
+    // fails only if `rth` and Trading. The pool count is checked only for an owned pool.
     bool check_invariants(InvariantError& error, bool rth = false) const noexcept;
 
-    // FNV-1a over (side, price, id, remaining, sequence) in book order: bids
-    // best first, then asks. Equal for equal books; compares runs. The trading
-    // state is not part of it: it changes no order, so digests compare with
-    // runs from before Status existed.
+    // FNV-1a over (side, price, id, remaining, sequence) of every order, bids then asks,
+    // best first. Excludes the trading state.
     std::uint64_t digest() const noexcept;
 };
 

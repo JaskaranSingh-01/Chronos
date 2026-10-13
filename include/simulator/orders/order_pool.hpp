@@ -7,6 +7,7 @@
 
 namespace simulator {
 
+// Fixed-capacity Order storage with a free list; allocates only in the constructor.
 class OrderPool
 {
 private:
@@ -35,6 +36,7 @@ public:
     OrderPool(OrderPool&&) = delete;
     OrderPool& operator=(OrderPool&&) = delete;
 
+    // nullptr when every slot is in use.
     Order* acquire(
         OrderId id,
         Side side,
@@ -43,6 +45,7 @@ public:
         Timestamp timestamp
     ) noexcept;
 
+    // False if `order` is not an in-use slot of this pool or is still linked into a level.
     bool release(Order& order) noexcept;
 
     constexpr std::size_t capacity() const noexcept

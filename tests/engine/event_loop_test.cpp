@@ -170,22 +170,22 @@ TEST(EventLoopTest, StrategySeesPostApplyBookAndMarkedPortfolio)
     h.run({.order_latency = 100, .report_latency = 100});
     ASSERT_EQ(h.strategy.seen.size(), 5u);
 
-    // ② before ④: the callback for an Add already sees it.
+    // The book applies an Add before the callback, which already sees it.
     EXPECT_EQ(h.strategy.seen[0].bid, (LevelInfo{Price{999'900}, 100, 1}));
     EXPECT_EQ(h.strategy.seen[1].ask, (LevelInfo{Price{1'000'000}, 300, 1}));
 
     // The portfolio has the fill before the strategy hears of it.
     EXPECT_EQ(h.strategy.seen[3].position, 100);
 
-    // ③ before ④: the long is already marked at the new best bid.
+    // The mark runs before the callback: the long is already at the new best bid.
     const Seen& last = h.strategy.seen[4];
     EXPECT_EQ(last.bid.price, Price{999'950});
     EXPECT_EQ(last.unrealised, 100 * (999'950 - 1'000'000));
 }
 
-// Spec §5 walkthrough, with the t=1,000 execution taking the level down to
-// 100 so the tie decides the fill: the market event at 21,000 refills the
-// ask to 200 before our order arrives at 21,000.
+// The t=1,000 execution takes the level down to 100, so the tie decides the
+// fill: the market event at 21,000 refills the ask to 200 before our order
+// arrives at 21,000.
 TEST(EventLoopTest, TieGoesToMarketInTheSpecWalkthrough)
 {
     const std::vector<MarketEvent> events{

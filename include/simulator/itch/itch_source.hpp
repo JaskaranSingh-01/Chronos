@@ -17,21 +17,18 @@ namespace simulator {
 // Which tickers: all_tickers, else tickers if not empty, else ticker.
 struct ItchSourceConfig
 {
-    // One ticker: 1-8 ASCII chars, matched against R's space-padded stock
-    // field. Anything else never matches, so the stream ends in SymbolNotFound.
+    // 1-8 ASCII chars matched against R's stock field; without its R the stream
+    // ends in SymbolNotFound.
     std::string_view ticker;
 
-    // Several tickers, matched as `ticker` is. One whose R never comes is not
-    // an error: it is never registered, which is how the caller finds it missing.
+    // Matched like `ticker`; one with no R is never registered, which is not an error.
     std::span<const std::string_view> tickers;
 
     bool all_tickers{false};  // every R
     std::chrono::year_month_day session_date{};
     std::chrono::minutes utc_offset{0};  // e.g. -5h for New York in winter
 
-    // A file cut at a byte count ends mid-message. When true, that partial
-    // message ends the stream (EndOfStream, truncated_tail()) instead of
-    // Error/TruncatedMessage.
+    // A partial last message ends the stream (EndOfStream, truncated_tail()) instead of failing.
     bool allow_truncated_tail{false};
 };
 
@@ -43,17 +40,8 @@ struct ItchSourceStatistics
     std::uint64_t events{0};    // MarketEvents emitted, the halt sweep's included
 };
 
-// The MarketEvents of the selected tickers from a NASDAQ TotalView-ITCH 5.0
-// byte span, in file order. A selected ticker's R registers {XNAS, ticker,
-// price_scale 4, quantity_scale 0, tick_size 0} and maps its locate to the
-// SymbolId; event messages (A F E C X D U P H) for an unmapped locate are
-// skipped before decoding, so they are never validated. H (stock trading
-// action) becomes Status. ITCH 5.0 treats a security left out of the pre-open
-// trading action spin as halted from the start of system hours, so the S with
-// event code 'S' is followed by a Status Halted, at its time, for every
-// selected locate without an H yet, in locate order.
-// ponytail: an R after that S is not swept: it trades until its first H.
-// The caller keeps `data` and `registry` alive.
+// MarketEvents of the selected tickers from NASDAQ TotalView-ITCH 5.0 bytes; each selected R
+// registers an instrument. The caller keeps `data` and `registry` alive.
 class ItchSource final : public MarketEventSource
 {
 private:
@@ -70,6 +58,7 @@ private:
 
     std::vector<SymbolId> symbols_;  // index = locate; no_symbol until its selected R
     std::vector<bool> has_status_;   // index = locate: an H or the halt sweep gave it a trading state
+    // ITCH halts every locate with no H by the start-of-system-hours S; this sweep emits those halts.
     std::size_t halt_sweep_{std::size_t{1} << 16};  // next locate the halt sweep checks; 65,536 = none
     Timestamp halt_sweep_time_{0};                  // of the S that started the sweep, epoch ns
     std::uint16_t locate_{0};        // of the last selected R
@@ -94,8 +83,7 @@ public:
     // Error/SymbolNotFound if the stream ends before the R of config.ticker.
     SourceResult next(MarketEvent& event) noexcept override;
 
-    // Byte offset of the start of the last message read or failed; at the
-    // end of a whole buffer, its size.
+    // Byte offset of the last message read or failed; the buffer size at its end.
     std::uint64_t position() const noexcept override
     {
         return message_start_;
@@ -112,8 +100,7 @@ public:
         return truncated_tail_;
     }
 
-    // 0 until the ticker's R is seen. With tickers or all_tickers, of the
-    // last selected R.
+    // Locate of the last selected R; 0 before it.
     std::uint16_t locate() const noexcept
     {
         return locate_;
@@ -130,8 +117,8 @@ public:
         return statistics_;
     }
 
-    // What the ticker's R registers; complete from construction, before the R.
-    // With tickers or all_tickers, native_symbol is empty: each R names its own.
+    // What a selected R registers, set at construction; native_symbol is empty
+    // with tickers or all_tickers.
     const Instrument& instrument() const noexcept
     {
         return instrument_;

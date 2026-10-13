@@ -8,9 +8,7 @@
 
 namespace simulator {
 
-// The strategy's only way to act (spec §4.9). Everything it does becomes a
-// SimEvent in the queue; the EventLoop sets now() before each callback.
-// Our order ids are their own sequence, from 1, and never reach MarketBook (D1).
+// The strategy's only way to act: every call queues a SimEvent.
 class OrderGateway
 {
 private:
@@ -25,9 +23,8 @@ public:
     OrderGateway(SimQueue& queue, Portfolio& portfolio, LatencyConfig latency) noexcept
         : queue_(queue), portfolio_(portfolio), latency_(latency) {}
 
-    // Pre-trade risk first (Portfolio::reserve). Accepted: `id` gets the next
-    // id and OrderArrive is queued at now + order_latency. Otherwise nothing
-    // is reserved or queued and `id` is untouched.
+    // Runs Portfolio::reserve; if Accepted, sets `id` and queues OrderArrive at now + order_latency.
+    // Otherwise nothing is reserved or queued and `id` is untouched.
     RiskCheck send(Side side, Price price, Quantity quantity, TimeInForce tif, OrderId& id) noexcept
     {
         const RiskCheck check = portfolio_.reserve(side, quantity);
@@ -41,15 +38,15 @@ public:
         return check;
     }
 
-    // CancelArrive at now + order_latency, after any order sent before it.
+    // Queues CancelArrive at now + order_latency, behind any order sent before it.
     void cancel(OrderId id) noexcept
     {
         queue_.push(SimEvent{.timestamp = now_ + latency_.order_latency, .type = SimEventType::CancelArrive,
                              .order_id = id});
     }
 
-    // Strategy::on_timer(timer_id) at `at`. False, and nothing queued, if `at`
-    // < now or after stop_timers().
+    // Schedules Strategy::on_timer(timer_id) at `at`.
+    // Returns false, queuing nothing, if `at` < now() or after stop_timers().
     bool set_timer(Timestamp at, std::uint64_t timer_id) noexcept
     {
         if (at < now_ || !timers_open_) {
@@ -62,7 +59,7 @@ public:
     Timestamp now() const noexcept { return now_; }
     void set_now(Timestamp now) noexcept { now_ = now; }
 
-    // The EventLoop calls this at the end of the market stream (see EventLoop).
+    // Makes every later set_timer fail; called at the end of the market stream.
     void stop_timers() noexcept { timers_open_ = false; }
 };
 

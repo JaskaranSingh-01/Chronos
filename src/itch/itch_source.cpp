@@ -10,9 +10,7 @@ namespace simulator {
 
 namespace {
 
-// ponytail: 'P' and 'H' are decoded here rather than in ItchDecoder:
-// ItchSource is their only user. Move them (and the constants to
-// itch_message_types.hpp) when a second one appears.
+// ITCH 5.0 message types ItchDecoder does not handle, with their payload sizes.
 constexpr std::uint8_t TRADE = 0x50;  // 'P'
 constexpr std::size_t TradePayloadSize = 43;
 constexpr std::uint8_t TRADING_ACTION = 0x48;  // 'H'
@@ -94,8 +92,6 @@ SourceError decode_trade(const ItchMessage& message, MarketEvent& event) noexcep
 
 // 'H' Stock Trading Action: the symbol's new trading state. Stock, reserved
 // byte and reason are left unread.
-// ponytail: 'h' (operational halt, one market centre) is skipped. It is
-// independent of H, so it needs its own per-book flag; add it when a file has one.
 SourceError decode_trading_action(const ItchMessage& message, MarketEvent& event) noexcept
 {
     if (message.payload.size() != TradingActionPayloadSize) {
@@ -248,8 +244,7 @@ SourceResult ItchSource::end_of_data() noexcept
 SourceResult ItchSource::next(MarketEvent& event) noexcept
 {
     while (!done_) {
-        // The halt sweep an S 'S' started: one Status Halted per selected
-        // locate that has no trading state yet, in locate order.
+        // Halt sweep after S 'S': one Status Halted per selected locate with no trading state yet.
         while (halt_sweep_ < symbols_.size()) {
             const std::size_t stock_locate = halt_sweep_++;
             if (symbols_[stock_locate] != no_symbol && !has_status_[stock_locate]) {
@@ -314,8 +309,8 @@ SourceResult ItchSource::next(MarketEvent& event) noexcept
         }
 
         if (!is_event_message(message.type)) {
-            // ITCH 5.0: a security left out of the pre-open trading action
-            // spin is halted from the start of system hours (S, event code 'S').
+            // ITCH 5.0: a security missing from the pre-open trading action spin
+            // is halted from the start of system hours (S, event code 'S').
             if (message.type == SYSTEM_EVENT && message.payload.size() == SystemEventPayloadSize &&
                 message.payload[10] == std::byte{'S'}) {
                 ByteReader reader{message.payload};
@@ -330,8 +325,7 @@ SourceResult ItchSource::next(MarketEvent& event) noexcept
             continue;
         }
 
-        // Before decoding: unmapped locates are dropped unvalidated. A payload
-        // too short to hold a locate goes on to decode, which rejects it.
+        // Unmapped locates are dropped before decoding; a payload too short for one fails in decode.
         SymbolId symbol{0};
         std::uint16_t stock_locate{0};
         if (message.payload.size() >= 2) {

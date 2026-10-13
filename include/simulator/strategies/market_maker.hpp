@@ -12,41 +12,25 @@ struct MarketMakerParams
 {
     std::uint64_t quote_size{100};                // shares per quote
     std::int64_t max_position{500};               // |position| a fill of the next quote may not exceed
-    Timestamp requote_cooldown_ns{100'000'000};   // a quote lives at least this long before a requote
-    std::int64_t improve_ticks{0};                // 0 = join the best bid and ask; N = N price ticks
-                                                  // inside them while the spread is wider than 2N
+    Timestamp requote_cooldown_ns{100'000'000};   // minimum quote age before a requote
+    std::int64_t improve_ticks{0};                // ticks inside the touch; used only while the spread is wider than twice this
 };
 
 struct MarketMakerStats
 {
-    std::uint64_t quotes{0};        // Day orders accepted by the gateway's risk check
-    std::uint64_t risk_rejects{0};  // refused by it
-    std::uint64_t cancels{0};       // cancels sent
-    std::uint64_t fills{0};         // Fill reports
-    std::uint64_t rejects{0};       // Rejected reports (WouldCross, or NotTrading for a quote in flight
-                                    // when trading stops)
+    std::uint64_t quotes{0};        // passed the gateway's risk check
+    std::uint64_t risk_rejects{0};  // refused by the risk check
+    std::uint64_t cancels{0};
+    std::uint64_t fills{0};
+    std::uint64_t rejects{0};       // WouldCross, or NotTrading for a quote in flight when trading stops
     std::uint64_t bought{0};        // shares
     std::uint64_t sold{0};
 
     bool operator==(const MarketMakerStats&) const = default;
 };
 
-// A TOY that exercises the passive path (resting orders, queue position,
-// cancels) end to end; it is not a trading idea and its PnL means nothing. It
-// has no fair value, no skew and no adverse-selection defence.
-//
-// It keeps at most one post-only Day quote per side, at the best bid and ask
-// (or improve_ticks inside), whenever the book is Trading, two-sided and not
-// locked or crossed. A halt, pause or quotation-only period pulls both quotes
-// at once. Inventory: it does not quote a side whose next full fill would
-// take |position| past max_position, and cancels such a quote at once.
-//
-// Requote = cancel, then replace on the ack: when a side's desired price
-// differs from its live quote's and the quote is at least requote_cooldown_ns
-// old, it cancels; the Cancelled report frees the side and the new quote goes
-// out in that same callback. So a side never has two orders in flight and
-// max_open_orders = 2 always suffices, at the cost of one round trip without
-// a quote. A WouldCross reject backs that side off for the cooldown.
+// A toy that exercises the passive path end to end; its PnL means nothing.
+// One post-only quote per side; a requote waits for Cancelled, so max_open_orders = 2 suffices.
 class MarketMaker
 {
 private:
@@ -64,7 +48,7 @@ private:
 
     static std::size_t index(Side side) noexcept { return static_cast<std::size_t>(side); }
 
-    // False if `side` should have no quote now.
+    // Sets `price` for `side`, or returns false if that side should have no quote now.
     bool target(const StrategyContext& ctx, Side side, Price& price) const noexcept
     {
         LevelInfo bid;
@@ -90,7 +74,7 @@ private:
         Price price;
         const bool want = target(ctx, side, price);
         if (quote.cancelling || (want && ctx.now() < quote.ready_at)) {
-            return;  // a cancel in flight, or cooling down (dropping a side does not wait)
+            return;  // a cancel in flight, or cooling down; dropping a side does not wait
         }
 
         if (quote.id != 0) {

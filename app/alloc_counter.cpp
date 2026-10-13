@@ -36,7 +36,7 @@ std::uint64_t simulator::allocation_count() noexcept
     return allocations.load(std::memory_order_relaxed);
 }
 
-// The nothrow forms are left to the library, whose defaults call these.
+// Replacing global new/delete affects the whole program, so this lives in the executable, never in simulator_lib.
 void* operator new(std::size_t size) { return allocate(size); }
 void* operator new[](std::size_t size) { return allocate(size); }
 void* operator new(std::size_t size, std::align_val_t align) { return allocate(size, align); }

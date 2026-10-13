@@ -5,10 +5,6 @@
 namespace simulator {
 namespace {
 
-// -----------------------------------------------------------------------------
-// Test helpers
-// -----------------------------------------------------------------------------
-
 Order make_buy_order(
     OrderId id,
     Price price,
@@ -46,11 +42,6 @@ void activate(Order& order)
 
 } // namespace
 
-
-// =============================================================================
-// Basic state
-// =============================================================================
-
 TEST(OrderBookTest, StartsEmpty)
 {
     OrderBook book;
@@ -59,11 +50,6 @@ TEST(OrderBookTest, StartsEmpty)
     EXPECT_EQ(book.best_bid(), nullptr);
     EXPECT_EQ(book.best_ask(), nullptr);
 }
-
-
-// =============================================================================
-// Adding orders
-// =============================================================================
 
 TEST(OrderBookTest, AddsActiveBuyOrder)
 {
@@ -123,8 +109,8 @@ TEST(OrderBookTest, RejectsDuplicateOrderId)
     EXPECT_EQ(book.best_bid(), &first);
 }
 
-// The guard every add path relies on (BUG.01): Order::activate accepts a zero
-// quantity, and nothing may rest with 0 shares.
+// Order::activate accepts a zero quantity, so every add path relies on this
+// guard: nothing may rest with 0 shares.
 TEST(OrderBookTest, RejectsZeroQuantityOrder)
 {
     OrderBook book;
@@ -138,11 +124,6 @@ TEST(OrderBookTest, RejectsZeroQuantityOrder)
     EXPECT_TRUE(book.asks().empty());  // no empty level left behind
     EXPECT_EQ(order.level(), nullptr);
 }
-
-
-// =============================================================================
-// Order lookup
-// =============================================================================
 
 TEST(OrderBookTest, FindsExistingOrder)
 {
@@ -177,11 +158,6 @@ TEST(OrderBookTest, ConstFindWorks)
     EXPECT_EQ(const_book.find(1), &order);
     EXPECT_EQ(const_book.find(999), nullptr);
 }
-
-
-// =============================================================================
-// Bid price priority
-// =============================================================================
 
 TEST(OrderBookTest, BestBidIsHighestPrice)
 {
@@ -222,11 +198,6 @@ TEST(OrderBookTest, BestBidUpdatesAfterCancellation)
     EXPECT_EQ(book.best_bid(), &low);
 }
 
-
-// =============================================================================
-// Ask price priority
-// =============================================================================
-
 TEST(OrderBookTest, BestAskIsLowestPrice)
 {
     OrderBook book;
@@ -266,11 +237,6 @@ TEST(OrderBookTest, BestAskUpdatesAfterCancellation)
     EXPECT_EQ(book.best_ask(), &high);
 }
 
-
-// =============================================================================
-// FIFO priority at the same price
-// =============================================================================
-
 TEST(OrderBookTest, BuyOrdersAtSamePricePreserveFIFO)
 {
     OrderBook book;
@@ -309,11 +275,6 @@ TEST(OrderBookTest, SellOrdersAtSamePricePreserveFIFO)
     EXPECT_EQ(book.best_ask(), &first);
 }
 
-
-// =============================================================================
-// Buy and sell books are independent
-// =============================================================================
-
 TEST(OrderBookTest, BuyAndSellOrdersCanCoexist)
 {
     OrderBook book;
@@ -333,11 +294,6 @@ TEST(OrderBookTest, BuyAndSellOrdersCanCoexist)
     EXPECT_EQ(book.find(1), &buy);
     EXPECT_EQ(book.find(2), &sell);
 }
-
-
-// =============================================================================
-// Cancellation
-// =============================================================================
 
 TEST(OrderBookTest, CancelsOrder)
 {
@@ -401,7 +357,6 @@ TEST(OrderBookTest, CannotCancelInactiveOrder)
 
     auto order = make_buy_order(1, Price{100});
 
-    // Order was never activated.
     EXPECT_EQ(order.state(), OrderState::New);
 
     EXPECT_FALSE(book.cancel(order.id()));
@@ -439,11 +394,6 @@ TEST(OrderBookTest, PartiallyFilledOrderCanBeCancelled)
     EXPECT_EQ(book.find(order.id()), nullptr);
     EXPECT_TRUE(book.empty());
 }
-
-
-// =============================================================================
-// Price-level cleanup
-// =============================================================================
 
 TEST(OrderBookTest, CancellingOnlyOrderRemovesPriceLevel)
 {
@@ -500,11 +450,6 @@ TEST(OrderBookTest, CancellingBestAskRevealsNextPrice)
     EXPECT_EQ(book.best_ask(), &next);
 }
 
-
-// =============================================================================
-// FIFO after cancellation
-// =============================================================================
-
 TEST(OrderBookTest, CancellingFirstBuyOrderPreservesRemainingFIFO)
 {
     OrderBook book;
@@ -551,11 +496,6 @@ TEST(OrderBookTest, CancellingMiddleBuyOrderPreservesFIFO)
     EXPECT_EQ(book.best_bid(), &third);
 }
 
-
-// =============================================================================
-// Complete lifecycle
-// =============================================================================
-
 TEST(OrderBookTest, CompleteOrderLifecycle)
 {
     OrderBook book;
@@ -566,20 +506,16 @@ TEST(OrderBookTest, CompleteOrderLifecycle)
         Quantity{100}
     );
 
-    // New
     EXPECT_EQ(order.state(), OrderState::New);
 
-    // New -> Active
     ASSERT_TRUE(order.activate());
     EXPECT_EQ(order.state(), OrderState::Active);
 
-    // Add to book
     ASSERT_TRUE(book.add(order));
 
     EXPECT_EQ(book.find(order.id()), &order);
     EXPECT_EQ(book.best_bid(), &order);
 
-    // Partial execution
     ASSERT_TRUE(order.execute(Quantity{40}));
 
     EXPECT_EQ(
@@ -592,11 +528,9 @@ TEST(OrderBookTest, CompleteOrderLifecycle)
         Quantity{60}
     );
 
-    // Order should still be resting in the book.
     EXPECT_EQ(book.find(order.id()), &order);
     EXPECT_EQ(book.best_bid(), &order);
 
-    // Cancel remaining quantity
     ASSERT_TRUE(book.cancel(order.id()));
 
     EXPECT_EQ(order.state(), OrderState::Cancelled);
@@ -604,11 +538,6 @@ TEST(OrderBookTest, CompleteOrderLifecycle)
     EXPECT_EQ(book.best_bid(), nullptr);
     EXPECT_TRUE(book.empty());
 }
-
-
-// =============================================================================
-// Multiple orders and both sides
-// =============================================================================
 
 TEST(OrderBookTest, HandlesMultipleOrdersAcrossMultiplePriceLevels)
 {
@@ -652,11 +581,6 @@ TEST(OrderBookTest, HandlesMultipleOrdersAcrossMultiplePriceLevels)
     EXPECT_FALSE(book.empty());
 }
 
-
-// =============================================================================
-// Const access
-// =============================================================================
-
 TEST(OrderBookTest, ConstBestBidWorks)
 {
     OrderBook book;
@@ -684,10 +608,6 @@ TEST(OrderBookTest, ConstBestAskWorks)
 
     EXPECT_EQ(const_book.best_ask(), &order);
 }
-
-// =============================================================================
-// Level totals
-// =============================================================================
 
 TEST(OrderBookTest, LevelTotalAfterPartialExecute)
 {

@@ -12,12 +12,11 @@ namespace simulator {
 
 enum class SimEventType : std::uint8_t { OrderArrive, CancelArrive, ReportDeliver, Timer };
 
-// Our side of the event stream; the market side is MarketEvent. A tagged
-// struct dispatched with a switch: only the field `type` names is meaningful.
+// Our side of the event stream. Only the field that `type` names is meaningful.
 struct SimEvent
 {
     Timestamp timestamp{0};
-    std::uint64_t sequence{0};      // assigned by SimQueue::push
+    std::uint64_t sequence{0};      // set by SimQueue::push
     SimEventType type{SimEventType::Timer};
     OrderRequest order{};           // OrderArrive
     OrderId order_id{0};            // CancelArrive
@@ -25,8 +24,7 @@ struct SimEvent
     std::uint64_t timer_id{0};      // Timer
 };
 
-// Pending SimEvents, earliest first. Equal timestamps pop in push order, so
-// two orders sent in one callback with equal latency arrive in call order.
+// Pending SimEvents, earliest first; equal timestamps pop in push order.
 class SimQueue
 {
 private:
@@ -54,7 +52,6 @@ public:
     explicit SimQueue(std::size_t capacity)
         : queue_(Later{}, reserved(capacity)) {}
 
-    // Overwrites event.sequence with the next push counter.
     void push(SimEvent event) noexcept
     {
         event.sequence = next_sequence_++;

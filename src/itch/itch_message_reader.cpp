@@ -22,12 +22,7 @@ ItchReadResult ItchMessageReader::next(
         return ItchReadResult::Error;
     }
 
-    /*
-     * The length includes the message-type byte.
-     *
-     * Therefore a message must contain at least
-     * one byte for the message type.
-     */
+    // The length includes the type byte, so it is at least 1.
     if (message_length == 0) {
         error_ = ItchReadError::InvalidLength;
         return ItchReadResult::Error;
@@ -45,9 +40,6 @@ ItchReadResult ItchMessageReader::next(
         return ItchReadResult::Error;
     }
 
-    /*
-     * First byte is the ITCH message type.
-     */
     message.type =std::to_integer<std::uint8_t>(message_bytes[0]);
 
     message.payload = message_bytes.subspan(1);

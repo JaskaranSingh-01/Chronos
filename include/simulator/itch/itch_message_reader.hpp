@@ -21,6 +21,8 @@ enum class ItchReadError : std::uint8_t {
     TruncatedMessage
 };
 
+// Splits a buffer into messages framed by a u16 big-endian length that counts the type byte.
+// An Error leaves the position unchanged.
 class ItchMessageReader
 {
 private:

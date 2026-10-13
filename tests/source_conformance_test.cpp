@@ -15,11 +15,6 @@
 namespace simulator::conformance {
 namespace {
 
-// ---------------------------------------------------------------------------
-// The suite every MarketEventSource must pass. Each source adds one
-// INSTANTIATE_TEST_SUITE_P line at the bottom of this file.
-// ---------------------------------------------------------------------------
-
 TEST_P(SourceConformanceTest, TimestampsNeverDecrease)
 {
     EXPECT_EQ(check_time(*make(data_)), std::nullopt);
@@ -59,13 +54,12 @@ TEST_P(SourceConformanceTest, BadInputEndsInStickyError)
         std::nullopt);
 }
 
-// VectorSource: events from an in-test array, so no data file. Two symbols
-// share order id 1, and every event type appears. It cannot fail.
 constexpr Instrument xnas_aapl{
     .venue = {"XNAS"}, .native_symbol = {"AAPL"}, .price_scale = 4, .tick_size = 100};
 constexpr Instrument xnas_msft{
     .venue = {"XNAS"}, .native_symbol = {"MSFT"}, .price_scale = 4, .tick_size = 0};
 
+// Two symbols share order id 1, and every event type appears. VectorSource cannot fail.
 constexpr MarketEvent vector_events[] = {
     {.timestamp = 1'000, .order_id = 1, .price = Price{1'000'100}, .quantity = Quantity{500},
      .symbol = 0, .type = MarketEventType::Add, .side = Side::Sell},
@@ -103,14 +97,13 @@ INSTANTIATE_TEST_SUITE_P(
     Vector, SourceConformanceTest,
     ::testing::Values(SourceCase{.name = "Vector", .factory = make_vector_source}));
 
-// ItchSource: ItchBuilder bytes held in memory, ticker AAPL. Every mapped ITCH
-// type appears (H as Status), plus S messages (skipped; the start of system
-// hours halts AAPL until its H) and MSFT messages (filtered).
 std::string to_string(std::span<const std::byte> bytes)
 {
     return {reinterpret_cast<const char*>(bytes.data()), bytes.size()};
 }
 
+// Every mapped ITCH type for AAPL (H as Status), plus S messages (skipped; the
+// start of system hours halts AAPL until its H) and MSFT messages (filtered).
 const std::string itch_good = to_string(
     itch_test::ItchBuilder{}
         .system_event(0, 1, 'O')
@@ -155,8 +148,8 @@ INSTANTIATE_TEST_SUITE_P(
         .name = "Itch", .data = itch_good, .factory = make_itch_source, .bad_input = itch_bad,
         .expected_error = SourceError::InvalidSide, .expected_position = 41}));
 
-// CsvSource: tests/data/conformance/basic.csv holds every CSV action at
-// xnas_aapl's scale 4 and tick 100. The bad input has a negative quantity (BUG.08).
+// basic.csv holds every CSV action at xnas_aapl's scale 4 and tick 100; the bad
+// input has a negative quantity.
 std::unique_ptr<MarketEventSource> make_csv_source(
     std::span<const std::byte> data, InstrumentRegistry& registry)
 {
@@ -172,10 +165,6 @@ INSTANTIATE_TEST_SUITE_P(
         .bad_input = "timestamp,event_type,order_id,side,price,quantity,new_order_id\n"
                      "1577716200000000000,ADD,1,BUY,1000000,-5,\n",
         .expected_error = SourceError::NumberOutOfRange, .expected_position = 2}));
-
-// ---------------------------------------------------------------------------
-// The checks themselves, run against deliberately broken in-test sources.
-// ---------------------------------------------------------------------------
 
 // Emits `events`, then a sticky EndOfStream, or a sticky Error at position
 // events.size() + 1 when `error` is not None.

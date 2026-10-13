@@ -14,7 +14,6 @@ OrderPool::OrderPool(std::size_t capacity)
         return;
     }
 
-    // Build the free-list.
     for (std::size_t i = 0; i < capacity_; ++i) {
         storage_[i].next =
             (i + 1 < capacity_)
@@ -67,7 +66,7 @@ bool OrderPool::release(Order& order) noexcept
         return false;
     }
 
-    // Verify that the Order belongs to this pool.
+    // Reject an order outside this pool or not at a slot boundary.
     Order* first = &storage_[0].order;
     Order* last = &storage_[capacity_ - 1].order;
 
@@ -75,7 +74,6 @@ bool OrderPool::release(Order& order) noexcept
         return false;
     }
 
-    // Check that the order is aligned with one of our slots.
     const auto address =
         reinterpret_cast<std::uintptr_t>(&order);
 
@@ -99,8 +97,7 @@ bool OrderPool::release(Order& order) noexcept
         return false;
     }
     
-    // An order still linked into a PriceLevel is referenced by the
-    // OrderBook; releasing it would leave a dangling pointer there.
+    // A linked order is still referenced by its PriceLevel.
     if (order.level_ != nullptr){
         return false;
     }

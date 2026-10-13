@@ -21,21 +21,15 @@ enum class SourceError : std::uint8_t {
     SymbolNotFound,        // ITCH: end of stream without an R message for the ticker
     InstrumentRejected,    // InstrumentRegistry::add returned Conflict or Full
     InvalidHeader,         // CSV
-    InvalidRow,            // text (CSV, LOBSTER): wrong column count
-    InvalidNumber,         // text: not a number
-    NumberOutOfRange,      // text: e.g. quantity > UINT64_MAX or negative
-    InvalidEventType,      // text
-    InvalidTradingState    // a status names an unknown trading state (ITCH H's state byte, LOBSTER 7's price)
+    InvalidRow,            // CSV: wrong column count
+    InvalidNumber,         // CSV: not a number
+    NumberOutOfRange,      // CSV: e.g. quantity > UINT64_MAX or negative
+    InvalidEventType,      // CSV
+    InvalidTradingState    // ITCH H: unknown trading state byte
 };
 
-// A pull-based stream of MarketEvents. Contract, checked for every source by
-// SourceConformanceTest (tests/support/source_conformance.hpp):
-//   - next() returns events with non-decreasing timestamps (epoch ns, UTC).
-//   - After EndOfStream or Error, further calls return the same result.
-//   - Each source applies its own symbol filter.
-//   - An event's symbol is registered in the InstrumentRegistry before the
-//     event is emitted.
-//   - order_id is unique within one symbol while the order is live.
+// Pull-based stream of MarketEvents with non-decreasing timestamps. EndOfStream and Error
+// are sticky; an event's symbol is registered before the event is emitted.
 class MarketEventSource
 {
 public:
@@ -43,8 +37,8 @@ public:
 
     virtual SourceResult next(MarketEvent& event) noexcept = 0;
 
-    // ITCH: byte offset of the start of the last message read or failed.
-    // CSV, LOBSTER: 1-based line. Vector: 1-based index.
+    // Where the last event came from or the error occurred: ITCH byte offset,
+    // CSV 1-based line, VectorSource 1-based index.
     virtual std::uint64_t position() const noexcept = 0;
 
     // Valid after next() returned Error.

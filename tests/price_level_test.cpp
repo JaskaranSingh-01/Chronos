@@ -6,8 +6,7 @@
 namespace simulator
 {
 
-    // Helper to create an Order.
-    // Orders start in the New state, so we activate them before adding.
+    // A New buy order of 100; tests activate it before adding.
     Order make_order(
         OrderId id,
         Price price,
@@ -20,10 +19,6 @@ namespace simulator
             Quantity{100},
             timestamp};
     }
-
-    // ------------------------------------------------------------
-    // Construction
-    // ------------------------------------------------------------
 
     TEST(PriceLevelTest, StartsEmpty)
     {
@@ -40,10 +35,6 @@ namespace simulator
 
         EXPECT_EQ(level.price(), Price{100});
     }
-
-    // ------------------------------------------------------------
-    // Add
-    // ------------------------------------------------------------
 
     TEST(PriceLevelTest, AddFirstOrder)
     {
@@ -77,7 +68,6 @@ namespace simulator
 
         EXPECT_EQ(level.order_count(), 3);
 
-        // First order remains at the front.
         EXPECT_EQ(level.front(), &order1);
     }
 
@@ -104,7 +94,6 @@ namespace simulator
 
         EXPECT_TRUE(level.add(order));
 
-        // Same order cannot be inserted again.
         EXPECT_FALSE(level.add(order));
 
         EXPECT_EQ(level.order_count(), 1);
@@ -132,10 +121,6 @@ namespace simulator
         EXPECT_EQ(level2.front(), &order);
     }
 
-    // ------------------------------------------------------------
-    // Remove - only order
-    // ------------------------------------------------------------
-
     TEST(PriceLevelTest, RemoveOnlyOrder)
     {
         PriceLevel level{Price{100}};
@@ -151,10 +136,6 @@ namespace simulator
         EXPECT_EQ(level.order_count(), 0);
         EXPECT_EQ(level.front(), nullptr);
     }
-
-    // ------------------------------------------------------------
-    // Remove - head
-    // ------------------------------------------------------------
 
     TEST(PriceLevelTest, RemoveHeadOrder)
     {
@@ -176,13 +157,8 @@ namespace simulator
 
         EXPECT_EQ(level.order_count(), 2);
 
-        // Order 2 becomes the new head.
         EXPECT_EQ(level.front(), &order2);
     }
-
-    // ------------------------------------------------------------
-    // Remove - middle
-    // ------------------------------------------------------------
 
     TEST(PriceLevelTest, RemoveMiddleOrder)
     {
@@ -204,13 +180,8 @@ namespace simulator
 
         EXPECT_EQ(level.order_count(), 2);
 
-        // Head is still order1.
         EXPECT_EQ(level.front(), &order1);
     }
-
-    // ------------------------------------------------------------
-    // Remove - tail
-    // ------------------------------------------------------------
 
     TEST(PriceLevelTest, RemoveTailOrder)
     {
@@ -235,10 +206,6 @@ namespace simulator
         EXPECT_EQ(level.front(), &order1);
     }
 
-    // ------------------------------------------------------------
-    // Remove invalid order
-    // ------------------------------------------------------------
-
     TEST(PriceLevelTest, RejectsRemovingOrderThatDoesNotBelong)
     {
         PriceLevel level{Price{100}};
@@ -251,7 +218,6 @@ namespace simulator
 
         ASSERT_TRUE(level.add(order1));
 
-        // order2 was never added to this level.
         EXPECT_FALSE(level.remove(order2));
 
         EXPECT_EQ(level.order_count(), 1);
@@ -268,7 +234,6 @@ namespace simulator
 
         ASSERT_TRUE(level1.add(order));
 
-        // order belongs to level1, not level2.
         EXPECT_FALSE(level2.remove(order));
 
         EXPECT_EQ(level1.order_count(), 1);
@@ -276,10 +241,6 @@ namespace simulator
 
         EXPECT_TRUE(level2.empty());
     }
-
-    // ------------------------------------------------------------
-    // Repeated removal
-    // ------------------------------------------------------------
 
     TEST(PriceLevelTest, RejectsRemovingSameOrderTwice)
     {
@@ -292,16 +253,11 @@ namespace simulator
 
         EXPECT_TRUE(level.remove(order));
 
-        // Already removed.
         EXPECT_FALSE(level.remove(order));
 
         EXPECT_EQ(level.order_count(), 0);
         EXPECT_TRUE(level.empty());
     }
-
-    // ------------------------------------------------------------
-    // Reuse after removal
-    // ------------------------------------------------------------
 
     TEST(PriceLevelTest, CanReAddOrderAfterRemoval)
     {
@@ -319,10 +275,6 @@ namespace simulator
         EXPECT_EQ(level.order_count(), 1);
         EXPECT_EQ(level.front(), &order);
     }
-
-    // ------------------------------------------------------------
-    // FIFO behavior after removing orders
-    // ------------------------------------------------------------
 
     TEST(PriceLevelTest, FIFOIsPreservedAfterRemovingMiddleOrder)
     {
@@ -349,7 +301,6 @@ namespace simulator
 
         ASSERT_TRUE(level.remove(order1));
 
-        // After removing order1, order3 should become head.
         EXPECT_EQ(level.front(), &order3);
     }
 
@@ -377,10 +328,6 @@ namespace simulator
 
         EXPECT_EQ(level.front(), &order3);
     }
-
-    // ------------------------------------------------------------
-    // Count consistency
-    // ------------------------------------------------------------
 
     TEST(PriceLevelTest, OrderCountRemainsConsistent)
     {
@@ -416,10 +363,6 @@ namespace simulator
 
         EXPECT_TRUE(level.empty());
     }
-
-    // ------------------------------------------------------------
-    // Total quantity
-    // ------------------------------------------------------------
 
     TEST(PriceLevelTest, TracksTotalQuantity)
     {

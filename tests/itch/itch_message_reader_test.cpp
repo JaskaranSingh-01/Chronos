@@ -11,17 +11,7 @@ namespace {
 
 TEST(ItchMessageReaderTest, ReadsSingleMessage)
 {
-    /*
-     * Length = 3
-     *
-     * Message:
-     *     type    = 0x41 ('A')
-     *     payload = 0x10 0x20
-     *
-     * Wire:
-     *
-     * 00 03 41 10 20
-     */
+    // Length 3: type 'A', payload 10 20.
     const std::array<std::byte, 5> data{
         std::byte{0x00},
         std::byte{0x03},
@@ -59,24 +49,7 @@ TEST(ItchMessageReaderTest, ReadsSingleMessage)
 
 TEST(ItchMessageReaderTest, ReadsMultipleMessages)
 {
-    /*
-     * Message A:
-     *
-     * length = 2
-     * type   = 'A'
-     * data   = 0x11
-     *
-     * Message B:
-     *
-     * length = 3
-     * type   = 'B'
-     * data   = 0x22 0x33
-     *
-     * Wire:
-     *
-     * 00 02 41 11
-     * 00 03 42 22 33
-     */
+    // 'A' with payload 11, then 'B' with payload 22 33.
     const std::array<std::byte, 9> data{
         std::byte{0x00},
         std::byte{0x02},
@@ -133,14 +106,7 @@ TEST(ItchMessageReaderTest, ReadsMultipleMessages)
 
 TEST(ItchMessageReaderTest, HandlesMessageWithEmptyPayload)
 {
-    /*
-     * Length = 1
-     * Type   = 'A'
-     *
-     * Wire:
-     *
-     * 00 01 41
-     */
+    // Length 1: the type byte alone.
     const std::array<std::byte, 3> data{
         std::byte{0x00},
         std::byte{0x01},
@@ -181,9 +147,6 @@ TEST(ItchMessageReaderTest, RejectsZeroLengthMessage)
         ItchReadError::InvalidLength
     );
 
-    /*
-     * Reader must not advance past the invalid message.
-     */
     EXPECT_EQ(reader.position(), 0);
 }
 
@@ -212,11 +175,7 @@ TEST(ItchMessageReaderTest, RejectsMissingLength)
 
 TEST(ItchMessageReaderTest, RejectsTruncatedMessage)
 {
-    /*
-     * Declared length = 5
-     *
-     * Only 3 message bytes exist.
-     */
+    // Declares 5 message bytes; only 3 follow.
     const std::array<std::byte, 5> data{
         std::byte{0x00},
         std::byte{0x05},
@@ -240,21 +199,13 @@ TEST(ItchMessageReaderTest, RejectsTruncatedMessage)
         ItchReadError::TruncatedMessage
     );
 
-    /*
-     * No bytes should be consumed when parsing fails.
-     */
     EXPECT_EQ(reader.position(), 0);
     EXPECT_EQ(reader.remaining(), 5);
 }
 
 TEST(ItchMessageReaderTest, PreservesReaderAfterTruncatedSecondMessage)
 {
-    /*
-     * First message is valid.
-     *
-     * Second message claims 5 bytes but only
-     * 2 message bytes remain.
-     */
+    // A valid message, then one that declares 5 bytes with only 2 left.
     const std::array<std::byte, 8> data{
         std::byte{0x00},
         std::byte{0x02},
@@ -290,18 +241,12 @@ TEST(ItchMessageReaderTest, PreservesReaderAfterTruncatedSecondMessage)
         ItchReadError::TruncatedMessage
     );
 
-    /*
-     * Position remains at the beginning of the
-     * malformed second message.
-     */
     EXPECT_EQ(reader.position(), 4);
 }
 
 TEST(ItchMessageReaderTest, SupportsLargeMessageLength)
 {
-    /*
-     * 0x0100 = 256 bytes including message type.
-     */
+    // Length 0x0100: the type byte plus 255 payload bytes.
     std::array<std::byte, 258> data{};
 
     data[0] = std::byte{0x01};

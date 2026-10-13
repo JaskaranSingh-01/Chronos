@@ -8,6 +8,7 @@
 
 namespace simulator {
 
+// FIFO of the orders at one price, intrusively linked through Order::prev_/next_.
 class PriceLevel {
 private:
     Price price_{};
@@ -26,8 +27,7 @@ public:
 
     bool remove(Order& order) noexcept;
 
-    // A partial execute or cancel of an order in this level: call after the
-    // order's remaining has dropped by `quantity`.
+    // Call after a partial execute or cancel drops an order's remaining by `quantity`.
     void reduce(Quantity quantity) noexcept {
         assert(quantity.value() <= total_quantity_);
         total_quantity_ -= quantity.value();

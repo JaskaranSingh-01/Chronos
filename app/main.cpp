@@ -185,10 +185,6 @@ bool print_final_book(const MarketBook& book, const ReplayReport& report, std::s
     return invariants;
 }
 
-// ---------------------------------------------------------------------------
-// Run metrics (--latency, --json)
-// ---------------------------------------------------------------------------
-
 // Process counters at one instant.
 struct Usage
 {
@@ -215,15 +211,14 @@ struct RunMetrics
     double user_s{0};
     double sys_s{0};
     std::uint64_t allocations{0};      // operator new calls during run()
-    std::uint64_t major_faults{0};     // page faults that waited for I/O: a cold page cache
-    std::uint64_t peak_rss{0};         // bytes, the whole process; counts resident pages of the mapped file
-    std::uint64_t peak_footprint{0};   // bytes, macOS: without clean file pages, so without the mapped file
+    std::uint64_t major_faults{0};     // page faults that waited for I/O
+    std::uint64_t peak_rss{0};         // bytes, whole process, including resident pages of the mapped file
+    std::uint64_t peak_footprint{0};   // bytes, macOS only; excludes clean file pages such as the mapped file
     const LatencyHistogram* latency{nullptr};  // --latency only
     std::uint64_t latency_batch{0};
 };
 
-// Runs run() and fills `metrics` with its wall and CPU time, allocations and
-// faults, and the process peaks after it.
+// Runs run() and records its wall and CPU time, allocations, faults and the process peaks.
 template <class Run>
 auto measured(Run&& run, RunMetrics& metrics)
 {
@@ -251,8 +246,7 @@ auto measured(Run&& run, RunMetrics& metrics)
     return result;
 }
 
-// The smallest step steady_clock is seen to take: 41-42 ns on Apple silicon
-// (a 24 MHz counter), which is why --latency times batches, not events.
+// Smallest observed steady_clock step: ~42 ns on Apple silicon, so --latency times batches, not events.
 double timer_tick_ns() noexcept
 {
     using clock = std::chrono::steady_clock;
@@ -328,8 +322,7 @@ std::string json_escape(std::string_view text)
     return out;
 }
 
-// FNV-1a 64 over the first and the last 4 KiB: cheap, and tells apart files
-// of the same size, such as a truncated copy.
+// FNV-1a 64 of the first and last 4 KiB: cheap, and tells same-size files apart.
 std::uint64_t fingerprint(std::span<const std::byte> bytes) noexcept
 {
     const std::size_t edge = std::min<std::size_t>(4'096, bytes.size());
@@ -352,7 +345,7 @@ std::string cpu_model()
         return name;
     }
 #endif
-    return "unknown";  // ponytail: macOS only; read /proc/cpuinfo once benchmarks run on Linux
+    return "unknown";
 }
 
 // "--all", the --symbols list or the --symbol.
@@ -371,9 +364,8 @@ std::string symbols_mode(const ReplayArgs& args)
     return list;
 }
 
-// --json: the build, machine and input, then the run; `extra`, a complete
-// member such as backtest_json(), goes just before "latency". False if the
-// file cannot be written.
+// Writes --json: build, machine, input, then the run, with `extra` (a complete
+// member) just before "latency". False if the file cannot be written.
 bool write_json(const ReplayArgs& args, std::span<const std::byte> input, const RunRecord& run,
                 std::string_view extra = {})
 {
@@ -642,8 +634,7 @@ int replay_books(const ReplayArgs& args)
     std::printf("\nBooks %zu: %zu empty at the end, %zu not empty\n", books.size(), books.size() - non_empty,
                 non_empty);
 
-    // --all: the 10 busiest, then others with rejections or orders left, in
-    // SymbolId order: at most 40, since a file cut before 20:00 leaves most books non-empty.
+    // --all: the 10 busiest, then up to 40 others with rejections or orders left, in SymbolId order.
     constexpr std::size_t max_others = 40;
     std::vector<SymbolId> rows(books.size());
     std::iota(rows.begin(), rows.end(), SymbolId{0});
@@ -677,10 +668,8 @@ int replay_books(const ReplayArgs& args)
     std::printf("\nLive orders       peak %zu, %zu at the end, all books together (capacity %zu)\n",
                 report.peak_live_orders, pool.in_use(), pool.capacity());
 
-    // Every book's structure first, so one crossed book cannot hide another
-    // problem; then every book crossed in RTH, not only the first. A book that
-    // is not Trading may cross: NASDAQ queues its orders without matching
-    // them, so it is listed, not failed.
+    // Structure first, so a crossed book cannot hide another problem. A book that is
+    // not Trading may cross (NASDAQ queues without matching), so it is listed, not failed.
     InvariantError invariant_error{InvariantError::None};
     SymbolId invariant_symbol{0};
     const bool structure = books.check_invariants(invariant_error, invariant_symbol);
@@ -820,9 +809,8 @@ void print_anomaly_samples(const ExecutionSimulator& execution, Timestamp midnig
     }
 }
 
-// MarketReplay plus a toy strategy through EventLoop: our orders filled
-// against the replayed book (never changing it), with latency, risk and fees.
-// Money prints in the instrument's currency.
+// MarketReplay plus a toy strategy through EventLoop: our orders fill against the
+// replayed book without changing it, with latency, risk and fees.
 int backtest(const ReplayArgs& args)
 {
     MappedFile file;

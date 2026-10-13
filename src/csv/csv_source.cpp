@@ -23,9 +23,8 @@ constexpr std::uint64_t uint64_max = std::numeric_limits<std::uint64_t>::max();
 
 using Fields = std::array<std::string_view, 7>;
 
-// A non-empty `text` of digits only, at most `max`. Any other character,
-// trailing ones included, is InvalidNumber; then a leading '-' or too large a
-// value is NumberOutOfRange.
+// Digits only, at most `max`. Any other character is InvalidNumber; a leading
+// '-' or too large a value is NumberOutOfRange.
 SourceError parse_number(std::string_view text, std::uint64_t max, std::uint64_t& value) noexcept
 {
     const bool negative = text.starts_with('-');

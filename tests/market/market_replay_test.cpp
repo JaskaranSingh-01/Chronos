@@ -331,10 +331,6 @@ TEST(MarketReplayTest, LatencyRecordsOneSamplePerFullBatchAndChangesNothingElse)
     EXPECT_EQ(timed_book.digest(), plain_book.digest());
 }
 
-// ---------------------------------------------------------------------------
-// Many books on one shared pool
-// ---------------------------------------------------------------------------
-
 // `count` instruments, SymbolIds 0 .. count - 1.
 InstrumentRegistry registry_of(std::size_t count)
 {

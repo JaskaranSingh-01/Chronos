@@ -27,7 +27,7 @@ private:
     Order* next_{nullptr};
     PriceLevel* level_{nullptr};
 
-    // The two 1-byte fields sit together at the end: 80 bytes, not 88.
+    // 1-byte fields last so an Order packs into 80 bytes.
     Side side_{Side::Buy};
     OrderState state_{OrderState::New};
 
@@ -55,6 +55,7 @@ public:
         Timestamp timestamp
     ) noexcept;
 
+    // State transitions: false, changing nothing, if the state or quantity forbids it.
     bool activate() noexcept;
 
     bool execute(Quantity executed) noexcept;
@@ -63,7 +64,6 @@ public:
     bool cancel(Quantity cancelled) noexcept;
     bool delete_order() noexcept;
 
-    // Accessors
     OrderId id() const noexcept;
     Side side() const noexcept;
     Price price() const noexcept;

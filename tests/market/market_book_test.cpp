@@ -44,10 +44,6 @@ void expect_invariants(const MarketBook& book)
     EXPECT_EQ(error, InvariantError::None);
 }
 
-// ---------------------------------------------------------------------------
-// Add / Execute / Cancel / Delete
-// ---------------------------------------------------------------------------
-
 TEST(MarketBookTest, AppliesHistoricalOrderLifecycle)
 {
     MarketBook book{kSymbol, 16};
@@ -116,10 +112,6 @@ TEST(MarketBookTest, AddAssignsIncreasingSequencesAndTracksPeak)
     EXPECT_EQ(book.peak_order_count(), 2u);
 }
 
-// ---------------------------------------------------------------------------
-// Replace
-// ---------------------------------------------------------------------------
-
 TEST(MarketBookTest, ReplaceGoesToBackOfQueue)
 {
     MarketBook book{kSymbol, 8};
@@ -170,10 +162,6 @@ TEST(MarketBookTest, RejectedReplaceLeavesBookUnchanged)
     EXPECT_EQ(book.apply(replace(1, 3, 101, 5)), ApplyResult::Applied);
     expect_invariants(book);
 }
-
-// ---------------------------------------------------------------------------
-// Rejections: one per ApplyResult, each leaving the book unchanged
-// ---------------------------------------------------------------------------
 
 TEST(MarketBookTest, RejectsEachInvalidEventWithItsOwnResult)
 {
@@ -245,10 +233,6 @@ TEST(MarketBookTest, StatusSetsTheTradingStateWithoutTouchingOrders)
     EXPECT_EQ(book.last_sequence(), 1u);
     EXPECT_EQ(book.order_count(), 1u);
 }
-
-// ---------------------------------------------------------------------------
-// Queries
-// ---------------------------------------------------------------------------
 
 TEST(MarketBookTest, BestIsFalseOnAnEmptySide)
 {
@@ -348,13 +332,8 @@ TEST(MarketBookTest, LockedIsNotCrossed)
     EXPECT_TRUE(book.is_crossed());
 }
 
-// ---------------------------------------------------------------------------
-// Invariants
-// ---------------------------------------------------------------------------
-
-// Builds a valid two-level book, then breaks it by mutating an order behind
-// the book's back. The book never hands out a mutable Order; the const_cast
-// stands in for a bug inside it.
+// The book never hands out a mutable Order; this const_cast stands in for a
+// bug inside it that changes an order behind the book's back.
 Order& mutable_order(const MarketBook& book, OrderId id)
 {
     return const_cast<Order&>(*book.find(id));
@@ -454,10 +433,6 @@ TEST(MarketBookTest, InRthIsHalfOpenFromOpenToClose)
     EXPECT_FALSE(in_rth(midnight + RTH_CLOSE_NS, midnight));
 }
 
-// ---------------------------------------------------------------------------
-// Digest
-// ---------------------------------------------------------------------------
-
 TEST(MarketBookTest, DigestMatchesForSameEventsAndDiffersByOneShare)
 {
     const MarketEvent events[] = {
@@ -535,10 +510,6 @@ TEST(MarketBookTest, RandomStreamKeepsInvariantsAndIsDeterministic)
     EXPECT_EQ(run_random_stream(42, again), first);
     EXPECT_EQ(again, counts);
 }
-
-// ---------------------------------------------------------------------------
-// A shared OrderPool
-// ---------------------------------------------------------------------------
 
 MarketEvent on(SymbolId symbol, MarketEvent event)
 {

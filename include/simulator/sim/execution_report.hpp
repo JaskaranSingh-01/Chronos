@@ -10,8 +10,8 @@
 
 namespace simulator {
 
-// Constant delays between the strategy and the simulated exchange, in ns.
-// order_latency also folds in the market-data delay.
+// Constant one-way delays between the strategy and the simulated exchange, in ns.
+// order_latency also covers the market-data delay.
 struct LatencyConfig
 {
     Timestamp order_latency{0};
@@ -19,11 +19,11 @@ struct LatencyConfig
 };
 
 enum class TimeInForce : std::uint8_t {
-    Ioc,  // fill what crosses now, expire the rest
-    Day   // post-only passive: rests until filled or cancelled; rejected if it would cross
+    Ioc,  // fills what crosses now, expires the rest
+    Day   // post-only: rests until filled or cancelled; rejected if it would cross
 };
 
-// One of our orders. Our ids are their own sequence and never reach MarketBook.
+// One of our orders. Its id is our own sequence and never reaches MarketBook.
 struct OrderRequest
 {
     OrderId id{0};
@@ -37,7 +37,7 @@ enum class ReportType : std::uint8_t { Accepted, Rejected, Fill, Cancelled, Canc
 
 enum class RejectReason : std::uint8_t {
     None,
-    WouldCross,   // a post-only order that would take liquidity
+    WouldCross,   // a post-only order would take liquidity
     InvalidOrder, // zero quantity
     NotTrading    // the symbol is halted, paused or quotation only
 };
@@ -46,12 +46,11 @@ enum class Liquidity : std::uint8_t { None, Maker, Taker };
 
 struct ExecutionReport
 {
-    Timestamp exchange_time{0};  // when it happened at the simulated exchange
+    Timestamp exchange_time{0};  // at the simulated exchange
     OrderId order_id{0};
     Price price{};               // Fill: execution price
-    Quantity quantity{0};        // Fill: filled qty. Cancelled/Expired/Rejected: qty removed
-                                 // from the market. Accepted: order qty.
-    Quantity leaves{0};          // open qty after this report
+    Quantity quantity{0};        // Fill: filled; Cancelled/Expired/Rejected: removed; Accepted: order quantity
+    Quantity leaves{0};          // open quantity after this report
     ReportType type{ReportType::Accepted};
     RejectReason reason{RejectReason::None};
     Liquidity liquidity{Liquidity::None};
@@ -60,7 +59,7 @@ struct ExecutionReport
     bool operator==(const ExecutionReport&) const = default;
 };
 
-// Portfolio::reserve's pre-trade verdict, checked in this order.
+// Portfolio::reserve's pre-trade verdict; checks run in this order.
 enum class RiskCheck : std::uint8_t { Accepted, InvalidOrder, OrderTooLarge, PositionLimit, TooManyOpenOrders };
 
 } // namespace simulator

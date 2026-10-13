@@ -10,13 +10,8 @@ namespace simulator {
 
 class Order;
 
-// OrderId -> Order*, the order index of one OrderBook (M2.04). Open addressing
-// with linear probing over a power-of-two table that is at most half full;
-// erase() shifts the rest of the probe run back, so there are no tombstones
-// and churn never slows lookups. It allocates only to grow: given the pool's
-// capacity up front it never grows, and an insert never allocates.
-// ponytail: never shrinks, so a book keeps the table of its busiest moment
-// (16 B a slot); add a shrink in erase() if idle books' memory ever matters.
+// OrderId -> Order*: linear probing over a power-of-two table at most half full.
+// erase() back-shifts the probe run, so there are no tombstones. Allocates only to grow.
 class OrderIndex
 {
 private:
@@ -37,8 +32,8 @@ public:
     // Room for `capacity` orders before the first growth; 0 allocates on the first insert().
     explicit OrderIndex(std::size_t capacity = 0);
 
-    // The slot `id` hashes to, by Fibonacci hashing: the top bits of
-    // id * 2^64 / phi, which spreads sequential ITCH ids evenly. Public for tests.
+    // Fibonacci hashing (top bits of id * 2^64 / phi) spreads sequential ids evenly.
+    // Public for tests.
     std::size_t home(OrderId id) const noexcept
     {
         return static_cast<std::size_t>((id * 0x9E37'79B9'7F4A'7C15ULL) >> shift_);

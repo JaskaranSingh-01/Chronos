@@ -16,22 +16,18 @@ struct ImbalanceTakerParams
 
 struct ImbalanceTakerStats
 {
-    std::uint64_t sent{0};          // accepted by the gateway's risk check
-    std::uint64_t risk_rejects{0};  // refused by it
-    std::uint64_t fills{0};         // Fill reports
-    std::uint64_t expired{0};       // Expired reports (IOC leftovers)
+    std::uint64_t sent{0};          // passed the gateway's risk check
+    std::uint64_t risk_rejects{0};  // refused by the risk check
+    std::uint64_t fills{0};
+    std::uint64_t expired{0};       // IOC leftovers
     std::uint64_t bought{0};        // shares
     std::uint64_t sold{0};
 
     bool operator==(const ImbalanceTakerStats&) const = default;
 };
 
-// A TOY that exercises the backtest path end to end; it is not a trading idea
-// and its PnL means nothing. While the book is Trading: when the best bid's
-// size is at least threshold x the best ask's, it sends a buy IOC for `clip`
-// at the best ask; in the mirror case a sell IOC at the best bid. It ignores
-// fees, pays the spread on every trade, has no fair value, and leans on the
-// no-impact fill model (spec §11 Q2). MarketMaker is its passive counterpart.
+// A toy that exercises the IOC path end to end; its PnL means nothing.
+// Buys `clip` at the ask when the bid size is at least threshold x the ask size; sells in the mirror case.
 class ImbalanceTaker
 {
 private:

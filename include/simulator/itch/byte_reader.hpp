@@ -8,6 +8,7 @@
 
 namespace simulator {
 
+// Big-endian reads over a byte span; a read past the end returns false and consumes nothing.
 class ByteReader
 {
 private:

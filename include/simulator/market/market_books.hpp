@@ -10,11 +10,8 @@
 
 namespace simulator {
 
-// One MarketBook per instrument in `registry`, indexed by SymbolId, all
-// taking order slots from one shared `pool`. A book is created once its
-// instrument is registered: find() of an id it has no book for adds the books
-// of every instrument registered since, so it allocates only for new symbols.
-// The caller keeps `registry` and `pool` alive.
+// One MarketBook per registered instrument, indexed by SymbolId, sharing one OrderPool.
+// Books are created lazily by find(); the caller keeps `registry` and `pool` alive.
 class MarketBooks
 {
 private:
@@ -47,9 +44,8 @@ public:
     const MarketBook& operator[](SymbolId id) const noexcept { return books_[id]; }
     const OrderPool& pool() const noexcept { return pool_; }
 
-    // Every book's check_invariants() in SymbolId order, then the shared pool
-    // against all of them. On failure `error` is the first broken invariant and
-    // `symbol` its book, or size() for PoolCountMismatch.
+    // Checks every book, then the shared pool against all of them. On failure `symbol`
+    // is the failing book, or size() for PoolCountMismatch.
     bool check_invariants(InvariantError& error, SymbolId& symbol, bool rth = false) const noexcept
     {
         std::size_t orders = 0;
@@ -70,10 +66,8 @@ public:
         return true;
     }
 
-    // FNV-1a over (id, last_sequence, digest) of every book in SymbolId order:
-    // equal for equal runs, whatever the hash maps do. With last_sequence() a
-    // book that ended empty, as every book does at the end of a day, still
-    // counts its Adds and Replaces.
+    // FNV-1a over (id, last_sequence, digest) of every book in SymbolId order.
+    // last_sequence() keeps a book that ends the day empty from hashing like an unused one.
     std::uint64_t digest() const noexcept
     {
         std::uint64_t hash = fnv1a_offset_basis;

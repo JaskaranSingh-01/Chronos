@@ -9,11 +9,8 @@
 
 namespace simulator {
 
-// Fixed-memory log-linear histogram (HdrHistogram-style): values below 32 are
-// exact; above that each power of two splits into 16 linear buckets. record()
-// never allocates.
-// ponytail: 16 sub-buckets bound the error at 6.25 %; add sub-bucket bits if
-// that is ever too coarse.
+// Fixed-memory log-linear histogram: values below 32 are exact, each higher power of two
+// splits into 16 linear buckets (at most 6.25 % error). record() never allocates.
 class LatencyHistogram
 {
 private:
@@ -55,9 +52,8 @@ public:
         max_ = std::max(max_, value);
     }
 
-    // The value at `fraction` (0.5 = median) of the recorded values: the upper
-    // bound of its bucket, so at most 6.25 % high, and never above max().
-    // 0 if nothing was recorded.
+    // Value at `fraction` (0.5 = median): its bucket's upper bound, at most 6.25 % high
+    // and never above max(). 0 if nothing was recorded.
     std::uint64_t percentile(double fraction) const noexcept
     {
         if (count_ == 0) {

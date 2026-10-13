@@ -9,9 +9,8 @@ namespace simulator {
 
 namespace {
 
-// The loop both run()s share. `route(event)` gives the event's book, nullptr
-// for none (counted as WrongSymbol); `count(event, result)` sees every result.
-// On return `event` is the last event read. Timed: options.latency is set.
+// The loop both run()s share. `route(event)` gives the event's book, or nullptr
+// (WrongSymbol); `count(event, result)` sees every result. `event` ends as the last read.
 template <bool Timed, class Route, class Count>
 void replay_loop(MarketEventSource& source, const ReplayOptions& options, ReplayReport& report,
                  MarketEvent& event, Route& route, Count& count) noexcept
@@ -79,7 +78,7 @@ void replay_loop(MarketEventSource& source, const ReplayOptions& options, Replay
     }
 }
 
-// One loop without a clock in it, one with.
+// Picks the timed loop only when latency sampling is on, so the other has no clock calls.
 template <class Route, class Count>
 void replay(MarketEventSource& source, const ReplayOptions& options, ReplayReport& report,
             MarketEvent& event, Route&& route, Count&& count) noexcept

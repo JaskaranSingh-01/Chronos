@@ -347,10 +347,8 @@ TEST(ItchDecoderTest, RejectsInvalidPrintableFlag)
     ItchBuilder builder;
     builder.executed_with_price(7, 1, 2, 100, 3, true, 12345);
 
-    /*
-     * Framed offset of the printable flag: length (2) + type (1)
-     * + header (10) + order ref (8) + shares (4) + match (8).
-     */
+    // The printable flag's framed offset: length 2 + type 1 + header 10
+    // + order ref 8 + shares 4 + match 8.
     std::vector<std::byte> bytes(builder.bytes().begin(), builder.bytes().end());
     bytes[33] = std::byte{'X'};
 

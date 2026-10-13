@@ -5,10 +5,6 @@
 namespace simulator {
 namespace {
 
-// ------------------------------------------------------------
-// Basic construction
-// ------------------------------------------------------------
-
 TEST(OrderPoolTest, StartsWithFullCapacity)
 {
     OrderPool pool{10};
@@ -17,11 +13,6 @@ TEST(OrderPoolTest, StartsWithFullCapacity)
     EXPECT_EQ(pool.available(), 10);
     EXPECT_EQ(pool.in_use(), 0);
 }
-
-
-// ------------------------------------------------------------
-// Acquire
-// ------------------------------------------------------------
 
 TEST(OrderPoolTest, AcquireReturnsOrder)
 {
@@ -48,11 +39,6 @@ TEST(OrderPoolTest, AcquireReturnsOrder)
     EXPECT_EQ(pool.available(), 9);
     EXPECT_EQ(pool.in_use(), 1);
 }
-
-
-// ------------------------------------------------------------
-// Acquired orders are distinct
-// ------------------------------------------------------------
 
 TEST(OrderPoolTest, AcquireReturnsDistinctOrders)
 {
@@ -85,11 +71,6 @@ TEST(OrderPoolTest, AcquireReturnsDistinctOrders)
     EXPECT_EQ(pool.available(), 8);
     EXPECT_EQ(pool.in_use(), 2);
 }
-
-
-// ------------------------------------------------------------
-// Pool exhaustion
-// ------------------------------------------------------------
 
 TEST(OrderPoolTest, ReturnsNullWhenPoolIsExhausted)
 {
@@ -130,11 +111,6 @@ TEST(OrderPoolTest, ReturnsNullWhenPoolIsExhausted)
     EXPECT_EQ(pool.available(), 0);
     EXPECT_EQ(pool.in_use(), 2);
 }
-
-
-// ------------------------------------------------------------
-// Release
-// ------------------------------------------------------------
 
 TEST(OrderPoolTest, ReleaseMakesSlotAvailable)
 {
@@ -179,11 +155,6 @@ TEST(OrderPoolTest, RejectsDuplicateRelease)
     EXPECT_EQ(pool.in_use(), 0);
 }
 
-
-// ------------------------------------------------------------
-// Released slot can be reused
-// ------------------------------------------------------------
-
 TEST(OrderPoolTest, ReleasedOrderSlotCanBeReused)
 {
     OrderPool pool{1};
@@ -220,11 +191,6 @@ TEST(OrderPoolTest, ReleasedOrderSlotCanBeReused)
     EXPECT_EQ(second->timestamp(), Timestamp{20});
     EXPECT_EQ(second->state(), OrderState::New);
 }
-
-
-// ------------------------------------------------------------
-// Released order is fully reinitialized
-// ------------------------------------------------------------
 
 TEST(OrderPoolTest, ReusedOrderIsFullyReset)
 {
@@ -293,11 +259,6 @@ TEST(OrderPoolTest, ReusedOrderIsFullyReset)
     );
 }
 
-
-// ------------------------------------------------------------
-// Release an order not owned by this pool
-// ------------------------------------------------------------
-
 TEST(OrderPoolTest, RejectsOrderFromAnotherPool)
 {
     OrderPool pool1{1};
@@ -322,11 +283,6 @@ TEST(OrderPoolTest, RejectsOrderFromAnotherPool)
     EXPECT_EQ(pool2.in_use(), 0);
 }
 
-
-// ------------------------------------------------------------
-// Release invalid order
-// ------------------------------------------------------------
-
 TEST(OrderPoolTest, RejectsOrderNotOwnedByPool)
 {
     OrderPool pool{1};
@@ -344,11 +300,6 @@ TEST(OrderPoolTest, RejectsOrderNotOwnedByPool)
     EXPECT_EQ(pool.available(), 1);
     EXPECT_EQ(pool.in_use(), 0);
 }
-
-
-// ------------------------------------------------------------
-// Multiple acquire/release operations
-// ------------------------------------------------------------
 
 TEST(OrderPoolTest, HandlesMultipleAcquireReleaseOperations)
 {

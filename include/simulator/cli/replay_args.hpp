@@ -10,9 +10,7 @@
 
 namespace simulator {
 
-// The one help text of every command (`simulator --help`, `replay --help`, ...).
-// ReplayArgsTest.UsageDocumentsEveryOption parses an example of every flag and
-// finds each flag here as " --flag ".
+// Help text for every command; a test requires each flag to appear here as " --flag ".
 inline constexpr std::string_view usage =
     "usage: simulator replay <itch-file> (--symbol AAPL | --symbols AAPL,MSFT | --all)\n"
     "                        --date 2019-12-30 [options]\n"
@@ -74,7 +72,6 @@ enum class CliCommand : std::uint8_t { Replay, Backtest, Help, Version };
 
 enum class StrategyKind : std::uint8_t { Imbalance, MarketMaker };
 
-// backtest only.
 struct BacktestArgs
 {
     StrategyKind strategy{StrategyKind::Imbalance};
@@ -97,9 +94,8 @@ constexpr std::size_t default_max_open_orders(StrategyKind strategy) noexcept
     return strategy == StrategyKind::MarketMaker ? 2 : 1;
 }
 
-// The default --capacity of the order pool every book shares (--symbols, --all):
-// 2^22, over twice the 1,924,078 live orders the 2019-12-30 full day peaks at,
-// all symbols together. A full pool rejects Adds as PoolExhausted.
+// Default --capacity of the pool shared by --symbols/--all: 2^22, over twice the
+// 1,924,078 peak live orders of the 2019-12-30 full day.
 inline constexpr std::size_t default_books_capacity = 4'194'304;
 
 // Events per timed batch for --latency: a batch takes ~0.5 ms, far above the
@@ -124,12 +120,8 @@ struct ReplayArgs
     BacktestArgs backtest{};
 };
 
-// `args` is argv without the program name: "replay" or "backtest", then the
-// file and the flags in any order. Exactly one of --symbol, --symbols and
-// --all; backtest takes only --symbol, and the backtest flags are rejected
-// for replay; both take --json. -h, --help or --version anywhere gives
-// CliCommand::Help or Version and nothing else. On false, `error` says what
-// is wrong.
+// Parses argv minus the program name: command, file, then flags in any order.
+// -h, --help or --version anywhere wins. On false, `error` says what is wrong.
 bool parse_replay_args(std::span<const std::string_view> args, ReplayArgs& out, std::string& error);
 
 // "YYYY-MM-DD", a real calendar date.

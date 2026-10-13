@@ -391,10 +391,6 @@ TEST(ItchSourceTest, ErrorsAreSticky)
     }
 }
 
-// ---------------------------------------------------------------------------
-// Several tickers, or all of them
-// ---------------------------------------------------------------------------
-
 Instrument xnas(std::string_view ticker)
 {
     Instrument instrument = xnas_aapl;
@@ -507,10 +503,6 @@ TEST(ItchSourceTest, NoSelectedRAtAllIsStillAnEmptyStreamForAList)
     EXPECT_EQ(source.statistics().filtered, 2u);
 }
 
-
-// ---------------------------------------------------------------------------
-// ITCH bytes end to end: ItchSource -> MarketReplay -> MarketBook
-// ---------------------------------------------------------------------------
 
 // The R registers AAPL as SymbolId 0. These ITCH timestamps are pre-market,
 // where a crossed book is legitimate; invariants are checked after every event.

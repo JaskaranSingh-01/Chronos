@@ -10,6 +10,7 @@
 #include "simulator/types/order_id.hpp"
 namespace simulator
 {
+    // Price levels and an id index over Orders it links but does not own.
     class OrderBook
     {
     public:
@@ -25,8 +26,7 @@ namespace simulator
         bool unlink(Order &order) noexcept;
 
     public:
-        // Room in the order index for `capacity` orders before it grows: a
-        // book that owns its OrderPool passes the pool's capacity.
+        // Sizes the order index for `capacity` orders before it grows.
         explicit OrderBook(std::size_t capacity = 0) : orders_(capacity) {}
 
         bool add(Order &order) noexcept;        
@@ -40,6 +40,8 @@ namespace simulator
         const BidLevels& bids() const noexcept { return bids_; }
         const AskLevels& asks() const noexcept { return asks_; }
 
+        // False if `id` is unknown or the order rejects the change.
+        // An order reduced to zero leaves the book.
         bool execute(OrderId id, Quantity quantity) noexcept;
         bool cancel(OrderId id, Quantity quantity) noexcept;
         bool erase(OrderId id) noexcept;

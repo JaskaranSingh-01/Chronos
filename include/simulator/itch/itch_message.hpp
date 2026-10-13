@@ -9,7 +9,7 @@ struct ItchMessage
 {
     std::uint8_t type{0};
 
-    std::span<const std::byte> payload{};
+    std::span<const std::byte> payload{};  // the bytes after the type byte
 };
 
 } // namespace simulator

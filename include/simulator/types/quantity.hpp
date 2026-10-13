@@ -26,7 +26,7 @@ namespace simulator
 
         constexpr bool operator==(const Quantity &) const = default;
         constexpr auto operator<=>(const Quantity &) const = default;
-        // Callers check `other <= *this` first; underflow is a logic bug.
+        // Precondition: other <= *this.
         constexpr Quantity operator-(const Quantity& other) const noexcept {
             assert(other.value_ <= value_);
             return Quantity{value_ - other.value_};

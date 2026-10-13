@@ -2,10 +2,8 @@
 
 namespace simulator {
 
-// Detaches the order from its price level and drops the level once it
-// is empty. Leaves orders_ and the order's state to the caller.
-// level_ already points at the order's level, so the map is searched only
-// to erase a level that emptied (M2.12).
+// Detaches the order from its level and erases the level if it empties.
+// Leaves orders_ and the order's state to the caller.
 bool OrderBook::unlink(Order& order) noexcept
 {
     PriceLevel* level = order.level_;
@@ -36,7 +34,6 @@ bool OrderBook::add(Order& order) noexcept
         return false;
     }
 
-    // Order ID must be unique.
     if (orders_.find(order.id()) != nullptr) {
         return false;
     }
@@ -52,8 +49,6 @@ bool OrderBook::add(Order& order) noexcept
         PriceLevel& level = it->second;
 
         if (!level.add(order)) {
-            // If we created a new empty level but failed
-            // to add the order, remove that level.
             if (inserted && level.empty()) {
                 bids_.erase(it);
             }
@@ -80,7 +75,6 @@ bool OrderBook::add(Order& order) noexcept
         }
     }
 
-    // Order successfully entered the book.
     orders_.insert(order.id(), &order);
 
     return true;
@@ -103,8 +97,6 @@ bool OrderBook::cancel(OrderId id) noexcept
         return false;
     }
 
-    // Now that the order is no longer in the book,
-    // transition its lifecycle state.
     if (!order->cancel()) {
         return false;
     }

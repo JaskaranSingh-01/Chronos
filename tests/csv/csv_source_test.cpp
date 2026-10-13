@@ -131,7 +131,7 @@ TEST(CsvSourceTest, RejectsMalformedRow)
     expect_sticky_error(source, SourceError::InvalidNumber, 3);
 }
 
-// BUG.08: std::stoull read "-1" as UINT64_MAX without an error.
+// "-1" is out of range, not UINT64_MAX as std::stoull would read it.
 TEST(CsvSourceTest, RejectsQuantityOutOfRange)
 {
     for (const std::string_view quantity : {"-1", "18446744073709551616"}) {
@@ -164,7 +164,7 @@ TEST(CsvSourceTest, RejectsQuantityOutOfRange)
     EXPECT_EQ(event.price, Price{std::numeric_limits<std::int64_t>::max()});
 }
 
-// M4.05: every action; columns an action ignores come out as 0 (or Buy).
+// Columns an action ignores come out as 0 (or Buy).
 TEST(CsvSourceTest, ReadsEveryEventType)
 {
     const std::string text = std::string{header7} + "\n"
@@ -362,8 +362,7 @@ TEST(CsvSourceTest, MarketReplayStopsAtTheMalformedLine)
     EXPECT_EQ(report.applied(), 1u);
 }
 
-// M4.05 end to end: every action applies, and the book is checked after
-// every event in RTH, where a crossed book would fail the run.
+// The book is checked after every event in RTH, where a crossed book fails the run.
 TEST(CsvSourceTest, ReplaysEveryEventTypeWithZeroRejections)
 {
     MappedFile file;

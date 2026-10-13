@@ -56,20 +56,16 @@ bool parse_symbols(std::string_view text, std::vector<std::string_view>& symbols
     return true;
 }
 
-// Bounds the backtest numbers so that scaled to ns (latencies, cooldown) or
-// multiplied by a price (clip, position) they stay far below int64 overflow.
+// Cap on backtest numbers, so scaling to ns or multiplying by a price stays far from int64 overflow.
 constexpr std::uint64_t max_value = 1'000'000'000;
 
-// print_book allocates --depth levels per side: a huge value throws length_error.
+// print_book allocates --depth levels per side.
 constexpr std::size_t max_depth = 1'000;
 
-// 2^30 slots x (a 96 B pool slot + up to 32 B of OrderIndex) is far past any
-// machine's memory, and keeps OrderIndex's bit_ceil(2 * capacity) and the
-// pool's byte count far from overflow.
+// Beyond any machine's memory, and keeps OrderIndex's bit_ceil(2 * capacity) far from overflow.
 constexpr std::size_t max_capacity = std::size_t{1} << 30;
 
-// A latency in units of unit_ns (1 for -ns, 1'000 for -us) as ns, at most
-// 1,000 s; writes `ns` only on success.
+// A latency in units of unit_ns as ns, at most 1,000 s; writes `ns` only on success.
 bool parse_latency(std::string_view text, std::uint64_t unit_ns, std::uint64_t& ns) noexcept
 {
     std::uint64_t value{0};
@@ -121,7 +117,7 @@ bool parse_utc_offset(std::string_view text, std::chrono::minutes& offset) noexc
 
 bool parse_replay_args(std::span<const std::string_view> args, ReplayArgs& out, std::string& error)
 {
-    // Help or version wins anywhere, even over a bad command or option; the first one given.
+    // The first help or version flag wins, even over a bad command or option.
     for (const std::string_view arg : args) {
         if (arg == "-h" || arg == "--help" || arg == "--version") {
             out = ReplayArgs{};

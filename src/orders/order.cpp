@@ -2,10 +2,6 @@
 
 namespace simulator {
 
-
-    // Initialize / reuse an Order
-    // --------------------------------------------------------
-
 void Order::initialize(
         OrderId id,
         Side side,
@@ -128,8 +124,6 @@ bool Order::cancel() noexcept {
     state_ = OrderState::Cancelled;
     return true;
 }
-
-// Accessors
 
 OrderId Order::id() const noexcept {
     return id_;

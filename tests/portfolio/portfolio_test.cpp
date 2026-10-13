@@ -54,11 +54,6 @@ void mark_at(Portfolio& portfolio, std::int64_t bid, std::int64_t ask)
     portfolio.mark(book);
 }
 
-// ---------------------------------------------------------------------------
-// Money (M3.02)
-// ---------------------------------------------------------------------------
-
-// Spec §4.10 worked example 1, portfolio side.
 TEST(PortfolioTest, WorkedExample1CashAndFees)
 {
     Portfolio portfolio{kEquity, kWide, FeeSchedule{.taker_fee_per_share = 30}};
@@ -222,10 +217,6 @@ TEST(PortfolioTest, ProductsNearTheScaleCapStayExact)
     EXPECT_EQ(portfolio.unrealised_pnl(), 1'000'000'000'000);
     EXPECT_EQ(portfolio.pnl(), 1'500'000'000'000);
 }
-
-// ---------------------------------------------------------------------------
-// Pre-trade risk (M3.03)
-// ---------------------------------------------------------------------------
 
 TEST(PortfolioTest, ReserveReturnsEachRiskCheck)
 {

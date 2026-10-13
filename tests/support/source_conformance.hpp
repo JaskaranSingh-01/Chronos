@@ -21,18 +21,13 @@
 #include "simulator/market/instrument_registry.hpp"
 #include "simulator/market/market_event_source.hpp"
 
-// The source conformance suite: the contract of market_event_source.hpp as
-// checks that every MarketEventSource must pass.
+// The contract of market_event_source.hpp as checks every MarketEventSource
+// must pass. Each check drains a source and returns its first violation, or
+// nullopt, so it also runs against deliberately broken sources.
 //
-// Each check is a plain function that drains a source and returns its first
-// violation, or nullopt, so it can also be run against a deliberately broken
-// source. SourceConformanceTest (tests/source_conformance_test.cpp) runs them
-// all for every SourceCase.
-//
-// Adding a source: one INSTANTIATE_TEST_SUITE_P line in
-// tests/source_conformance_test.cpp, plus one small synthetic data file under
-// tests/data/conformance/ (never a slice of real data) unless the input is
-// built in the test (SourceCase::data) or the events come from an in-test array.
+// A new source adds one INSTANTIATE_TEST_SUITE_P line in
+// tests/source_conformance_test.cpp and, unless its input is built in the test,
+// a small synthetic file under tests/data/conformance/ (never real data).
 
 namespace simulator::conformance {
 

@@ -10,8 +10,7 @@ namespace {
 
 using Int128 = __int128;
 
-// Money is summed and multiplied in __int128 and narrowed once. Not fitting
-// int64 is a logic bug the combined-scale cap rules out for sane positions.
+// Narrows money computed in __int128 to int64; a value that does not fit is a logic bug.
 std::int64_t to_money(Int128 value) noexcept
 {
     assert(value >= std::numeric_limits<std::int64_t>::min() &&

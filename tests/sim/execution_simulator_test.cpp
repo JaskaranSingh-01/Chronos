@@ -23,7 +23,7 @@ MarketEvent status(TradingState state)
     return MarketEvent{.symbol = kSymbol, .type = MarketEventType::Status, .trading_state = state};
 }
 
-// Spec §4.10 worked example 1's asks, plus two bid levels:
+// Worked example 1's asks, plus two bid levels:
 //   bids 999,900 x 300 (h4), 999,800 x 400 (h5)
 //   asks 1,000,000 x 300 (h1 200, h2 100), 1,000,100 x 500 (h3)
 void build_example_book(MarketBook& book)
@@ -84,7 +84,6 @@ TEST_F(ExecutionSimulatorTest, FullFillAtOneLevel)
               (std::vector{fill(1, Side::Buy, 1'000'000, 150, 0)}));
 }
 
-// Spec §4.10 worked example 1: sweep, partial, Expired, and no impact.
 TEST_F(ExecutionSimulatorTest, WorkedExample1SweepsThenExpiresAndRepeatsIdentically)
 {
     const std::uint64_t digest = book_.digest();
@@ -96,7 +95,7 @@ TEST_F(ExecutionSimulatorTest, WorkedExample1SweepsThenExpiresAndRepeatsIdentica
     EXPECT_EQ(book_.quantity_at(Side::Sell, Price{1'000'000}), 300u);
     EXPECT_EQ(book_.quantity_at(Side::Sell, Price{1'000'100}), 500u);
 
-    // The same visible shares are taken again (spec §11 Q2).
+    // The same visible shares are taken again.
     EXPECT_EQ(arrive(order(2, Side::Buy, 1'000'100, 1000)),
               (std::vector{fill(2, Side::Buy, 1'000'000, 300, 700), fill(2, Side::Buy, 1'000'100, 500, 200),
                            expired(2, Side::Buy, 200)}));
@@ -152,10 +151,6 @@ TEST_F(ExecutionSimulatorTest, AppendsToOutAndCountsTakerFills)
     EXPECT_EQ(execution_.open_orders(), 0u);  // an IOC never rests
 }
 
-// ---------------------------------------------------------------------------
-// Increment 2: resting post-only Day orders, cancels and fill rules (a)-(d)
-// ---------------------------------------------------------------------------
-
 constexpr std::int64_t kP = 1'000'000;  // $100.0000
 
 MarketEvent at(Timestamp ts, MarketEvent event)
@@ -207,7 +202,7 @@ ExecutionReport cancel_rejected(OrderId id)
 
 using Reports = std::vector<ExecutionReport>;
 
-// An empty book; market() runs ① then ② as the EventLoop does.
+// An empty book; market() feeds the simulator, then the book, as the EventLoop does.
 class RestingOrderTest : public ::testing::Test
 {
 protected:
@@ -244,34 +239,34 @@ protected:
     }
 };
 
-// Spec §4.10 worked example 2, steps 1-10: rule (b) shrinks the queue ahead,
-// only orders ahead executing never fill us, then rule (a).
+// Rule (b) shrinks the queue ahead, executions ahead of us never fill us,
+// then rule (a) does.
 TEST_F(RestingOrderTest, WorkedExample2QueuePosition)
 {
     EXPECT_EQ(market(add(1, Side::Buy, kP, 200)), Reports{});  // seq 1
     EXPECT_EQ(market(add(2, Side::Buy, kP, 300)), Reports{});  // seq 2
 
-    EXPECT_EQ(arrive(day(1, Side::Buy, kP, 100)), (Reports{accepted(1, Side::Buy, 100)}));  // step 3
+    EXPECT_EQ(arrive(day(1, Side::Buy, kP, 100)), (Reports{accepted(1, Side::Buy, 100)}));
     const ShadowOrder* o1 = execution_.find(1);
     ASSERT_NE(o1, nullptr);
     EXPECT_EQ(o1->anchor_sequence, 2u);
     EXPECT_EQ(o1->ahead_quantity, 500u);
     EXPECT_EQ(o1->remaining, 100u);
 
-    EXPECT_EQ(market(add(3, Side::Buy, kP, 100)), Reports{});  // 4: seq 3 > 2, behind us
+    EXPECT_EQ(market(add(3, Side::Buy, kP, 100)), Reports{});  // seq 3 > 2: behind us
     EXPECT_EQ(ahead(1), 500u);
-    EXPECT_EQ(market(reduce(MarketEventType::Execute, 1, 150)), Reports{});  // 5
+    EXPECT_EQ(market(reduce(MarketEventType::Execute, 1, 150)), Reports{});
     EXPECT_EQ(ahead(1), 350u);
-    EXPECT_EQ(market(reduce(MarketEventType::Cancel, 2, 100)), Reports{});  // 6
+    EXPECT_EQ(market(reduce(MarketEventType::Cancel, 2, 100)), Reports{});
     EXPECT_EQ(ahead(1), 250u);
-    EXPECT_EQ(market(reduce(MarketEventType::Execute, 1, 50)), Reports{});  // 7
+    EXPECT_EQ(market(reduce(MarketEventType::Execute, 1, 50)), Reports{});
     EXPECT_EQ(ahead(1), 200u);
-    EXPECT_EQ(market(reduce(MarketEventType::Execute, 2, 200)), Reports{});  // 8
+    EXPECT_EQ(market(reduce(MarketEventType::Execute, 2, 200)), Reports{});
     EXPECT_EQ(ahead(1), 0u);
 
-    EXPECT_EQ(market(at(9'000, reduce(MarketEventType::Execute, 3, 60))),  // 9: rule (a)
+    EXPECT_EQ(market(at(9'000, reduce(MarketEventType::Execute, 3, 60))),  // rule (a)
               (Reports{maker(1, Side::Buy, kP, 60, 40, 9'000)}));
-    EXPECT_EQ(market(reduce(MarketEventType::Execute, 3, 40)), (Reports{maker(1, Side::Buy, kP, 40, 0, 0)}));  // 10
+    EXPECT_EQ(market(reduce(MarketEventType::Execute, 3, 40)), (Reports{maker(1, Side::Buy, kP, 40, 0, 0)}));
 
     EXPECT_EQ(execution_.find(1), nullptr);
     EXPECT_EQ(execution_.open_orders(), 0u);
@@ -299,7 +294,7 @@ TEST_F(RestingOrderTest, DeleteAndReplaceOfOrdersAheadShrinkTheQueue)
     EXPECT_EQ(market(reduce(MarketEventType::Execute, 20, 30)), (Reports{maker(1, Side::Sell, kP, 30, 70, 0)}));
 }
 
-// Spec §4.10 worked example 3: an inside-spread bid fills on a crossing Add (c).
+// An inside-spread bid fills on a crossing Add: rule (c).
 TEST_F(RestingOrderTest, WorkedExample3CrossingAddFillsAtOurPrice)
 {
     market(add(1, Side::Buy, kP, 100));
@@ -311,8 +306,8 @@ TEST_F(RestingOrderTest, WorkedExample3CrossingAddFillsAtOurPrice)
     EXPECT_EQ(book_.quantity_at(Side::Sell, Price{kP + 100}), 80u);  // the book never sees our fill
 }
 
-// Worked example 3's documented gap, closed by rule (d) (spec §11 Q1): a sell
-// hitting the 1,000,000 bid trades through our 1,000,100 bid, so we fill first.
+// Rule (d): a sell hitting the 1,000,000 bid trades through our 1,000,100 bid,
+// so we fill first.
 TEST_F(RestingOrderTest, RuleDExecuteAtAWorsePriceFillsUsFirst)
 {
     market(add(1, Side::Buy, kP, 100));
@@ -519,10 +514,6 @@ TEST_F(RestingOrderTest, IgnoresEventsTheBookRejects)
     EXPECT_EQ(out_, Reports{});
     EXPECT_EQ(execution_.find(1)->remaining, 50u);
 }
-
-// ---------------------------------------------------------------------------
-// Trading state: nothing matches while the book is not Trading
-// ---------------------------------------------------------------------------
 
 TEST_F(ExecutionSimulatorTest, RejectsArrivalsWhileNotTrading)
 {

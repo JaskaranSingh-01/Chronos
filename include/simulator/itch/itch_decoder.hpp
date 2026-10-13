@@ -28,8 +28,7 @@ class ItchDecoder
 private:
     ItchDecodeError error_{ItchDecodeError::None};
 
-    // Reads the header every ITCH 5.0 body starts with: stock locate,
-    // tracking number (discarded) and timestamp (ns since midnight).
+    // Common body prefix: locate (2), tracking number (2, discarded), timestamp (6, ns since midnight).
     bool read_header(ByteReader& reader,std::uint16_t& stock_locate,Timestamp& timestamp) noexcept;
 
     // Reads the Add Order fields shared by 'A' and 'F'.

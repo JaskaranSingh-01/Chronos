@@ -13,53 +13,21 @@
 
 namespace simulator {
 
-// The most SimEvents the end-of-stream drain handles (see EventLoop).
+// Caps the end-of-stream drain, so a strategy that answers every report with an order still ends.
 inline constexpr std::uint64_t max_drain_events = 100'000;
 
 struct LoopReport
 {
-    ReplayReport replay;                    // the market side, counted as MarketReplay::run counts it
-    std::uint64_t sim_events{0};            // SimEvents handled, drained ones included
-    std::uint64_t drained_sim_events{0};    // handled after the market stream's EndOfStream
-    std::uint64_t discarded_sim_events{0};  // never handled: queued at a fatal failure, or past the drain cap
+    ReplayReport replay;                    // market side, counted as MarketReplay::run counts it
+    std::uint64_t sim_events{0};            // handled, drained ones included
+    std::uint64_t drained_sim_events{0};    // handled after the market stream ended
+    std::uint64_t discarded_sim_events{0};  // never handled: queued at a fatal failure or past the drain cap
 
     bool operator==(const LoopReport&) const = default;
 };
 
-// The M3 loop (spec §4.8, §5): the historical market stream and our SimQueue,
-// merged in (timestamp, stream, sequence) order with ties going to the market.
-//
-// Per market event e at t:
-//   ① execution.on_market(e, book) on the pre-event book; its reports are
-//     scheduled for delivery at t + report_latency
-//   ② book.apply(e), the only writer of the historical book
-//   ③ portfolio.mark(book) while the position is open (flat, pnl does not
-//     depend on the mark, and every delivered report marks anyway)
-//   ④ strategy.on_market, only if ② Applied, so it sees the post-event book
-// Per SimEvent at t:
-//   OrderArrive   execution.on_order_arrive; reports delivered at t + report_latency
-//   CancelArrive  execution.on_cancel_arrive; likewise
-//   ReportDeliver portfolio.on_report, portfolio.mark, then strategy.on_report
-//   Timer         strategy.on_timer
-//
-// Unlike spec §5, the Portfolio takes each report at delivery rather than at
-// exchange time, so the const Portfolio& a strategy reads never shows a fill
-// before its report arrives. Prices and exchange_time are unchanged; only
-// marks inside the report_latency window differ.
-//
-// End of stream: the SimQueue is drained in (timestamp, sequence) order, so
-// orders, cancels and reports still in flight reach the ExecutionSimulator,
-// the Portfolio and the strategy. The clock advances to each event; the book
-// stays frozen at its final state. Callbacks still run and may send orders
-// and cancels, but set_timer now returns false, so a re-arming timer ends.
-// A strategy that answers every report with another order would never end, so
-// the drain stops after max_drain_events; whatever is left is discarded and
-// counted. Deterministic either way.
-//
-// Fatal, as in MarketReplay::run: a source Error, a market timestamp earlier
-// than the one before, or a failed periodic invariant check. A fatal failure
-// ends the run at once: queued SimEvents are discarded and counted, not
-// drained. No wall clock: callers time run().
+// Merges the historical market stream with our SimQueue in timestamp order and drives the strategy.
+// At end of stream it drains the SimQueue with timers disabled; a fatal failure discards it instead.
 template <Strategy S>
 class EventLoop
 {
@@ -74,7 +42,7 @@ private:
     SimQueue queue_;
     OrderGateway gateway_;
     StrategyContext context_;
-    std::vector<ExecutionReport> reports_;  // ExecutionSimulator output, drained after each call
+    std::vector<ExecutionReport> reports_;  // ExecutionSimulator output, scheduled and cleared after each call
 
     void schedule_reports(Timestamp now) noexcept
     {
@@ -88,15 +56,15 @@ private:
     ApplyResult on_market(const MarketEvent& event) noexcept
     {
         gateway_.set_now(event.timestamp);
-        execution_.on_market(event, book_, reports_);  // ①
+        execution_.on_market(event, book_, reports_);  // sees the pre-event book
         schedule_reports(event.timestamp);
 
-        const ApplyResult applied = book_.apply(event);  // ②
+        const ApplyResult applied = book_.apply(event);  // the only writer of the historical book
         if (portfolio_.position() != 0) {
-            portfolio_.mark(book_);  // ③
+            portfolio_.mark(book_);  // a flat pnl does not depend on the mark
         }
         if (applied == ApplyResult::Applied) {
-            strategy_.on_market(context_, event);  // ④
+            strategy_.on_market(context_, event);
         }
         return applied;
     }
@@ -176,7 +144,7 @@ public:
             replay.last_timestamp = event.timestamp;
             ++replay.events;
 
-            // Every SimEvent strictly before this market event; a tie goes to the market.
+            // SimEvents strictly before this market event; ties go to the market.
             while (!queue_.empty() && queue_.top().timestamp < event.timestamp) {
                 const SimEvent sim = queue_.top();  // a copy: handling it may push
                 queue_.pop();

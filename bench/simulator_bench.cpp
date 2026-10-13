@@ -1,15 +1,7 @@
-// Micro-benchmarks of the replay's hot paths (cmake -DCHRONOS_BENCH=ON):
-//   - MarketBook::apply of Add, Execute (partial and full), Cancel, Delete and
-//     Replace on one book pre-filled to `depth` orders: 1,000 is a busy
-//     symbol's book and stays in cache; 1,000,000 does not, like the full
-//     day's 1.9 M live orders over 8,906 books;
-//   - ItchSource::next over an in-memory ITCH stream, all symbols or one;
-//   - OrderPool release + acquire on a half-full pool.
-//
-// Each iteration times only a batch of prepared operations (UseManualTime,
-// steady_clock) and reports the batch's mean, so Time is ns per operation
-// (per message for ItchSource). Preparing a batch and undoing it are not
-// timed, which is why the CPU column, which includes them, is not comparable.
+// Micro-benchmarks of the replay hot paths (cmake -DCHRONOS_BENCH=ON): MarketBook::apply
+// per event type at depth 1,000 (in cache) and 1,000,000 (not), ItchSource::next, and
+// OrderPool release + acquire. Time is the mean ns per operation of a manually timed
+// batch; the CPU column also counts untimed setup, so it is not comparable.
 
 #include <benchmark/benchmark.h>
 

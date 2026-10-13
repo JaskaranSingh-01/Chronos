@@ -16,10 +16,8 @@ struct Instrument
     std::uint8_t price_scale{0};           // decimal places: value = ticks x 10^-price_scale
     std::uint8_t quantity_scale{0};        // decimal places: 0 = whole shares
 
-    // Minimum price increment in ticks; informational, the engine never enforces it.
-    // 0 means unspecified: US equities step $0.01 at $1.00 or more and $0.0001
-    // below (Reg NMS Rule 612), so no single increment fits every price.
-    // The conformance suite checks prices are multiples of it only when it is > 0.
+    // Minimum price increment in ticks, informational only. 0 = unspecified
+    // (US equities step $0.01 at $1.00 and above, $0.0001 below).
     std::int64_t tick_size{1};
 
     bool operator==(const Instrument&) const = default;
@@ -32,14 +30,11 @@ enum class RegisterResult : std::uint8_t {
     Full
 };
 
-// Maps a dense SymbolId to its instrument. The caller owns it and it outlives
-// the run. Sources register their instruments before emitting their events.
+// Maps dense SymbolIds to instruments. Sources register an instrument before
+// emitting its events; the caller keeps the registry alive for the whole run.
 class InstrumentRegistry
 {
 private:
-    // ponytail: linear scan in add(). Every R of a NASDAQ day (8,906 on
-    // 2019-12-30, ItchSource all_tickers) takes 45 ms once per run; hash on
-    // (venue, native_symbol) if registration ever shows up in a profile.
     std::vector<Instrument> instruments_;  // index = SymbolId
     std::size_t capacity_{0};
 
@@ -47,10 +42,8 @@ public:
     // Reserves `capacity` instruments; the only allocation.
     explicit InstrumentRegistry(std::size_t capacity);
 
-    // Idempotent on (venue, native_symbol): the same instrument again gives
-    // Existing and its id. The same key with different scales or tick size
-    // gives Conflict; a new key past capacity gives Full. `id` is written only
-    // on Added and Existing.
+    // Keyed on (venue, native_symbol): a repeat gives Existing, the same key with other
+    // scales or tick size gives Conflict. Writes `id` only on Added and Existing.
     RegisterResult add(const Instrument& instrument, SymbolId& id) noexcept;
 
     // nullptr if unknown.

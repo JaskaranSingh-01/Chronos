@@ -11,8 +11,7 @@ MarketBook::MarketBook(SymbolId symbol, std::size_t order_capacity)
 MarketBook::MarketBook(SymbolId symbol, OrderPool& pool) noexcept
     : symbol_(symbol), pool_(&pool) {}
 
-// Every case validates first and mutates second, so a rejected event leaves
-// the book (and digest()) unchanged.
+// Every case validates before mutating, so a rejected event leaves the book unchanged.
 ApplyResult MarketBook::apply(const MarketEvent& event) noexcept
 {
     if (event.symbol != symbol_) {
@@ -73,8 +72,6 @@ ApplyResult MarketBook::add(const MarketEvent& event) noexcept
     return ApplyResult::Applied;
 }
 
-// ponytail: find() here and again inside OrderBook::execute/cancel/erase is
-// two hash lookups per event; pass the Order& through if M2 profiling says so.
 ApplyResult MarketBook::reduce(const MarketEvent& event) noexcept
 {
     Order* order = book_.find(event.order_id);
@@ -114,8 +111,7 @@ ApplyResult MarketBook::erase(const MarketEvent& event) noexcept
         return ApplyResult::UnknownOrder;
     }
 
-    // Unlink before delete_order(): it zeroes remaining, which the level
-    // subtracts from its total at unlink time.
+    // Unlink before delete_order(), which zeroes the remaining the level subtracts on unlink.
     [[maybe_unused]] const bool erased = book_.erase(event.order_id);
     [[maybe_unused]] const bool deleted = order->delete_order();
     [[maybe_unused]] const bool released = pool_->release(*order);

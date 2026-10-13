@@ -66,10 +66,7 @@ struct ItchOrderReplace
     std::uint16_t stock_locate{0};
 };
 
-/*
- * Maps a stock locate to its symbol. Not an order-book event: ItchSource
- * registers the instrument from it and emits no MarketEvent.
- */
+// Maps a stock locate to its symbol; ItchSource registers it and emits no MarketEvent.
 struct ItchStockDirectory
 {
     Timestamp timestamp{0};

@@ -100,9 +100,7 @@ TEST(OrderIndexTest, ProbeRunsWrapAroundTheEndOfTheTable)
     EXPECT_EQ(index.find(zero), &orders[9]);
 }
 
-// Random inserts and erases on a small, often half-full table, checked
-// against std::unordered_map after every step: long probe runs, wrap-around
-// and backward shifts, with no tombstones to pile up.
+// A small, often half-full table: long probe runs, wrap-around and backward shifts.
 TEST(OrderIndexTest, MatchesAReferenceMapUnderChurn)
 {
     OrderIndex index{8};
