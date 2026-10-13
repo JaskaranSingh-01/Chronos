@@ -1,0 +1,36 @@
+162,299 samples (1 ms apart) inside MarketReplay::run, from profile-sample.txt
+
+Self (top of stack), share of replay time:
+   20.4%    33,114  simulator::OrderBook::unlink(simulator::Order&)
+   13.8%    22,466  simulator::OrderBook::add(simulator::Order&)
+   11.6%    18,852  simulator::OrderBook::find(unsigned long long)
+   10.2%    16,522  [libsystem_malloc.dylib]
+    9.7%    15,711  std::__hash_table<std::__hash_value_type<unsigned long long, simulator::Order*>>::remove(std::__hash_const_iterator<std::__hash_node<std::__hash_value_type<unsigned long long, simulator::Order*>, void*>*>)
+    7.8%    12,628  simulator::ItchSource::next(simulator::MarketEvent&)
+    4.2%     6,780  std::__hash_table<std::__hash_value_type<unsigned long long, simulator::Order*>>::__emplace_unique_key_args<unsigned long long, unsigned long long, simulator::Order*>(unsigned long long const&, unsigned long long&&, simulator::Order*&&)
+    2.4%     3,937  simulator::ByteReader::read_u16_be(unsigned short&)
+    2.3%     3,689  simulator::ItchDecoder::read_add_order(simulator::ByteReader&, simulator::ItchAddOrder&)
+    2.0%     3,307  simulator::MarketReplay::run(simulator::MarketEventSource&, simulator::MarketBooks&, simulator::ReplayOptions const&)
+    2.0%     3,239  simulator::ByteReader::read_u64_be(unsigned long long&)
+    1.8%     2,897  simulator::ByteReader::read_u32_be(unsigned int&)
+    1.8%     2,881  simulator::ByteReader::read_u48_be(unsigned long long&)
+    1.8%     2,853  simulator::ItchMessageReader::next(simulator::ItchMessage&)
+    1.4%     2,301  simulator::MarketBook::apply(simulator::MarketEvent const&)
+
+Total (self + callees), share of replay time:
+  100.0%   162,299  simulator::MarketReplay::run(simulator::MarketEventSource&, simulator::MarketBooks&, simulator::ReplayOptions const&)
+   62.3%   101,117  simulator::MarketBook::apply(simulator::MarketEvent const&)
+   34.6%    56,190  simulator::OrderBook::erase(unsigned long long)
+   24.2%    39,229  simulator::OrderBook::add(simulator::Order&)
+   22.2%    36,011  simulator::OrderBook::unlink(simulator::Order&)
+   21.2%    34,374  simulator::ItchSource::next(simulator::MarketEvent&)
+   11.9%    19,269  simulator::MarketBook::replace(simulator::MarketEvent const&)
+   11.6%    18,852  simulator::OrderBook::find(unsigned long long)
+   10.2%    16,527  [libsystem_malloc.dylib]
+    9.7%    15,711  std::__hash_table<std::__hash_value_type<unsigned long long, simulator::Order*>>::remove(std::__hash_const_iterator<std::__hash_node<std::__hash_value_type<unsigned long long, simulator::Order*>, void*>*>)
+    8.9%    14,522  std::__hash_table<std::__hash_value_type<unsigned long long, simulator::Order*>>::__emplace_unique_key_args<unsigned long long, unsigned long long, simulator::Order*>(unsigned long long const&, unsigned long long&&, simulator::Order*&&)
+    6.6%    10,740  simulator::ItchDecoder::read_add_order(simulator::ByteReader&, simulator::ItchAddOrder&)
+    6.6%    10,729  simulator::ItchDecoder::decode_add_order(simulator::ItchMessage const&, simulator::ItchAddOrder&)
+    5.0%     8,157  operator new(unsigned long)
+    3.2%     5,255  simulator::ItchMessageReader::next(simulator::ItchMessage&)
+

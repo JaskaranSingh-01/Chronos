@@ -4,24 +4,25 @@ namespace simulator {
 
 // Detaches the order from its price level and drops the level once it
 // is empty. Leaves orders_ and the order's state to the caller.
+// level_ already points at the order's level, so the map is searched only
+// to erase a level that emptied (M2.12).
 bool OrderBook::unlink(Order& order) noexcept
 {
-    // bids_ and asks_ differ only in comparator, so one generic lambda serves both.
-    auto unlink_from = [&order](auto& levels) noexcept {
-        auto level_it = levels.find(order.price());
+    PriceLevel* level = order.level_;
 
-        if (level_it == levels.end() || !level_it->second.remove(order)) {
-            return false;
+    if (level == nullptr || !level->remove(order)) {
+        return false;
+    }
+
+    if (level->empty()) {
+        if (order.side() == Side::Buy) {
+            bids_.erase(level->price());
+        } else {
+            asks_.erase(level->price());
         }
+    }
 
-        if (level_it->second.empty()) {
-            levels.erase(level_it);
-        }
-
-        return true;
-    };
-
-    return order.side() == Side::Buy ? unlink_from(bids_) : unlink_from(asks_);
+    return true;
 }
 
 bool OrderBook::add(Order& order) noexcept
@@ -36,7 +37,7 @@ bool OrderBook::add(Order& order) noexcept
     }
 
     // Order ID must be unique.
-    if (orders_.find(order.id()) != orders_.end()) {
+    if (orders_.find(order.id()) != nullptr) {
         return false;
     }
 
@@ -80,19 +81,14 @@ bool OrderBook::add(Order& order) noexcept
     }
 
     // Order successfully entered the book.
-    orders_.emplace(order.id(), &order);
+    orders_.insert(order.id(), &order);
 
     return true;
 }
 
 bool OrderBook::remove(OrderId id) noexcept{
-    auto it = orders_.find(id);
+    Order* order = orders_.find(id);
 
-    if(it == orders_.end()){
-        return false;
-    }
-
-    Order* order = it->second;
     if(order == nullptr){
         return false;
     }
@@ -105,7 +101,7 @@ bool OrderBook::remove(OrderId id) noexcept{
         return false;
     }
 
-    orders_.erase(it);
+    orders_.erase(id);
 
     return true;
 
@@ -113,13 +109,7 @@ bool OrderBook::remove(OrderId id) noexcept{
 
 bool OrderBook::cancel(OrderId id) noexcept
 {
-    auto it = orders_.find(id);
-
-    if (it == orders_.end()) {
-        return false;
-    }
-
-    Order* order = it->second;
+    Order* order = orders_.find(id);
 
     if (order == nullptr) {
         return false;
@@ -140,31 +130,19 @@ bool OrderBook::cancel(OrderId id) noexcept
         return false;
     }
 
-    orders_.erase(it);
+    orders_.erase(id);
 
     return true;
 }
 
 Order* OrderBook::find(OrderId id) noexcept
 {
-    auto it = orders_.find(id);
-
-    if (it == orders_.end()) {
-        return nullptr;
-    }
-
-    return it->second;
+    return orders_.find(id);
 }
 
 const Order* OrderBook::find(OrderId id) const noexcept
 {
-    auto it = orders_.find(id);
-
-    if (it == orders_.end()) {
-        return nullptr;
-    }
-
-    return it->second;
+    return orders_.find(id);
 }
 
 Order* OrderBook::best_bid() noexcept
@@ -205,7 +183,7 @@ const Order* OrderBook::best_ask() const noexcept
 
 bool OrderBook::empty() const noexcept
 {
-    return orders_.empty();
+    return orders_.size() == 0;
 }
 
 // void OrderBook::clear() noexcept
@@ -259,13 +237,7 @@ bool OrderBook::execute(
     Quantity quantity
 ) noexcept
 {
-    auto it = orders_.find(id);
-
-    if (it == orders_.end()) {
-        return false;
-    }
-
-    Order* order = it->second;
+    Order* order = orders_.find(id);
 
     if (order == nullptr) {
         return false;
@@ -285,7 +257,7 @@ bool OrderBook::execute(
         return false;
     }
 
-    orders_.erase(it);
+    orders_.erase(id);
 
     return true;
 }
@@ -295,13 +267,7 @@ bool OrderBook::cancel(
     Quantity quantity
 ) noexcept
 {
-    auto it = orders_.find(id);
-
-    if (it == orders_.end()) {
-        return false;
-    }
-
-    Order* order = it->second;
+    Order* order = orders_.find(id);
 
     if (order == nullptr) {
         return false;
@@ -321,20 +287,14 @@ bool OrderBook::cancel(
         return false;
     }
 
-    orders_.erase(it);
+    orders_.erase(id);
 
     return true;
 }
 
 bool OrderBook::erase(OrderId id) noexcept
 {
-    auto it = orders_.find(id);
-
-    if (it == orders_.end()) {
-        return false;
-    }
-
-    Order* order = it->second;
+    Order* order = orders_.find(id);
 
     if (order == nullptr) {
         return false;
@@ -344,7 +304,7 @@ bool OrderBook::erase(OrderId id) noexcept
         return false;
     }
 
-    orders_.erase(it);
+    orders_.erase(id);
 
     return true;
 }

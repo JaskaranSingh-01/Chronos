@@ -3,17 +3,31 @@
 #include <cinttypes>
 #include <cstdio>
 #include <cstdlib>
+#include <ctime>
 #include <numeric>
+#include <span>
 #include <string>
 #include <string_view>
 #include <vector>
 
+#include <sys/resource.h>
+#include <sys/utsname.h>
+#include <unistd.h>
+
+#ifdef __APPLE__
+#include <libproc.h>
+#include <sys/sysctl.h>
+#endif
+
+#include "alloc_counter.hpp"
+#include "build_info.hpp"  // generated: build_commit, build_dirty, build_type
 #include "simulator/cli/replay_args.hpp"
 #include "simulator/engine/event_loop.hpp"
 #include "simulator/io/mapped_file.hpp"
 #include "simulator/itch/itch_source.hpp"
 #include "simulator/market/market_books.hpp"
 #include "simulator/market/market_replay.hpp"
+#include "simulator/metrics/latency_histogram.hpp"
 #include "simulator/strategies/imbalance_taker.hpp"
 #include "simulator/strategies/market_maker.hpp"
 
@@ -168,6 +182,263 @@ bool print_final_book(const MarketBook& book, const ReplayReport& report, std::s
     return invariants;
 }
 
+// ---------------------------------------------------------------------------
+// Run metrics (--latency, --json)
+// ---------------------------------------------------------------------------
+
+// Process counters at one instant.
+struct Usage
+{
+    std::chrono::steady_clock::time_point wall;
+    double user_s{0};
+    double sys_s{0};
+    std::uint64_t allocations{0};
+    std::uint64_t major_faults{0};
+};
+
+Usage usage_now() noexcept
+{
+    rusage usage{};
+    ::getrusage(RUSAGE_SELF, &usage);
+    auto seconds = [](const timeval& t) { return static_cast<double>(t.tv_sec) + static_cast<double>(t.tv_usec) * 1e-6; };
+    return {std::chrono::steady_clock::now(), seconds(usage.ru_utime), seconds(usage.ru_stime), allocation_count(),
+            static_cast<std::uint64_t>(usage.ru_majflt)};
+}
+
+// What one run() cost.
+struct RunMetrics
+{
+    double wall_s{0};
+    double user_s{0};
+    double sys_s{0};
+    std::uint64_t allocations{0};      // operator new calls during run()
+    std::uint64_t major_faults{0};     // page faults that waited for I/O: a cold page cache
+    std::uint64_t peak_rss{0};         // bytes, the whole process; counts resident pages of the mapped file
+    std::uint64_t peak_footprint{0};   // bytes, macOS: without clean file pages, so without the mapped file
+    const LatencyHistogram* latency{nullptr};  // --latency only
+    std::uint64_t latency_batch{0};
+};
+
+// Runs run() and fills `metrics` with its wall and CPU time, allocations and
+// faults, and the process peaks after it.
+template <class Run>
+auto measured(Run&& run, RunMetrics& metrics)
+{
+    const Usage before = usage_now();
+    auto result = run();
+    const Usage after = usage_now();
+
+    metrics.wall_s = std::chrono::duration<double>(after.wall - before.wall).count();
+    metrics.user_s = after.user_s - before.user_s;
+    metrics.sys_s = after.sys_s - before.sys_s;
+    metrics.allocations = after.allocations - before.allocations;
+    metrics.major_faults = after.major_faults - before.major_faults;
+
+    rusage usage{};
+    ::getrusage(RUSAGE_SELF, &usage);
+#ifdef __APPLE__
+    metrics.peak_rss = static_cast<std::uint64_t>(usage.ru_maxrss);  // bytes on macOS
+    rusage_info_v4 info{};
+    if (::proc_pid_rusage(::getpid(), RUSAGE_INFO_V4, reinterpret_cast<rusage_info_t*>(&info)) == 0) {
+        metrics.peak_footprint = info.ri_lifetime_max_phys_footprint;
+    }
+#else
+    metrics.peak_rss = static_cast<std::uint64_t>(usage.ru_maxrss) * 1024;  // KiB on Linux
+#endif
+    return result;
+}
+
+// The smallest step steady_clock is seen to take: 41-42 ns on Apple silicon
+// (a 24 MHz counter), which is why --latency times batches, not events.
+double timer_tick_ns() noexcept
+{
+    using clock = std::chrono::steady_clock;
+    clock::duration best = clock::duration::max();
+    for (int i = 0; i < 100; ++i) {
+        const clock::time_point start = clock::now();
+        clock::time_point now = clock::now();
+        while (now == start) {
+            now = clock::now();
+        }
+        best = std::min(best, now - start);
+    }
+    return std::chrono::duration<double, std::nano>(best).count();
+}
+
+// a / b, or 0 for an empty run: keeps the JSON free of inf and nan.
+double ratio(double a, double b) noexcept
+{
+    return b != 0 ? a / b : 0;
+}
+
+// One replay's outcome, for the summary lines and --json.
+struct RunRecord
+{
+    std::uint64_t events{0};
+    std::uint64_t messages{0};
+    std::uint64_t rejected{0};
+    std::uint64_t digest{0};
+    std::size_t books{0};
+    std::size_t books_not_empty{0};
+    std::size_t peak_live_orders{0};
+    bool succeeded{false};  // the source and every check, as the exit code says
+    RunMetrics metrics;
+};
+
+void print_metrics(const RunRecord& run, std::uint64_t file_bytes)
+{
+    const RunMetrics& m = run.metrics;
+    const auto events = static_cast<double>(run.events);
+    std::printf("Elapsed           %.2f s wall, %.2f s CPU (user %.2f, sys %.2f); %.0f events/s, %.1f ns/event, "
+                "%.0f messages/s, %.1f MB/s\n",
+                m.wall_s, m.user_s + m.sys_s, m.user_s, m.sys_s, ratio(events, m.wall_s), ratio(m.wall_s * 1e9, events),
+                static_cast<double>(run.messages) / m.wall_s, static_cast<double>(file_bytes) / 1e6 / m.wall_s);
+    std::printf("Memory            %" PRIu64 " allocations (%.4f per event), peak RSS %.1f MB, peak footprint "
+                "%.1f MB, %" PRIu64 " major faults\n",
+                m.allocations, ratio(static_cast<double>(m.allocations), events), static_cast<double>(m.peak_rss) / 1e6,
+                static_cast<double>(m.peak_footprint) / 1e6, m.major_faults);
+    if (m.latency != nullptr) {
+        const LatencyHistogram& h = *m.latency;
+        std::printf("Latency           ns/event over %" PRIu64 " batches of %" PRIu64 " events (timer tick %.1f ns): "
+                    "p50 %" PRIu64 ", p90 %" PRIu64 ", p99 %" PRIu64 ", p99.9 %" PRIu64 ", max %" PRIu64 "\n",
+                    h.count(), m.latency_batch, timer_tick_ns(), h.percentile(0.5), h.percentile(0.9),
+                    h.percentile(0.99), h.percentile(0.999), h.max());
+    }
+}
+
+// JSON string contents: quotes, backslashes and control characters escaped.
+std::string json_escape(std::string_view text)
+{
+    std::string out;
+    for (const char c : text) {
+        if (c == '"' || c == '\\') {
+            out += '\\';
+            out += c;
+        } else if (static_cast<unsigned char>(c) < 0x20) {
+            char escaped[8];
+            std::snprintf(escaped, sizeof escaped, "\\u%04x", static_cast<unsigned>(c));
+            out += escaped;
+        } else {
+            out += c;
+        }
+    }
+    return out;
+}
+
+// FNV-1a 64 over the first and the last 4 KiB: cheap, and tells apart files
+// of the same size, such as a truncated copy.
+std::uint64_t fingerprint(std::span<const std::byte> bytes) noexcept
+{
+    const std::size_t edge = std::min<std::size_t>(4'096, bytes.size());
+    std::uint64_t hash = fnv1a_offset_basis;
+    for (const std::span<const std::byte> part : {bytes.first(edge), bytes.last(edge)}) {
+        for (const std::byte byte : part) {
+            hash ^= std::to_integer<std::uint64_t>(byte);
+            hash *= 1099511628211ULL;  // FNV-1a 64 prime
+        }
+    }
+    return hash;
+}
+
+std::string cpu_model()
+{
+#ifdef __APPLE__
+    char name[256] = {};
+    std::size_t size = sizeof name - 1;
+    if (::sysctlbyname("machdep.cpu.brand_string", name, &size, nullptr, 0) == 0) {
+        return name;
+    }
+#endif
+    return "unknown";  // ponytail: macOS only; read /proc/cpuinfo once benchmarks run on Linux
+}
+
+// "--all", the --symbols list or the --symbol.
+std::string symbols_mode(const ReplayArgs& args)
+{
+    if (args.all_symbols) {
+        return "all";
+    }
+    if (args.symbols.empty()) {
+        return std::string{args.symbol};
+    }
+    std::string list;
+    for (const std::string_view symbol : args.symbols) {
+        list += (list.empty() ? "" : ",") + std::string{symbol};
+    }
+    return list;
+}
+
+// --json: the build, machine and input, then the run. False if the file
+// cannot be written.
+bool write_json(const ReplayArgs& args, std::span<const std::byte> input, const RunRecord& run)
+{
+    const std::string path{args.json};
+    std::FILE* out = std::fopen(path.c_str(), "w");
+    if (out == nullptr) {
+        std::fprintf(stderr, "error: cannot write %s\n", path.c_str());
+        return false;
+    }
+
+    char date[32];
+    const std::time_t now = std::time(nullptr);
+    std::tm utc{};
+    ::gmtime_r(&now, &utc);
+    std::strftime(date, sizeof date, "%Y-%m-%dT%H:%M:%SZ", &utc);
+    utsname os{};
+    ::uname(&os);
+    const RunMetrics& m = run.metrics;
+    const auto events = static_cast<double>(run.events);
+
+    std::fprintf(out, "{\n  \"schema\": 1,\n  \"date\": \"%s\",\n", date);
+    std::fprintf(out, "  \"build\": {\"commit\": \"%s\", \"dirty\": %s, \"type\": \"%s\", \"compiler\": \"%s\"},\n",
+                 build_commit, build_dirty ? "true" : "false", build_type, json_escape(__VERSION__).c_str());
+    std::fprintf(out, "  \"machine\": {\"cpu\": \"%s\", \"cores\": %ld, \"memory_bytes\": %lld, \"os\": \"%s %s\"},\n",
+                 json_escape(cpu_model()).c_str(), ::sysconf(_SC_NPROCESSORS_ONLN),
+                 static_cast<long long>(::sysconf(_SC_PHYS_PAGES)) * ::sysconf(_SC_PAGESIZE), os.sysname, os.release);
+    std::fprintf(out, "  \"input\": {\"path\": \"%s\", \"bytes\": %zu, \"fingerprint\": \"%016" PRIx64 "\"},\n",
+                 json_escape(args.file).c_str(), input.size(), fingerprint(input));
+    std::fprintf(out, "  \"run\": {\"symbols\": \"%s\", \"capacity\": %zu, \"check_invariants_every\": %" PRIu64 "},\n",
+                 json_escape(symbols_mode(args)).c_str(), args.capacity, args.check_invariants_every);
+    std::fprintf(out,
+                 "  \"result\": {\"events\": %" PRIu64 ", \"messages\": %" PRIu64 ", \"rejected\": %" PRIu64
+                 ", \"digest\": \"%016" PRIx64 "\", \"books\": %zu, \"books_not_empty\": %zu, "
+                 "\"peak_live_orders\": %zu, \"succeeded\": %s},\n",
+                 run.events, run.messages, run.rejected, run.digest, run.books, run.books_not_empty,
+                 run.peak_live_orders, run.succeeded ? "true" : "false");
+    std::fprintf(out,
+                 "  \"time\": {\"wall_s\": %.3f, \"user_s\": %.3f, \"sys_s\": %.3f, \"cpu_s\": %.3f, "
+                 "\"events_per_s\": %.0f, \"ns_per_event\": %.2f},\n",
+                 m.wall_s, m.user_s, m.sys_s, m.user_s + m.sys_s, ratio(events, m.wall_s), ratio(m.wall_s * 1e9, events));
+    std::fprintf(out,
+                 "  \"memory\": {\"allocations\": %" PRIu64 ", \"allocations_per_event\": %.4f, "
+                 "\"peak_rss_bytes\": %" PRIu64 ", \"peak_footprint_bytes\": %" PRIu64 ", \"major_faults\": %" PRIu64 "},\n",
+                 m.allocations, ratio(static_cast<double>(m.allocations), events), m.peak_rss, m.peak_footprint,
+                 m.major_faults);
+    if (m.latency == nullptr) {
+        std::fprintf(out, "  \"latency\": null\n}\n");
+    } else {
+        const LatencyHistogram& h = *m.latency;
+        std::fprintf(out,
+                     "  \"latency\": {\"batch_events\": %" PRIu64 ", \"batches\": %" PRIu64 ", \"timer_tick_ns\": %.2f, "
+                     "\"ns_per_event\": {\"p50\": %" PRIu64 ", \"p90\": %" PRIu64 ", \"p99\": %" PRIu64
+                     ", \"p99_9\": %" PRIu64 ", \"max\": %" PRIu64 "}}\n}\n",
+                     m.latency_batch, h.count(), timer_tick_ns(), h.percentile(0.5), h.percentile(0.9),
+                     h.percentile(0.99), h.percentile(0.999), h.max());
+    }
+    return std::fclose(out) == 0;
+}
+
+// The options both replays share, with --latency wired to `latency`.
+ReplayOptions replay_options(const ReplayArgs& args, Timestamp midnight, LatencyHistogram& latency) noexcept
+{
+    ReplayOptions options{.check_invariants_every = args.check_invariants_every, .session_midnight = midnight};
+    if (args.latency_batch != 0) {
+        options.latency = &latency;
+        options.latency_batch = args.latency_batch;
+    }
+    return options;
+}
+
 int replay(const ReplayArgs& args)
 {
     MappedFile file;
@@ -187,10 +458,11 @@ int replay(const ReplayArgs& args)
     ItchSource source{file.bytes(), config, registry};
     MarketBook book{0, args.capacity};  // the registry's first id: ItchSource registers the only instrument
 
-    const auto start = std::chrono::steady_clock::now();
-    const ReplayReport report = MarketReplay::run(
-        source, book, {.check_invariants_every = args.check_invariants_every, .session_midnight = midnight});
-    const std::chrono::duration<double> elapsed = std::chrono::steady_clock::now() - start;
+    LatencyHistogram latency;
+    const ReplayOptions options = replay_options(args, midnight, latency);
+    RunRecord run;
+    const ReplayReport report =
+        measured([&] { return MarketReplay::run(source, book, options); }, run.metrics);
 
     const ItchSourceStatistics& stats = source.statistics();
     std::printf("\nSource\n");
@@ -217,12 +489,22 @@ int replay(const ReplayArgs& args)
     const bool invariants =
         print_final_book(book, report, args.depth, source.instrument().price_scale, midnight);
 
-    const double seconds = elapsed.count();
-    std::printf("Elapsed           %.1f ms, %.0f events/s, %.0f messages/s, %.1f MB/s\n", seconds * 1e3,
-                static_cast<double>(report.events) / seconds, static_cast<double>(stats.messages) / seconds,
-                static_cast<double>(file.bytes().size()) / 1e6 / seconds);
+    run.events = report.events;
+    run.messages = stats.messages;
+    run.rejected = report.rejected();
+    run.digest = book.digest();
+    run.books = 1;
+    run.books_not_empty = book.order_count() != 0;
+    run.peak_live_orders = book.peak_order_count();
+    run.succeeded = report.succeeded() && invariants;
+    run.metrics.latency = options.latency;
+    run.metrics.latency_batch = options.latency_batch;
+    print_metrics(run, file.bytes().size());
 
-    return report.succeeded() && invariants ? 0 : 1;
+    if (!args.json.empty() && !write_json(args, file.bytes(), run)) {
+        return 2;
+    }
+    return run.succeeded ? 0 : 1;
 }
 
 // The NUL-padded native symbol without its padding.
@@ -268,10 +550,11 @@ int replay_books(const ReplayArgs& args)
     OrderPool pool{args.capacity};
     MarketBooks books{registry, pool};
 
-    const auto start = std::chrono::steady_clock::now();
-    const BooksReplayReport report = MarketReplay::run(
-        source, books, {.check_invariants_every = args.check_invariants_every, .session_midnight = midnight});
-    const std::chrono::duration<double> elapsed = std::chrono::steady_clock::now() - start;
+    LatencyHistogram latency;
+    const ReplayOptions options = replay_options(args, midnight, latency);
+    RunRecord run;
+    const BooksReplayReport report =
+        measured([&] { return MarketReplay::run(source, books, options); }, run.metrics);
     const ReplayReport& total = report.total;
 
     const ItchSourceStatistics& stats = source.statistics();
@@ -387,12 +670,22 @@ int replay_books(const ReplayArgs& args)
     const bool invariants = structure && crossed.empty();
     std::printf("Digest (combined) %016" PRIx64 "\n", books.digest());
 
-    const double seconds = elapsed.count();
-    std::printf("Elapsed           %.2f s, %.0f events/s, %.0f messages/s, %.1f MB/s\n", seconds,
-                static_cast<double>(total.events) / seconds, static_cast<double>(stats.messages) / seconds,
-                static_cast<double>(file.bytes().size()) / 1e6 / seconds);
+    run.events = total.events;
+    run.messages = stats.messages;
+    run.rejected = total.rejected();
+    run.digest = books.digest();
+    run.books = books.size();
+    run.books_not_empty = non_empty;
+    run.peak_live_orders = report.peak_live_orders;
+    run.succeeded = total.succeeded() && invariants;
+    run.metrics.latency = options.latency;
+    run.metrics.latency_batch = options.latency_batch;
+    print_metrics(run, file.bytes().size());
 
-    return total.succeeded() && invariants ? 0 : 1;
+    if (!args.json.empty() && !write_json(args, file.bytes(), run)) {
+        return 2;
+    }
+    return run.succeeded ? 0 : 1;
 }
 
 void print_strategy(const ImbalanceTakerStats& stats)

@@ -134,6 +134,10 @@ bool parse_replay_args(std::span<const std::string_view> args, ReplayArgs& out, 
             parsed.all_symbols = true;
             continue;
         }
+        if (!backtest && arg == "--latency") {
+            parsed.latency_batch = parsed.latency_batch != 0 ? parsed.latency_batch : default_latency_batch;
+            continue;
+        }
 
         if (i + 1 == args.size()) {
             error = std::string{arg} + " needs a value";
@@ -157,6 +161,11 @@ bool parse_replay_args(std::span<const std::string_view> args, ReplayArgs& out, 
             ok = parse_number(value, parsed.check_invariants_every);
         } else if (arg == "--capacity") {
             ok = has_capacity = parse_number(value, parsed.capacity) && parsed.capacity > 0;
+        } else if (!backtest && arg == "--latency-batch") {
+            ok = parse_number(value, parsed.latency_batch) && parsed.latency_batch > 0;
+        } else if (!backtest && arg == "--json") {
+            parsed.json = value;
+            ok = !value.empty();
         } else if (backtest && arg == "--order-latency-us") {
             ok = parse_number(value, b.order_latency_us) && b.order_latency_us <= max_value;
         } else if (backtest && arg == "--report-latency-us") {

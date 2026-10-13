@@ -12,6 +12,8 @@
 
 namespace simulator {
 
+class LatencyHistogram;
+
 enum class ReplayFailure : std::uint8_t {
     None,
     SourceError,          // the source returned Error
@@ -28,6 +30,12 @@ struct ReplayOptions
     // session_midnight_ns() of the session: decides RTH (in_rth), where a
     // crossed book is a violation.
     Timestamp session_midnight{0};
+
+    // When set, after every `latency_batch` events read (applied or not) the
+    // batch's mean ns per event, by steady_clock, goes into it; a partial last
+    // batch is dropped. Unset: the loop reads no clock.
+    LatencyHistogram* latency{nullptr};
+    std::uint64_t latency_batch{1024};
 };
 
 struct ReplayReport

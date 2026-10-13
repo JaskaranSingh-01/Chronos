@@ -1,6 +1,9 @@
 #include "simulator/market/market_replay.hpp"
 
 #include <algorithm>
+#include <chrono>
+
+#include "simulator/metrics/latency_histogram.hpp"
 
 namespace simulator {
 
@@ -8,12 +11,16 @@ namespace {
 
 // The loop both run()s share. `route(event)` gives the event's book, nullptr
 // for none (counted as WrongSymbol); `count(event, result)` sees every result.
-// On return `event` is the last event read.
-template <class Route, class Count>
-void replay(MarketEventSource& source, const ReplayOptions& options, ReplayReport& report,
-            MarketEvent& event, Route&& route, Count&& count) noexcept
+// On return `event` is the last event read. Timed: options.latency is set.
+template <bool Timed, class Route, class Count>
+void replay_loop(MarketEventSource& source, const ReplayOptions& options, ReplayReport& report,
+                 MarketEvent& event, Route& route, Count& count) noexcept
 {
+    using clock = std::chrono::steady_clock;
+
     std::uint64_t until_check = options.check_invariants_every;
+    std::uint64_t until_sample = options.latency_batch;
+    clock::time_point batch_start = Timed ? clock::now() : clock::time_point{};
 
     auto fail = [&](ReplayFailure failure, std::string_view message) {
         report.failure = failure;
@@ -48,6 +55,16 @@ void replay(MarketEventSource& source, const ReplayOptions& options, ReplayRepor
         ++report.by_result[static_cast<std::size_t>(applied)];
         count(event, applied);
 
+        if constexpr (Timed) {
+            if (--until_sample == 0) {
+                const clock::time_point now = clock::now();
+                const auto batch_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(now - batch_start);
+                options.latency->record(static_cast<std::uint64_t>(batch_ns.count()) / options.latency_batch);
+                batch_start = now;
+                until_sample = options.latency_batch;
+            }
+        }
+
         if (applied != ApplyResult::Applied || until_check == 0 || --until_check != 0) {
             continue;
         }
@@ -59,6 +76,18 @@ void replay(MarketEventSource& source, const ReplayOptions& options, ReplayRepor
             fail(ReplayFailure::InvariantViolation, to_string(report.invariant_error));
             break;
         }
+    }
+}
+
+// One loop without a clock in it, one with.
+template <class Route, class Count>
+void replay(MarketEventSource& source, const ReplayOptions& options, ReplayReport& report,
+            MarketEvent& event, Route&& route, Count&& count) noexcept
+{
+    if (options.latency != nullptr && options.latency_batch != 0) {
+        replay_loop<true>(source, options, report, event, route, count);
+    } else {
+        replay_loop<false>(source, options, report, event, route, count);
     }
 }
 

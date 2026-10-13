@@ -1,0 +1,45 @@
+Chronos replay
+  file             data/itch/12302019.NASDAQ_ITCH50.bin (8251407909 bytes)
+  symbols          all
+  session          2019-12-30, UTC-05:00
+  truncated tail   fatal
+  invariant checks at the end only
+  capacity         4194304 orders, shared by every book
+
+Source
+  messages 268744780: 0 other symbols, 4275335 unused types, 264460539 events
+  truncated tail   no
+
+Events 264460539, 04:00:00.000724386 to 20:00:00.097129306 local
+  Add              118631456
+  Modify           0
+  Replace          21639067
+  Cancel           2787676
+  Delete           114360997
+  Execute          5822741
+  Clear            0
+  Trade            1218602
+
+Applied 264460539, rejected 0
+
+Books 8906: 8906 empty at the end, 0 not empty
+Per symbol: the 10 with most events, then others with rejections or orders left
+  symbol         events      applied   rejected  peak orders  orders left
+  QQQ           2376241      2376241          0         8847            0
+  SPY           2138438      2138438          0         1949            0
+  IWM           1940269      1940269          0          434            0
+  TQQQ          1625845      1625845          0         4348            0
+  AAPL          1519357      1519357          0        27110            0
+  AMD           1512168      1512168          0        11614            0
+  MSFT          1220969      1220969          0        23005            0
+  URTY          1125016      1125016          0          133            0
+  TNA            947612       947612          0          655            0
+  XLK            943185       943185          0          522            0
+
+Live orders       peak 1924078, 0 at the end, all books together (capacity 4194304)
+Invariants at end: ok, all 8906 books
+                   0 periodic checks passed
+Digest (combined) 6897f945bcef75c2
+Elapsed           222.20 s wall, 210.86 s CPU (user 205.62, sys 5.25); 1190206 events/s, 840.2 ns/event, 1209488 messages/s, 37.1 MB/s
+Memory            184193726 allocations (0.6965 per event), peak RSS 1805.7 MB, peak footprint 571.4 MB, 499964 major faults
+Latency           ns/event over 258262 batches of 1024 events (timer tick 41.0 ns): p50 831, p90 1151, p99 1727, p99.9 4607, max 52536

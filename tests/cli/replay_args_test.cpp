@@ -261,6 +261,33 @@ TEST(ReplayArgsTest, BacktestTakesOnlyOneSymbol)
     }
 }
 
+TEST(ReplayArgsTest, ParsesLatencyAndJsonForReplayOnly)
+{
+    const Parsed off = parse({"replay", "day.bin", "--all", "--date", "2019-12-30"});
+    ASSERT_TRUE(off.ok) << off.error;
+    EXPECT_EQ(off.args.latency_batch, 0u);
+    EXPECT_TRUE(off.args.json.empty());
+
+    const Parsed on = parse({"replay", "day.bin", "--all", "--date", "2019-12-30", "--latency", "--json", "out.json"});
+    ASSERT_TRUE(on.ok) << on.error;
+    EXPECT_EQ(on.args.latency_batch, 1'024u);
+    EXPECT_EQ(on.args.json, "out.json");
+
+    // --latency-batch implies --latency, in either order.
+    for (const std::vector<std::string_view>& argv :
+         {std::vector<std::string_view>{"replay", "day.bin", "--all", "--date", "2019-12-30", "--latency-batch", "64"},
+          std::vector<std::string_view>{"replay", "day.bin", "--all", "--date", "2019-12-30", "--latency-batch", "64",
+                                        "--latency"}}) {
+        const Parsed p = parse(argv);
+        ASSERT_TRUE(p.ok) << p.error;
+        EXPECT_EQ(p.args.latency_batch, 64u);
+    }
+
+    EXPECT_FALSE(parse({"replay", "day.bin", "--all", "--date", "2019-12-30", "--latency-batch", "0"}).ok);
+    EXPECT_FALSE(parse({"backtest", "day.bin", "--symbol", "SPY", "--date", "2019-12-30", "--latency"}).ok);
+    EXPECT_FALSE(parse({"backtest", "day.bin", "--symbol", "SPY", "--date", "2019-12-30", "--json", "a.json"}).ok);
+}
+
 TEST(ReplayArgsTest, ParsesDatesAndOffsets)
 {
     year_month_day date{};

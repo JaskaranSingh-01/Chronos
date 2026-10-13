@@ -1,10 +1,11 @@
 #pragma once
 
+#include <cstddef>
 #include <functional>
 #include <map>
-#include <unordered_map>
 
 #include "simulator/orders/order.hpp"
+#include "simulator/orders/order_index.hpp"
 #include "simulator/orders/price_level.hpp"
 #include "simulator/types/order_id.hpp"
 namespace simulator
@@ -19,11 +20,15 @@ namespace simulator
     private:
         BidLevels bids_;
         AskLevels asks_;
-        std::unordered_map<OrderId, Order *> orders_;
+        OrderIndex orders_;
 
         bool unlink(Order &order) noexcept;
 
     public:
+        // Room in the order index for `capacity` orders before it grows: a
+        // book that owns its OrderPool passes the pool's capacity.
+        explicit OrderBook(std::size_t capacity = 0) : orders_(capacity) {}
+
         bool add(Order &order) noexcept;        
         bool remove(OrderId id) noexcept;
         bool cancel(OrderId id) noexcept;

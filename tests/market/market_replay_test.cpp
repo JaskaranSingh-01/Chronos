@@ -9,6 +9,7 @@
 #include "simulator/market/market_books.hpp"
 #include "simulator/market/market_replay.hpp"
 #include "simulator/market/vector_source.hpp"
+#include "simulator/metrics/latency_histogram.hpp"
 
 namespace simulator {
 namespace {
@@ -275,6 +276,29 @@ TEST(MarketReplayTest, SameInputGivesSameReportAndDigest)
     EXPECT_EQ(first_book.digest(), second_book.digest());
 }
 
+TEST(MarketReplayTest, LatencyRecordsOneSamplePerFullBatchAndChangesNothingElse)
+{
+    std::vector<MarketEvent> input;
+    for (OrderId id = 1; id <= 10; ++id) {
+        input.push_back(add(static_cast<Timestamp>(id), id, Side::Buy, 100, 10));
+    }
+    input.push_back(add(11, 1, Side::Buy, 100, 10));  // rejected, still an event of its batch
+
+    VectorSource plain_source{input};
+    VectorSource timed_source{input};
+    MarketBook plain_book{kSymbol, 16};
+    MarketBook timed_book{kSymbol, 16};
+    LatencyHistogram latency;
+
+    const ReplayReport plain = MarketReplay::run(plain_source, plain_book, {});
+    const ReplayReport timed =
+        MarketReplay::run(timed_source, timed_book, {.latency = &latency, .latency_batch = 4});
+
+    EXPECT_EQ(latency.count(), 2u);  // events 1-4 and 5-8; 9-11 are a partial batch
+    EXPECT_EQ(timed, plain);
+    EXPECT_EQ(timed_book.digest(), plain_book.digest());
+}
+
 // ---------------------------------------------------------------------------
 // Many books on one shared pool
 // ---------------------------------------------------------------------------
@@ -423,6 +447,24 @@ TEST(MarketReplayBooksTest, InvariantsCompareTheSharedPoolWithAllBooks)
     ASSERT_EQ(stray.apply(on(7, add(1, 1, Side::Buy, 100, 10))), ApplyResult::Applied);
     EXPECT_FALSE(books.check_invariants(error, failed));
     EXPECT_EQ(error, InvariantError::PoolCountMismatch);
+}
+
+TEST(MarketReplayBooksTest, LatencyRecordsOneSamplePerFullBatch)
+{
+    const InstrumentRegistry registry = registry_of(2);
+    std::vector<MarketEvent> input;
+    for (OrderId id = 1; id <= 9; ++id) {
+        input.push_back(on(static_cast<SymbolId>(id % 2), add(static_cast<Timestamp>(id), id, Side::Sell, 100, 10)));
+    }
+
+    OrderPool pool{16};
+    MarketBooks books{registry, pool};
+    VectorSource source{input};
+    LatencyHistogram latency;
+    const BooksReplayReport report = MarketReplay::run(source, books, {.latency = &latency, .latency_batch = 3});
+
+    EXPECT_EQ(report.total.applied(), 9u);
+    EXPECT_EQ(latency.count(), 3u);
 }
 
 TEST(MarketReplayBooksTest, CombinedDigestIsStableAndChangesWithAnyBook)

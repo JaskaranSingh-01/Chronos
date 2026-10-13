@@ -37,6 +37,7 @@ add_library(simulator_lib
     src/orders/order_book.cpp
     src/orders/order.cpp
     src/orders/order_pool.cpp
+    src/orders/order_index.cpp
     src/matching/matching_engine.cpp
     src/simulator/simulator.cpp
     src/replay/replay_engine.cpp
@@ -71,9 +72,25 @@ target_compile_options(simulator_lib PRIVATE ${CHRONOS_WARNINGS})
 add_executable(simulator
 
     app/main.cpp
+    app/alloc_counter.cpp
 )
 
 target_compile_options(simulator PRIVATE ${CHRONOS_WARNINGS})
+
+# generated/build_info.hpp: the commit, dirty flag and build type for
+# `replay --json`. Checked on every build, rewritten only when it changes.
+add_custom_target(build_info
+    COMMAND ${CMAKE_COMMAND} -DSOURCE_DIR=${PROJECT_SOURCE_DIR}
+            -DOUTPUT=${PROJECT_BINARY_DIR}/generated/build_info.hpp
+            -DBUILD_TYPE=${CMAKE_BUILD_TYPE}
+            -P ${PROJECT_SOURCE_DIR}/cmake/build_info.cmake
+    BYPRODUCTS ${PROJECT_BINARY_DIR}/generated/build_info.hpp
+    VERBATIM
+)
+
+add_dependencies(simulator build_info)
+
+target_include_directories(simulator PRIVATE ${PROJECT_BINARY_DIR}/generated)
 
 target_link_libraries(simulator
     PRIVATE
@@ -109,6 +126,7 @@ add_executable(simulator_tests
     tests/order_book_test.cpp
     tests/matching_engine_test.cpp
     tests/order_pool_test.cpp
+    tests/order_index_test.cpp
     tests/order_pool_integration_test.cpp
     tests/simulator/simulator_test.cpp
     tests/simulator/simulator_matching_test.cpp
@@ -141,6 +159,7 @@ add_executable(simulator_tests
     tests/engine/backtest_determinism_test.cpp
     tests/strategies/imbalance_taker_test.cpp
     tests/strategies/market_maker_test.cpp
+    tests/metrics/latency_histogram_test.cpp
 )
 
 target_compile_definitions(simulator_tests
@@ -164,3 +183,54 @@ target_include_directories(simulator_tests
 include(GoogleTest)
 
 gtest_discover_tests(simulator_tests)
+
+# Its own executable: the counting operator new must stay out of simulator_tests.
+add_executable(alloc_counter_test
+
+    tests/alloc_counter_test.cpp
+    app/alloc_counter.cpp
+)
+
+target_compile_options(alloc_counter_test PRIVATE ${CHRONOS_WARNINGS})
+
+target_include_directories(alloc_counter_test PRIVATE ${PROJECT_SOURCE_DIR}/app)
+
+target_link_libraries(alloc_counter_test PRIVATE GTest::gtest_main)
+
+gtest_discover_tests(alloc_counter_test)
+
+
+# -------------------------
+# Benchmarks: -DCHRONOS_BENCH=ON (bench/run.sh)
+# -------------------------
+
+option(CHRONOS_BENCH "Build the simulator_bench Google Benchmark target" OFF)
+
+if(CHRONOS_BENCH)
+    set(BENCHMARK_ENABLE_TESTING OFF CACHE BOOL "" FORCE)
+    set(BENCHMARK_ENABLE_INSTALL OFF CACHE BOOL "" FORCE)
+    set(BENCHMARK_ENABLE_WERROR OFF CACHE BOOL "" FORCE)
+
+    FetchContent_Declare(
+        benchmark
+        URL https://github.com/google/benchmark/archive/refs/tags/v1.9.1.zip
+    )
+
+    FetchContent_MakeAvailable(benchmark)
+
+    add_executable(simulator_bench
+
+        bench/simulator_bench.cpp
+    )
+
+    target_compile_options(simulator_bench PRIVATE ${CHRONOS_WARNINGS})
+
+    # itch/itch_test_builder.hpp builds the decode benchmark's input.
+    target_include_directories(simulator_bench PRIVATE ${PROJECT_SOURCE_DIR}/tests)
+
+    target_link_libraries(simulator_bench
+        PRIVATE
+            simulator_lib
+            benchmark::benchmark_main
+    )
+endif()

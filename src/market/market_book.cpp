@@ -6,7 +6,7 @@
 namespace simulator {
 
 MarketBook::MarketBook(SymbolId symbol, std::size_t order_capacity)
-    : symbol_(symbol), owned_pool_(std::in_place, order_capacity), pool_(&*owned_pool_) {}
+    : symbol_(symbol), owned_pool_(std::in_place, order_capacity), pool_(&*owned_pool_), book_(order_capacity) {}
 
 MarketBook::MarketBook(SymbolId symbol, OrderPool& pool) noexcept
     : symbol_(symbol), pool_(&pool) {}

@@ -14,6 +14,7 @@ inline constexpr std::string_view usage =
     "usage: simulator replay <itch-file> (--symbol AAPL | --symbols AAPL,MSFT | --all) --date 2019-12-30\n"
     "                        [--utc-offset -05:00] [--allow-truncated-tail] [--depth 5]\n"
     "                        [--check-invariants N] [--capacity N]\n"
+    "                        [--latency] [--latency-batch 1024] [--json out.json]\n"
     "       simulator backtest <itch-file> --symbol AAPL --date 2019-12-30 [replay options]\n"
     "                        [--strategy imbalance|mm] [--order-latency-us 50] [--report-latency-us 50]\n"
     "                        [--max-position 500] [--max-open-orders N] [--taker-fee-ticks 0]\n"
@@ -28,6 +29,10 @@ inline constexpr std::string_view usage =
     "  --check-invariants N    check the book every N applied events (default 0 = only at the end)\n"
     "  --capacity N            order slots reserved for the book (default 1048576); with --symbols\n"
     "                          or --all, shared by every book (default 4194304)\n"
+    "  --latency               time every batch of 1024 events; print ns/event percentiles\n"
+    "                          over the batches\n"
+    "  --latency-batch N       events per timed batch (implies --latency)\n"
+    "  --json PATH             also write the run's results, metrics, build and input as JSON\n"
     "\n"
     "backtest runs a toy strategy against the replayed book, which our orders never change:\n"
     "  --strategy S            imbalance (default): IOCs on top-of-book imbalance;\n"
@@ -78,6 +83,10 @@ constexpr std::size_t default_max_open_orders(StrategyKind strategy) noexcept
 // all symbols together. A full pool rejects Adds as PoolExhausted.
 inline constexpr std::size_t default_books_capacity = 4'194'304;
 
+// Events per timed batch for --latency: a batch takes ~0.5 ms, far above the
+// 41.67 ns tick of steady_clock on Apple silicon.
+inline constexpr std::uint64_t default_latency_batch = 1'024;
+
 struct ReplayArgs
 {
     CliCommand command{CliCommand::Replay};
@@ -91,6 +100,8 @@ struct ReplayArgs
     std::size_t depth{5};
     std::uint64_t check_invariants_every{0};
     std::size_t capacity{1'048'576};
+    std::uint64_t latency_batch{0};  // replay --latency: events per timed batch; 0 = off
+    std::string_view json;           // replay --json: where to write the run as JSON
     BacktestArgs backtest{};
 };
 
