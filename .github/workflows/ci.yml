@@ -1,0 +1,57 @@
+# CI (M4.02): build and ctest on every push and pull request.
+# - Ubuntu (gcc, clang) and macOS (Apple clang), each in Release and Debug.
+# - Release also builds simulator_bench (CHRONOS_BENCH=ON); it is not run.
+# - Debug runs under sanitizers, and any report fails the test. gcc: ASan+UBSan.
+#   clang on Linux: UBSan only, as its static ASan runtime defines the operator
+#   new that app/alloc_counter.cpp replaces. macOS: UBSan only, as ASan hangs at
+#   startup on the developer's macOS 27 and is untried with that operator new.
+# - The real-data tests skip: CHRONOS_ITCH_FILE is not set.
+# - format: non-blocking until the formatting-only commit (M4.03 follow-up).
+name: CI
+
+on: [push, pull_request]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {name: linux-gcc-release,          os: ubuntu-latest, cxx: g++,     build_type: Release, sanitize: "OFF",     bench: "ON"}
+          - {name: linux-gcc-debug-asan-ubsan, os: ubuntu-latest, cxx: g++,     build_type: Debug,   sanitize: "ON",      bench: "OFF"}
+          - {name: linux-clang-release,        os: ubuntu-latest, cxx: clang++, build_type: Release, sanitize: "OFF",     bench: "ON"}
+          - {name: linux-clang-debug-ubsan,    os: ubuntu-latest, cxx: clang++, build_type: Debug,   sanitize: undefined, bench: "OFF"}
+          - {name: macos-release,              os: macos-latest,  cxx: clang++, build_type: Release, sanitize: "OFF",     bench: "ON"}
+          - {name: macos-debug-ubsan,          os: macos-latest,  cxx: clang++, build_type: Debug,   sanitize: undefined, bench: "OFF"}
+    steps:
+      - uses: actions/checkout@v5
+      - name: Let ASan map its shadow memory (needs 28-bit mmap randomisation)
+        if: matrix.sanitize == 'ON'
+        run: sudo sysctl -w vm.mmap_rnd_bits=28
+      - name: Configure
+        run: >-
+          cmake -S . -B build
+          -DCMAKE_BUILD_TYPE=${{ matrix.build_type }}
+          -DCMAKE_CXX_COMPILER=${{ matrix.cxx }}
+          -DCHRONOS_SANITIZE=${{ matrix.sanitize }}
+          -DCHRONOS_BENCH=${{ matrix.bench }}
+      - name: Build
+        run: cmake --build build --parallel 4
+      - name: Test
+        run: ctest --test-dir build --output-on-failure --no-tests=error
+
+  format:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+      - run: pipx install clang-format==20.1.8
+      - name: clang-format (non-blocking until the formatting-only commit; then delete continue-on-error)
+        run: bash scripts/check-format.sh
+        continue-on-error: true

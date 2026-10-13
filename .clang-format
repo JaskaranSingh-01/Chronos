@@ -1,0 +1,27 @@
+# Chronos C++ style (M4.03), measured against the code. Check with
+# scripts/check-format.sh; rewrite a file with clang-format -i FILE. Use the
+# clang-format version .github/workflows/ci.yml pins: other versions differ.
+BasedOnStyle: LLVM
+Standard: c++20
+ColumnLimit: 120
+IndentWidth: 4
+AccessModifierOffset: -4
+PointerAlignment: Left
+BreakBeforeBraces: Custom
+BraceWrapping:
+  AfterClass: true
+  AfterFunction: true
+  AfterStruct: true
+  AfterUnion: true
+  SplitEmptyFunction: false
+  SplitEmptyRecord: false
+AlignOperands: DontAlign
+AlignTrailingComments:
+  Kind: Leave
+AllowShortEnumsOnASingleLine: false
+AllowShortFunctionsOnASingleLine: Empty
+BreakTemplateDeclarations: Yes
+MaxEmptyLinesToKeep: 2
+PackConstructorInitializers: NextLineOnly
+ReflowComments: false
+SpacesBeforeTrailingComments: 2

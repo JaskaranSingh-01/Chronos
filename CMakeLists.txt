@@ -17,11 +17,18 @@ if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
     set(CMAKE_BUILD_TYPE RelWithDebInfo CACHE STRING "" FORCE)
 endif()
 
-option(CHRONOS_SANITIZE "Build with AddressSanitizer + UBSan" OFF)
+# OFF, ON (= address,undefined) or a -fsanitize= list such as undefined, the
+# choice where ASan does not work (it hangs at startup on macOS 27 with Apple
+# clang 17). Any report aborts, so a passing test is a clean one.
+set(CHRONOS_SANITIZE OFF CACHE STRING "OFF, ON (= address,undefined) or a -fsanitize= list")
 
 if(CHRONOS_SANITIZE)
-    add_compile_options(-fsanitize=address,undefined -fno-omit-frame-pointer)
-    add_link_options(-fsanitize=address,undefined)
+    set(chronos_sanitizers "${CHRONOS_SANITIZE}")
+    if("${CHRONOS_SANITIZE}")  # quoted: true only for ON, YES, TRUE, Y or a non-zero number
+        set(chronos_sanitizers address,undefined)
+    endif()
+    add_compile_options(-fsanitize=${chronos_sanitizers} -fno-sanitize-recover=all -fno-omit-frame-pointer)
+    add_link_options(-fsanitize=${chronos_sanitizers})
 endif()
 
 set(CHRONOS_WARNINGS -Wall -Wextra -Wpedantic)
