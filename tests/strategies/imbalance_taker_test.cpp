@@ -42,6 +42,12 @@ struct Fixture
         ASSERT_EQ(book.apply(event), ApplyResult::Applied);
     }
 
+    void status(TradingState state)
+    {
+        ASSERT_EQ(book.apply(MarketEvent{.symbol = kSymbol, .type = MarketEventType::Status, .trading_state = state}),
+                  ApplyResult::Applied);
+    }
+
     // A market callback at `now`; returns the orders it sent.
     std::vector<OrderRequest> tick(Timestamp now)
     {
@@ -162,6 +168,22 @@ TEST(ImbalanceTakerTest, CountsRiskRejectsFillsAndExpiries)
     EXPECT_EQ(stats.expired, 1u);
     EXPECT_EQ(stats.bought, 60u);
     EXPECT_EQ(stats.sold, 0u);
+}
+
+TEST(ImbalanceTakerTest, StaysOutWhileNotTrading)
+{
+    Fixture f;
+    f.add(Side::Buy, 300);
+    f.add(Side::Sell, 100);
+
+    f.status(TradingState::Paused);
+    EXPECT_TRUE(f.tick(5'000).empty());
+    EXPECT_EQ(f.taker.stats().sent, 0u);
+
+    f.status(TradingState::Trading);
+    const std::vector<OrderRequest> sent = f.tick(5'001);  // no cooldown started while paused
+    ASSERT_EQ(sent.size(), 1u);
+    EXPECT_EQ(sent[0].side, Side::Buy);
 }
 
 } // namespace

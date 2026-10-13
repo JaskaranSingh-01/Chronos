@@ -48,7 +48,7 @@ mkdir -p "$out"
 echo "== results: $out"
 
 # replay <name> <file> [flags]: one --all replay, its log and JSON. A non-zero
-# exit is recorded, not fatal: the slice ends crossed in RTH by design.
+# exit is recorded, not fatal.
 replay() {
     local name=$1 file=$2
     shift 2

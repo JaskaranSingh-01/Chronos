@@ -24,7 +24,8 @@ enum class SourceError : std::uint8_t {
     InvalidRow,            // text (CSV, LOBSTER): wrong column count
     InvalidNumber,         // text: not a number
     NumberOutOfRange,      // text: e.g. quantity > UINT64_MAX or negative
-    InvalidEventType       // text
+    InvalidEventType,      // text
+    InvalidTradingState    // a status names an unknown trading state (ITCH H's state byte, LOBSTER 7's price)
 };
 
 // A pull-based stream of MarketEvents. Contract, checked for every source by

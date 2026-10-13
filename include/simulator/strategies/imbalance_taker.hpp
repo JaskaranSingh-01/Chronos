@@ -27,11 +27,11 @@ struct ImbalanceTakerStats
 };
 
 // A TOY that exercises the backtest path end to end; it is not a trading idea
-// and its PnL means nothing. When the best bid's size is at least threshold x
-// the best ask's, it sends a buy IOC for `clip` at the best ask; in the mirror
-// case a sell IOC at the best bid. It ignores fees, pays the spread on every
-// trade, has no fair value, and leans on the no-impact fill model (spec §11
-// Q2). MarketMaker is its passive counterpart.
+// and its PnL means nothing. While the book is Trading: when the best bid's
+// size is at least threshold x the best ask's, it sends a buy IOC for `clip`
+// at the best ask; in the mirror case a sell IOC at the best bid. It ignores
+// fees, pays the spread on every trade, has no fair value, and leans on the
+// no-impact fill model (spec §11 Q2). MarketMaker is its passive counterpart.
 class ImbalanceTaker
 {
 private:
@@ -58,7 +58,8 @@ public:
     {
         LevelInfo bid;
         LevelInfo ask;
-        if (ctx.now() < ready_at_ || !ctx.book.best(Side::Buy, bid) || !ctx.book.best(Side::Sell, ask)) {
+        if (ctx.book.trading_state() != TradingState::Trading || ctx.now() < ready_at_ ||
+            !ctx.book.best(Side::Buy, bid) || !ctx.book.best(Side::Sell, ask)) {
             return;
         }
 

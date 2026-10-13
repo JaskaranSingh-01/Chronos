@@ -65,7 +65,7 @@ inline std::span<const std::byte> as_bytes(std::string_view text) noexcept
 inline std::string_view type_name(MarketEventType type) noexcept
 {
     constexpr std::array<std::string_view, market_event_type_count> names{
-        "Add", "Modify", "Replace", "Cancel", "Delete", "Execute", "Clear", "Trade"};
+        "Add", "Modify", "Replace", "Cancel", "Delete", "Execute", "Clear", "Trade", "Status"};
     const auto index = static_cast<std::size_t>(type);
     return index < names.size() ? names[index] : "unknown type";
 }
@@ -191,6 +191,7 @@ inline Violation check_references(MarketEventSource& source)
             return std::nullopt;
 
         case MarketEventType::Trade:
+        case MarketEventType::Status:
             return std::nullopt;
         }
         return at(source) + "unknown event type " +
@@ -201,6 +202,8 @@ inline Violation check_references(MarketEventSource& source)
 // The symbol is registered before its first event. Required prices and sizes
 // are > 0, and Add, Modify and Replace prices are multiples of tick_size.
 // tick_size 0 means unspecified (US equities step by price), so it is skipped.
+// A Status names a known trading state and no order, price or size; every
+// other type leaves trading_state at Trading.
 inline Violation check_scales(MarketEventSource& source, const InstrumentRegistry& registry)
 {
     return for_each_event(source, [&](const MarketEvent& event) -> Violation {
@@ -217,6 +220,13 @@ inline Violation check_scales(MarketEventSource& source, const InstrumentRegistr
         const bool needs_size = needs_price ||
             type == MarketEventType::Cancel || type == MarketEventType::Execute;
 
+        if (type == MarketEventType::Status
+                ? event.order_id != 0 || event.new_order_id != 0 || event.price.ticks != 0 ||
+                      !event.quantity.is_zero() || event.trading_state > TradingState::QuotationOnly
+                : event.trading_state != TradingState::Trading) {
+            return at(source) + std::string{type_name(type)} + " with trading state " +
+                std::to_string(static_cast<int>(event.trading_state)) + " or order fields";
+        }
         if (needs_price && event.price.ticks <= 0) {
             return at(source) + std::string{type_name(type)} + " price " +
                 std::to_string(event.price.ticks) + " is not > 0";
@@ -238,7 +248,7 @@ inline bool same_event(const MarketEvent& a, const MarketEvent& b) noexcept
     return a.timestamp == b.timestamp && a.order_id == b.order_id &&
         a.new_order_id == b.new_order_id && a.price == b.price &&
         a.quantity == b.quantity && a.symbol == b.symbol &&
-        a.type == b.type && a.side == b.side;
+        a.type == b.type && a.side == b.side && a.trading_state == b.trading_state;
 }
 
 // Two fresh sources over the same bytes and registry give identical events.

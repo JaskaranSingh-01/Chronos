@@ -125,6 +125,20 @@ public:
         return end(start);
     }
 
+    // 'H' Stock Trading Action (25 bytes). state: 'H' halted, 'P' paused,
+    // 'Q' quotation only, 'T' trading. The reserved byte is ' ', as in real files.
+    ItchBuilder& trading_action(
+        std::uint16_t locate, std::uint64_t ts, std::string_view stock, char state,
+        std::string_view reason = "")
+    {
+        const auto start = begin('H', locate, ts);
+        put_alpha(stock, 8);
+        put_char(state);
+        put_char(' ');  // reserved
+        put_alpha(reason, 4);
+        return end(start);
+    }
+
     // 'S' System Event (12 bytes). Chronos doesn't decode it; tests use it as
     // a real message the replay reader must skip.
     ItchBuilder& system_event(std::uint16_t locate, std::uint64_t ts, char event_code)

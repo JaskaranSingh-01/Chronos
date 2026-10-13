@@ -23,7 +23,8 @@ struct MarketMakerStats
     std::uint64_t risk_rejects{0};  // refused by it
     std::uint64_t cancels{0};       // cancels sent
     std::uint64_t fills{0};         // Fill reports
-    std::uint64_t rejects{0};       // Rejected reports (WouldCross)
+    std::uint64_t rejects{0};       // Rejected reports (WouldCross, or NotTrading for a quote in flight
+                                    // when trading stops)
     std::uint64_t bought{0};        // shares
     std::uint64_t sold{0};
 
@@ -35,8 +36,9 @@ struct MarketMakerStats
 // has no fair value, no skew and no adverse-selection defence.
 //
 // It keeps at most one post-only Day quote per side, at the best bid and ask
-// (or improve_ticks inside), whenever the book is two-sided and not locked or
-// crossed. Inventory: it does not quote a side whose next full fill would
+// (or improve_ticks inside), whenever the book is Trading, two-sided and not
+// locked or crossed. A halt, pause or quotation-only period pulls both quotes
+// at once. Inventory: it does not quote a side whose next full fill would
 // take |position| past max_position, and cancels such a quote at once.
 //
 // Requote = cancel, then replace on the ack: when a side's desired price
@@ -67,7 +69,8 @@ private:
     {
         LevelInfo bid;
         LevelInfo ask;
-        if (!ctx.book.best(Side::Buy, bid) || !ctx.book.best(Side::Sell, ask) || bid.price >= ask.price) {
+        if (ctx.book.trading_state() != TradingState::Trading || !ctx.book.best(Side::Buy, bid) ||
+            !ctx.book.best(Side::Sell, ask) || bid.price >= ask.price) {
             return false;
         }
         const std::int64_t position = ctx.portfolio.position();

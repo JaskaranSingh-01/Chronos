@@ -27,8 +27,8 @@ struct StrategyContext
 };
 
 // Spec §4.11, with the context in place of (book, gateway). on_market runs
-// only for events the book Applied (Trade included) and sees the post-event
-// book; on_report runs at delivery, after the Portfolio has the report.
+// only for events the book Applied (Trade and Status included) and sees the
+// post-event book; on_report runs at delivery, after the Portfolio has the report.
 // A strategy keeps its own state and calls the gateway only inside callbacks.
 template <class S>
 concept Strategy = requires(S& s, StrategyContext& ctx, const MarketEvent& event, const ExecutionReport& report,

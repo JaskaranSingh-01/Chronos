@@ -14,7 +14,7 @@ namespace simulator {
 // Why apply() accepted or rejected an event. Every rejection leaves the book
 // unchanged; the caller counts results by reason.
 enum class ApplyResult : std::uint8_t {
-    Applied,           // also Trade, which never touches the book
+    Applied,           // also Trade and Status, which never touch its orders
     WrongSymbol,       // event.symbol is not this book's symbol
     UnknownOrder,      // Execute/Cancel/Delete/Replace of an id not in the book
     DuplicateOrder,    // Add (or Replace's new id) already in the book
@@ -48,7 +48,7 @@ enum class InvariantError : std::uint8_t {
     SequenceNotIncreasing,  // FIFO broken: sequence must rise from head to tail
     InactiveOrderInBook,    // not Active/PartiallyFilled, or remaining == 0
     PoolCountMismatch,      // pool slots in use != order_count() (a shared pool: of all its books)
-    CrossedInRth            // best bid > best ask during regular trading hours
+    CrossedInRth            // best bid > best ask during regular trading hours, while Trading
 };
 
 // Regular trading hours, [09:30, 16:00) exchange-local; session_midnight from
@@ -77,6 +77,7 @@ class MarketBook
 {
 private:
     SymbolId symbol_;
+    TradingState trading_state_{TradingState::Trading};
     std::optional<OrderPool> owned_pool_;  // empty when the pool is shared
     OrderPool* pool_;                      // owned_pool_ or the shared one
     OrderBook book_;
@@ -103,6 +104,9 @@ public:
     ApplyResult apply(const MarketEvent& event) noexcept;
 
     SymbolId symbol() const noexcept { return symbol_; }
+
+    // Trading until a Status event says otherwise.
+    TradingState trading_state() const noexcept { return trading_state_; }
     const Order* find(OrderId id) const noexcept { return book_.find(id); }
 
     // False if the side is empty.
@@ -137,12 +141,16 @@ public:
     bool is_locked() const noexcept;   // best bid == best ask
 
     // O(orders). On failure writes the first broken invariant to `error`.
-    // A crossed book fails only when `rth` is true (see in_rth). The pool
-    // count is checked only for a pool of its own; MarketBooks checks a shared one.
+    // A crossed book fails only when `rth` is true (see in_rth) and the book is
+    // Trading: a halted, paused or quotation-only book queues orders without
+    // matching them, so it may cross. The pool count is checked only for a
+    // pool of its own; MarketBooks checks a shared one.
     bool check_invariants(InvariantError& error, bool rth = false) const noexcept;
 
     // FNV-1a over (side, price, id, remaining, sequence) in book order: bids
-    // best first, then asks. Equal for equal books; compares runs.
+    // best first, then asks. Equal for equal books; compares runs. The trading
+    // state is not part of it: it changes no order, so digests compare with
+    // runs from before Status existed.
     std::uint64_t digest() const noexcept;
 };
 

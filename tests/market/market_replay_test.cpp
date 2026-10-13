@@ -29,6 +29,11 @@ MarketEvent add(Timestamp ts, OrderId id, Side side, std::int64_t price, std::ui
     return event(ts, MarketEventType::Add, id, quantity, price, side);
 }
 
+MarketEvent status(Timestamp ts, TradingState state)
+{
+    return MarketEvent{.timestamp = ts, .symbol = kSymbol, .type = MarketEventType::Status, .trading_state = state};
+}
+
 std::uint64_t by_type(const ReplayReport& report, MarketEventType type)
 {
     return report.by_type[static_cast<std::size_t>(type)];
@@ -234,6 +239,33 @@ TEST(MarketReplayTest, CrossedBookFailsTheInvariantCheckOnlyInRth)
     EXPECT_EQ(report.failed_position, 2u);
     EXPECT_EQ(report.invariant_checks, 2u);
     EXPECT_EQ(report.events, 2u);  // the first violation stops the run
+}
+
+// Halted, the book crosses at the open and passes every check; the Trading
+// status makes the same crossed book a violation.
+TEST(MarketReplayTest, HaltedBookMayCrossInRthUntilTradingResumes)
+{
+    constexpr Timestamp midnight = 1'577'682'000'000'000'000;
+    constexpr Timestamp open = midnight + RTH_OPEN_NS;
+
+    const std::vector<MarketEvent> events{
+        status(open, TradingState::Halted), add(open, 1, Side::Buy, 101, 10), add(open, 2, Side::Sell, 100, 10),
+        status(open, TradingState::Trading)};
+    const ReplayOptions options{.check_invariants_every = 1, .session_midnight = midnight};
+
+    VectorSource source{events};
+    MarketBook book{kSymbol, 4};
+    const ReplayReport report = MarketReplay::run(source, book, options);
+
+    EXPECT_EQ(report.failure, ReplayFailure::InvariantViolation);
+    EXPECT_EQ(report.invariant_error, InvariantError::CrossedInRth);
+    EXPECT_EQ(report.failed_position, 4u);
+    EXPECT_EQ(report.invariant_checks, 4u);
+    EXPECT_EQ(by_type(report, MarketEventType::Status), 2u);
+    EXPECT_EQ(report.applied(), 4u);
+
+    EXPECT_EQ(to_string(MarketEventType::Status), "Status");
+    EXPECT_EQ(to_string(TradingState::QuotationOnly), "QuotationOnly");
 }
 
 TEST(MarketReplayTest, SameInputGivesSameReportAndDigest)

@@ -42,8 +42,9 @@ code) is not needed.
   - The peak is 1,924,078 live orders over 8,906 books. AAPL peaks at 27,110 and MSFT at 23,005.
 - Slice: `12302019.NASDAQ_ITCH50.first-256MiB.bin`, 268,435,456 bytes, fingerprint `812aade968a7dc04`.
   - 7,844,756 messages and 6,520,959 events, from 04:00 to 09:30:10, so pre-market only.
-  - It ends cut mid-message, with 6 books crossed after the open. Every slice run therefore exits 1 by design;
-    its digest `b00db289f7c388b2` is still deterministic.
+  - It ends cut mid-message, with 6 books crossed after the open. The slice runs recorded here exited 1 because
+    the RTH crossed check was not yet halt-aware (M1.32; all 6 are halted); its digest `b00db289f7c388b2` is
+    still deterministic.
 
 ## Protocol (`bench/run.sh`)
 

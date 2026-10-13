@@ -32,6 +32,11 @@ MarketEvent replace(OrderId id, OrderId new_id, std::int64_t price, std::uint64_
                        .quantity = Quantity{quantity}, .symbol = kSymbol, .type = MarketEventType::Replace};
 }
 
+MarketEvent status(TradingState state)
+{
+    return MarketEvent{.symbol = kSymbol, .type = MarketEventType::Status, .trading_state = state};
+}
+
 void expect_invariants(const MarketBook& book)
 {
     InvariantError error{InvariantError::None};
@@ -218,6 +223,29 @@ TEST(MarketBookTest, TradeIsAppliedWithoutTouchingTheBook)
     EXPECT_EQ(book.last_sequence(), 1u);
 }
 
+TEST(MarketBookTest, StatusSetsTheTradingStateWithoutTouchingOrders)
+{
+    MarketBook book{kSymbol, 4};
+    EXPECT_EQ(book.trading_state(), TradingState::Trading);
+    ASSERT_EQ(book.apply(add(1, Side::Buy, 100, 10)), ApplyResult::Applied);
+    const std::uint64_t before = book.digest();
+
+    for (const TradingState state : {TradingState::Halted, TradingState::Paused, TradingState::QuotationOnly,
+                                     TradingState::Trading}) {
+        EXPECT_EQ(book.apply(status(state)), ApplyResult::Applied);
+        EXPECT_EQ(book.trading_state(), state);
+    }
+
+    MarketEvent other_symbol = status(TradingState::Halted);
+    other_symbol.symbol = kSymbol + 1;
+    EXPECT_EQ(book.apply(other_symbol), ApplyResult::WrongSymbol);
+    EXPECT_EQ(book.trading_state(), TradingState::Trading);
+
+    EXPECT_EQ(book.digest(), before);
+    EXPECT_EQ(book.last_sequence(), 1u);
+    EXPECT_EQ(book.order_count(), 1u);
+}
+
 // ---------------------------------------------------------------------------
 // Queries
 // ---------------------------------------------------------------------------
@@ -383,6 +411,38 @@ TEST(MarketBookTest, CrossedBookFailsInvariantsOnlyDuringRth)
 
     EXPECT_FALSE(book.check_invariants(error, true));
     EXPECT_EQ(error, InvariantError::CrossedInRth);
+}
+
+// A book that is not Trading queues orders without matching them, so it may cross.
+TEST(MarketBookTest, CrossedBookFailsInRthOnlyWhileTrading)
+{
+    MarketBook book{kSymbol, 4};
+    ASSERT_EQ(book.apply(add(1, Side::Buy, 101, 10)), ApplyResult::Applied);
+    ASSERT_EQ(book.apply(add(2, Side::Sell, 100, 10)), ApplyResult::Applied);
+
+    InvariantError error{InvariantError::None};
+    for (const TradingState state : {TradingState::Halted, TradingState::Paused, TradingState::QuotationOnly}) {
+        ASSERT_EQ(book.apply(status(state)), ApplyResult::Applied);
+        EXPECT_TRUE(book.check_invariants(error, true));
+        EXPECT_EQ(error, InvariantError::None);
+    }
+
+    ASSERT_EQ(book.apply(status(TradingState::Trading)), ApplyResult::Applied);
+    EXPECT_FALSE(book.check_invariants(error, true));
+    EXPECT_EQ(error, InvariantError::CrossedInRth);
+}
+
+TEST(MarketBookTest, NotTradingStillChecksTheBookStructure)
+{
+    MarketBook book{kSymbol, 4};
+    ASSERT_EQ(book.apply(add(1, Side::Buy, 100, 10)), ApplyResult::Applied);
+    ASSERT_EQ(book.apply(status(TradingState::Halted)), ApplyResult::Applied);
+
+    ASSERT_TRUE(mutable_order(book, 1).execute(Quantity{3}));
+
+    InvariantError error{InvariantError::None};
+    EXPECT_FALSE(book.check_invariants(error, true));
+    EXPECT_EQ(error, InvariantError::LevelTotalMismatch);
 }
 
 TEST(MarketBookTest, InRthIsHalfOpenFromOpenToClose)

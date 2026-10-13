@@ -101,9 +101,10 @@ void print_book(const MarketBook& book, std::size_t depth, unsigned scale)
     const std::string spread = book.best(Side::Buy, bid) && book.best(Side::Sell, ask)
         ? dollars(ask.price.ticks - bid.price.ticks, scale)
         : std::string{"n/a (a side is empty)"};
-    std::printf("  spread %s, orders %zu, peak orders %zu, crossed %s, locked %s\n", spread.c_str(),
-                book.order_count(), book.peak_order_count(), book.is_crossed() ? "yes" : "no",
-                book.is_locked() ? "yes" : "no");
+    const std::string_view state = to_string(book.trading_state());
+    std::printf("  spread %s, orders %zu, peak orders %zu, crossed %s, locked %s, trading state %.*s\n",
+                spread.c_str(), book.order_count(), book.peak_order_count(), book.is_crossed() ? "yes" : "no",
+                book.is_locked() ? "yes" : "no", static_cast<int>(state.size()), state.data());
 }
 
 // The run header both commands print.
@@ -461,7 +462,8 @@ std::string backtest_json(const BacktestArgs& b, const RiskLimits& limits, const
         "    \"sim_events\": %" PRIu64 ", \"drained_sim_events\": %" PRIu64 ", \"discarded_sim_events\": %" PRIu64 ",\n"
         "    \"maker_fills\": %" PRIu64 ", \"maker_quantity\": %" PRIu64 ", \"taker_fills\": %" PRIu64
         ", \"taker_quantity\": %" PRIu64 ", \"accepted_quantity\": %" PRIu64 ", \"cancelled\": %" PRIu64
-        ", \"cancel_rejects\": %" PRIu64 ", \"would_cross_rejects\": %" PRIu64 ", \"fifo_anomalies\": %" PRIu64 ",\n"
+        ", \"cancel_rejects\": %" PRIu64 ", \"would_cross_rejects\": %" PRIu64 ", \"not_trading_rejects\": %" PRIu64
+        ", \"fifo_anomalies\": %" PRIu64 ",\n"
         "    \"position\": %" PRId64 ", \"max_abs_position\": %" PRId64 ", \"open_orders\": %zu, \"cash\": %" PRId64
         ", \"realised_pnl\": %" PRId64 ", \"unrealised_pnl\": %" PRId64 ", \"fees\": %" PRId64 ", \"pnl\": %" PRId64
         ", \"max_drawdown\": %" PRId64 "},\n",
@@ -470,8 +472,8 @@ std::string backtest_json(const BacktestArgs& b, const RiskLimits& limits, const
         b.taker_fee_ticks, unsigned{instrument.price_scale}, unsigned{instrument.price_scale} + instrument.quantity_scale,
         loop.sim_events, loop.drained_sim_events, loop.discarded_sim_events, e.maker_fills, e.maker_quantity,
         e.taker_fills, e.taker_quantity, e.accepted_quantity, e.cancelled, e.cancel_rejects, e.would_cross_rejects,
-        e.fifo_anomalies, p.position(), p.max_abs_position(), p.open_orders(), p.cash(), p.realised_pnl(),
-        p.unrealised_pnl(), p.fees(), p.pnl(), p.max_drawdown());
+        e.not_trading_rejects, e.fifo_anomalies, p.position(), p.max_abs_position(), p.open_orders(), p.cash(),
+        p.realised_pnl(), p.unrealised_pnl(), p.fees(), p.pnl(), p.max_drawdown());
     return text;
 }
 
@@ -676,15 +678,18 @@ int replay_books(const ReplayArgs& args)
                 report.peak_live_orders, pool.in_use(), pool.capacity());
 
     // Every book's structure first, so one crossed book cannot hide another
-    // problem; then every book crossed in RTH, not only the first.
+    // problem; then every book crossed in RTH, not only the first. A book that
+    // is not Trading may cross: NASDAQ queues its orders without matching
+    // them, so it is listed, not failed.
     InvariantError invariant_error{InvariantError::None};
     SymbolId invariant_symbol{0};
     const bool structure = books.check_invariants(invariant_error, invariant_symbol);
     std::vector<SymbolId> crossed;
+    std::vector<SymbolId> not_trading;  // crossed in RTH while not Trading: allowed
     if (in_rth(total.last_timestamp, midnight)) {
         for (SymbolId id = 0; id < books.size(); ++id) {
             if (books[id].is_crossed()) {
-                crossed.push_back(id);
+                (books[id].trading_state() == TradingState::Trading ? crossed : not_trading).push_back(id);
             }
         }
     }
@@ -707,6 +712,16 @@ int replay_books(const ReplayArgs& args)
         std::printf("Invariants at end: ok, all %zu books\n", books.size());
     }
     std::printf("                   %" PRIu64 " periodic checks passed\n", total.invariant_checks);
+    if (!not_trading.empty()) {
+        std::printf("Not trading       %zu books crossed in RTH, allowed:", not_trading.size());
+        for (std::size_t i = 0; i < not_trading.size() && i < 20; ++i) {
+            const std::string_view symbol = name(*registry.find(not_trading[i]));
+            const std::string_view state = to_string(books[not_trading[i]].trading_state());
+            std::printf(" %.*s (%.*s)", static_cast<int>(symbol.size()), symbol.data(),
+                        static_cast<int>(state.size()), state.data());
+        }
+        std::printf("%s\n", not_trading.size() > 20 ? " ..." : "");
+    }
     const bool invariants = structure && crossed.empty();
     std::printf("Digest (combined) %016" PRIx64 "\n", books.digest());
 
@@ -746,7 +761,7 @@ void print_strategy(const MarketMakerStats& stats)
     std::printf("  risk rejects     %" PRIu64 "\n", stats.risk_rejects);
     std::printf("  cancels sent     %" PRIu64 "\n", stats.cancels);
     std::printf("  fills            %" PRIu64 "\n", stats.fills);
-    std::printf("  rejects          %" PRIu64 " (would cross)\n", stats.rejects);
+    std::printf("  rejects          %" PRIu64 " (would cross or not trading)\n", stats.rejects);
     std::printf("  bought           %" PRIu64 " shares\n", stats.bought);
     std::printf("  sold             %" PRIu64 " shares\n", stats.sold);
 }
@@ -764,6 +779,7 @@ void print_execution(const ExecutionStatistics& stats)
     std::printf("  cancels          %" PRIu64 " done, %" PRIu64 " rejected (too late)\n", stats.cancelled,
                 stats.cancel_rejects);
     std::printf("  would cross      %" PRIu64 " rejected\n", stats.would_cross_rejects);
+    std::printf("  not trading      %" PRIu64 " rejected\n", stats.not_trading_rejects);
     std::printf("  FIFO anomalies   %" PRIu64 "\n", stats.fifo_anomalies);
 }
 

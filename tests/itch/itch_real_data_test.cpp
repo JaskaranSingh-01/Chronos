@@ -151,11 +151,12 @@ TEST(ItchRealDataTest, ReplaysEverySymbolWithoutRejections)
         AllOutcome run;
         run.report = MarketReplay::run(source, books, options);
         run.digest = books.digest();
-        // CrossedInRth is left out at the end: NASDAQ queues orders for a
-        // halted or IPO-pending stock without matching them, so its book may
-        // cross in RTH, and Chronos does not track trading state (H) yet. The
-        // 2019-12-30 slice ends at 09:30:10 with 6 crossed books, all halted.
-        run.final_invariants = books.check_invariants(run.final_error, run.final_symbol);
+        // A book that is not Trading (halted, paused or quotation only) may
+        // cross in RTH: NASDAQ queues its orders without matching them, and
+        // check_invariants allows it. The 2019-12-30 slice ends at 09:30:10
+        // with 6 crossed books, none Trading.
+        run.final_invariants = books.check_invariants(run.final_error, run.final_symbol,
+                                                      in_rth(run.report.total.last_timestamp, midnight));
         for (SymbolId id = 0; id < books.size(); ++id) {
             run.crossed += books[id].is_crossed();
         }
@@ -178,6 +179,7 @@ TEST(ItchRealDataTest, ReplaysEverySymbolWithoutRejections)
     for (std::size_t result = 1; result < apply_result_count; ++result) {
         EXPECT_EQ(total.by_result[result], 0u) << to_string(static_cast<ApplyResult>(result));
     }
+    EXPECT_GT(total.by_type[static_cast<std::size_t>(MarketEventType::Status)], 0u);
     EXPECT_TRUE(run.final_invariants) << to_string(run.final_error) << " in symbol " << run.final_symbol;
 
     const AllOutcome again = replay();

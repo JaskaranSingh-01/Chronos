@@ -150,6 +150,7 @@ std::string_view to_string(MarketEventType type) noexcept
     case MarketEventType::Execute: return "Execute";
     case MarketEventType::Clear: return "Clear";
     case MarketEventType::Trade: return "Trade";
+    case MarketEventType::Status: return "Status";
     }
     return "?";
 }
@@ -185,6 +186,7 @@ std::string_view to_string(SourceError error) noexcept
     case SourceError::InvalidNumber: return "InvalidNumber";
     case SourceError::NumberOutOfRange: return "NumberOutOfRange";
     case SourceError::InvalidEventType: return "InvalidEventType";
+    case SourceError::InvalidTradingState: return "InvalidTradingState";
     }
     return "?";
 }
@@ -201,6 +203,17 @@ std::string_view to_string(InvariantError error) noexcept
     case InvariantError::InactiveOrderInBook: return "InactiveOrderInBook";
     case InvariantError::PoolCountMismatch: return "PoolCountMismatch";
     case InvariantError::CrossedInRth: return "CrossedInRth";
+    }
+    return "?";
+}
+
+std::string_view to_string(TradingState state) noexcept
+{
+    switch (state) {
+    case TradingState::Trading: return "Trading";
+    case TradingState::Halted: return "Halted";
+    case TradingState::Paused: return "Paused";
+    case TradingState::QuotationOnly: return "QuotationOnly";
     }
     return "?";
 }

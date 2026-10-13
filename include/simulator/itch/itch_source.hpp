@@ -38,16 +38,21 @@ struct ItchSourceConfig
 struct ItchSourceStatistics
 {
     std::uint64_t messages{0};  // every framed message
-    std::uint64_t filtered{0};  // messages for unselected symbols (order messages and R)
-    std::uint64_t skipped{0};   // types Chronos does not use (S, H, Q, I, ...)
-    std::uint64_t events{0};    // MarketEvents emitted
+    std::uint64_t filtered{0};  // messages for unselected symbols (event messages and R)
+    std::uint64_t skipped{0};   // types that become no event (S, Q, I, h, ...)
+    std::uint64_t events{0};    // MarketEvents emitted, the halt sweep's included
 };
 
 // The MarketEvents of the selected tickers from a NASDAQ TotalView-ITCH 5.0
 // byte span, in file order. A selected ticker's R registers {XNAS, ticker,
 // price_scale 4, quantity_scale 0, tick_size 0} and maps its locate to the
-// SymbolId; order messages (A F E C X D U P) for an unmapped locate are
-// skipped before decoding, so they are never validated.
+// SymbolId; event messages (A F E C X D U P H) for an unmapped locate are
+// skipped before decoding, so they are never validated. H (stock trading
+// action) becomes Status. ITCH 5.0 treats a security left out of the pre-open
+// trading action spin as halted from the start of system hours, so the S with
+// event code 'S' is followed by a Status Halted, at its time, for every
+// selected locate without an H yet, in locate order.
+// ponytail: an R after that S is not swept: it trades until its first H.
 // The caller keeps `data` and `registry` alive.
 class ItchSource final : public MarketEventSource
 {
@@ -64,6 +69,9 @@ private:
     bool allow_truncated_tail_{false};
 
     std::vector<SymbolId> symbols_;  // index = locate; no_symbol until its selected R
+    std::vector<bool> has_status_;   // index = locate: an H or the halt sweep gave it a trading state
+    std::size_t halt_sweep_{std::size_t{1} << 16};  // next locate the halt sweep checks; 65,536 = none
+    Timestamp halt_sweep_time_{0};                  // of the S that started the sweep, epoch ns
     std::uint16_t locate_{0};        // of the last selected R
     SymbolId symbol_{0};
     std::uint64_t message_start_{0};
@@ -77,7 +85,7 @@ private:
     bool selected(const std::array<char, 8>& stock) const noexcept;
 
 public:
-    // Allocates the 65,536-entry locate table.
+    // Allocates the 65,536-entry locate tables.
     ItchSource(
         std::span<const std::byte> data,
         const ItchSourceConfig& config,

@@ -38,7 +38,8 @@ enum class ReportType : std::uint8_t { Accepted, Rejected, Fill, Cancelled, Canc
 enum class RejectReason : std::uint8_t {
     None,
     WouldCross,   // a post-only order that would take liquidity
-    InvalidOrder  // zero quantity
+    InvalidOrder, // zero quantity
+    NotTrading    // the symbol is halted, paused or quotation only
 };
 
 enum class Liquidity : std::uint8_t { None, Maker, Taker };

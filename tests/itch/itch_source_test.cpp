@@ -7,6 +7,7 @@
 #include <tuple>
 #include <vector>
 
+#include "itch_golden_messages.hpp"
 #include "itch_test_builder.hpp"
 #include "simulator/itch/itch_source.hpp"
 
@@ -30,7 +31,7 @@ auto fields(const MarketEvent& e)
 {
     return std::tuple{e.timestamp, e.order_id, e.new_order_id, e.price.ticks,
                       e.quantity.value(), e.symbol, static_cast<int>(e.type),
-                      static_cast<int>(e.side)};
+                      static_cast<int>(e.side), static_cast<int>(e.trading_state)};
 }
 
 // Reads events until the stream ends; the end result goes to `end`.
@@ -73,7 +74,8 @@ TEST(ItchSourceTest, FiltersOtherLocatesWithoutDecodingThem)
         .stock_directory(2, 3, "MSFT")
         .add_order(2, 4, 1, 'Z', 100, "MSFT", 1'500'000)  // bad side, but not ours
         .add_order(1, 5, 2, 'S', 100, "AAPL", 2'900'000)
-        .erase(3, 6, 3);
+        .erase(3, 6, 3)
+        .trading_action(2, 7, "MSFT", 'Z');  // bad state, but not ours
 
     InstrumentRegistry registry{4};
     ItchSource source{itch.bytes(), aapl, registry};
@@ -86,9 +88,9 @@ TEST(ItchSourceTest, FiltersOtherLocatesWithoutDecodingThem)
     EXPECT_EQ(registry.size(), 1u);
 
     const ItchSourceStatistics& stats = source.statistics();
-    EXPECT_EQ(stats.messages, 6u);
+    EXPECT_EQ(stats.messages, 7u);
     EXPECT_EQ(stats.skipped, 1u);   // S
-    EXPECT_EQ(stats.filtered, 3u);  // R MSFT, A locate 2, D locate 3
+    EXPECT_EQ(stats.filtered, 4u);  // R MSFT, A locate 2, D locate 3, H locate 2
     EXPECT_EQ(stats.events, 1u);
 }
 
@@ -103,7 +105,11 @@ TEST(ItchSourceTest, MapsEachMessageType)
         .cancel(1, 14, 2, 20)
         .replace(1, 15, 2, 3, 150, 2'905'000)
         .erase(1, 16, 3)
-        .trade(1, 17, 0, 'B', 40, "AAPL", 2'900'500, 902);
+        .trade(1, 17, 0, 'B', 40, "AAPL", 2'900'500, 902)
+        .trading_action(1, 18, "AAPL", 'H')
+        .trading_action(1, 19, "AAPL", 'P')
+        .trading_action(1, 20, "AAPL", 'Q')
+        .trading_action(1, 21, "AAPL", 'T');
 
     InstrumentRegistry registry{4};
     ItchSource source{itch.bytes(), aapl, registry};
@@ -125,6 +131,10 @@ TEST(ItchSourceTest, MapsEachMessageType)
         {.timestamp = midnight + 16, .order_id = 3, .type = T::Delete},
         {.timestamp = midnight + 17, .order_id = 0, .price = Price{2'900'500},
          .quantity = Quantity{40}, .type = T::Trade, .side = Side::Buy},
+        {.timestamp = midnight + 18, .type = T::Status, .trading_state = TradingState::Halted},
+        {.timestamp = midnight + 19, .type = T::Status, .trading_state = TradingState::Paused},
+        {.timestamp = midnight + 20, .type = T::Status, .trading_state = TradingState::QuotationOnly},
+        {.timestamp = midnight + 21, .type = T::Status, .trading_state = TradingState::Trading},
     };
 
     EXPECT_EQ(end, SourceResult::EndOfStream);
@@ -132,6 +142,94 @@ TEST(ItchSourceTest, MapsEachMessageType)
     for (std::size_t i = 0; i < events.size(); ++i) {
         EXPECT_EQ(fields(events[i]), fields(expected[i])) << "event " << i;
     }
+}
+
+TEST(ItchSourceTest, AnUnknownTradingStateIsAnError)
+{
+    ItchBuilder itch;
+    itch.stock_directory(1, 1, "AAPL").trading_action(1, 2, "AAPL", 'X');
+
+    InstrumentRegistry registry{4};
+    ItchSource source{itch.bytes(), aapl, registry};
+    MarketEvent event;
+
+    for (int call = 0; call < 2; ++call) {
+        ASSERT_EQ(source.next(event), SourceResult::Error) << "call " << call;
+        EXPECT_EQ(source.error(), SourceError::InvalidTradingState);
+        EXPECT_EQ(source.position(), 41u);
+    }
+}
+
+// The file's first H, framed after the R of its stock "A".
+TEST(ItchSourceTest, DecodesARealTradingAction)
+{
+    ItchBuilder itch;
+    itch.stock_directory(1, 1, "A");
+    std::vector<std::byte> bytes{itch.bytes().begin(), itch.bytes().end()};
+    bytes.push_back(std::byte{0x00});
+    bytes.push_back(std::byte{0x19});
+    for (const std::uint8_t b : itch_test::real_h) {
+        bytes.push_back(std::byte{b});
+    }
+
+    ItchSourceConfig config = aapl;
+    config.ticker = "A";
+
+    InstrumentRegistry registry{4};
+    ItchSource source{bytes, config, registry};
+    SourceResult end{};
+    const auto events = drain(source, end);
+
+    EXPECT_EQ(end, SourceResult::EndOfStream);
+    ASSERT_EQ(events.size(), 1u);
+    const MarketEvent expected{.timestamp = midnight + 11'354'328'694'637, .symbol = 0,
+                               .type = MarketEventType::Status, .trading_state = TradingState::Trading};
+    EXPECT_EQ(fields(events[0]), fields(expected));
+}
+
+// ITCH 5.0: a security left out of the pre-open trading action spin is halted
+// from the start of system hours (S, event code 'S').
+TEST(ItchSourceTest, HaltsSymbolsLeftOutOfTheSpinAtTheStartOfSystemHours)
+{
+    ItchBuilder itch;
+    itch.stock_directory(1, 1, "AAPL")
+        .stock_directory(2, 2, "MSFT")
+        .stock_directory(3, 3, "SPY")
+        .trading_action(1, 4, "AAPL", 'T')
+        .system_event(0, 5, 'Q')  // not the start of system hours: no sweep
+        .system_event(0, 6, 'S')
+        .add_order(2, 7, 1, 'B', 100, "MSFT", 1'500'000)
+        .system_event(0, 8, 'S');  // every selected locate has a state: nothing new
+
+    const std::string_view tickers[] = {"AAPL", "MSFT"};
+    ItchSourceConfig config = aapl;
+    config.ticker = {};
+    config.tickers = tickers;
+
+    InstrumentRegistry registry{4};
+    ItchSource source{itch.bytes(), config, registry};
+    SourceResult end{};
+    const auto events = drain(source, end);
+
+    using T = MarketEventType;
+    const MarketEvent expected[] = {
+        {.timestamp = midnight + 4, .symbol = 0, .type = T::Status, .trading_state = TradingState::Trading},
+        {.timestamp = midnight + 6, .symbol = 1, .type = T::Status, .trading_state = TradingState::Halted},
+        {.timestamp = midnight + 7, .order_id = 1, .price = Price{1'500'000}, .quantity = Quantity{100},
+         .symbol = 1, .type = T::Add, .side = Side::Buy},
+    };
+
+    EXPECT_EQ(end, SourceResult::EndOfStream);
+    ASSERT_EQ(events.size(), std::size(expected));
+    for (std::size_t i = 0; i < events.size(); ++i) {
+        EXPECT_EQ(fields(events[i]), fields(expected[i])) << "event " << i;
+    }
+
+    const ItchSourceStatistics& stats = source.statistics();
+    EXPECT_EQ(stats.messages, 8u);
+    EXPECT_EQ(stats.filtered, 1u);  // R SPY
+    EXPECT_EQ(stats.skipped, 3u);   // the S messages
+    EXPECT_EQ(stats.events, 3u);
 }
 
 TEST(ItchSourceTest, TimestampsAreEpochNsFromSessionMidnight)

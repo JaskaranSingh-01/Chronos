@@ -10,12 +10,18 @@ namespace simulator {
 
 namespace {
 
-// ponytail: 'P' is decoded here rather than in ItchDecoder, its only user.
-// Move it (and the constant to itch_message_types.hpp) when a second one appears.
+// ponytail: 'P' and 'H' are decoded here rather than in ItchDecoder:
+// ItchSource is their only user. Move them (and the constants to
+// itch_message_types.hpp) when a second one appears.
 constexpr std::uint8_t TRADE = 0x50;  // 'P'
 constexpr std::size_t TradePayloadSize = 43;
+constexpr std::uint8_t TRADING_ACTION = 0x48;  // 'H'
+constexpr std::size_t TradingActionPayloadSize = 24;
+constexpr std::uint8_t SYSTEM_EVENT = 0x53;  // 'S'
+constexpr std::size_t SystemEventPayloadSize = 11;
 
-bool is_order_message(std::uint8_t type) noexcept
+// The types that become MarketEvents: the order messages, P and H.
+bool is_event_message(std::uint8_t type) noexcept
 {
     switch (type) {
     case itch::ADD_ORDER:
@@ -26,6 +32,7 @@ bool is_order_message(std::uint8_t type) noexcept
     case itch::ORDER_DELETE:
     case itch::REPLACE_ORDER:
     case TRADE:
+    case TRADING_ACTION:
         return true;
     default:
         return false;
@@ -85,7 +92,42 @@ SourceError decode_trade(const ItchMessage& message, MarketEvent& event) noexcep
     return SourceError::None;
 }
 
-// An order message as a MarketEvent, timestamp in ITCH ns since midnight and
+// 'H' Stock Trading Action: the symbol's new trading state. Stock, reserved
+// byte and reason are left unread.
+// ponytail: 'h' (operational halt, one market centre) is skipped. It is
+// independent of H, so it needs its own per-book flag; add it when a file has one.
+SourceError decode_trading_action(const ItchMessage& message, MarketEvent& event) noexcept
+{
+    if (message.payload.size() != TradingActionPayloadSize) {
+        return SourceError::InvalidPayloadLength;
+    }
+
+    // The size check makes every read succeed.
+    ByteReader reader{message.payload};
+    std::span<const std::byte> unused;
+    std::uint64_t timestamp{0};
+    std::uint8_t code{0};
+
+    reader.read_bytes(4, unused);  // locate, tracking number
+    reader.read_u48_be(timestamp);
+    reader.read_bytes(8, unused);  // stock
+    reader.read_u8(code);
+
+    TradingState state{};
+    switch (code) {
+    case 'T': state = TradingState::Trading; break;
+    case 'H': state = TradingState::Halted; break;
+    case 'P': state = TradingState::Paused; break;
+    case 'Q': state = TradingState::QuotationOnly; break;
+    default: return SourceError::InvalidTradingState;
+    }
+
+    event = MarketEvent{.timestamp = static_cast<Timestamp>(timestamp), .type = MarketEventType::Status,
+                        .trading_state = state};
+    return SourceError::None;
+}
+
+// An event message as a MarketEvent, timestamp in ITCH ns since midnight and
 // symbol unset. None on success.
 SourceError decode(const ItchMessage& message, MarketEvent& event) noexcept
 {
@@ -141,7 +183,9 @@ SourceError decode(const ItchMessage& message, MarketEvent& event) noexcept
                  .quantity = m.quantity, .type = T::Replace};
         break;
     }
-    default:  // TRADE; next() only passes order messages
+    case TRADING_ACTION:
+        return decode_trading_action(message, event);
+    default:  // TRADE; next() passes only event messages
         return decode_trade(message, event);
     }
 
@@ -160,7 +204,8 @@ ItchSource::ItchSource(
       require_ticker_(!config.all_tickers && config.tickers.empty()),
       session_midnight_(session_midnight_ns(config.session_date, config.utc_offset)),
       allow_truncated_tail_(config.allow_truncated_tail),
-      symbols_(std::size_t{1} << 16, no_symbol)
+      symbols_(std::size_t{1} << 16, no_symbol),
+      has_status_(std::size_t{1} << 16)
 {
     if (all_tickers_) {
         return;
@@ -203,6 +248,19 @@ SourceResult ItchSource::end_of_data() noexcept
 SourceResult ItchSource::next(MarketEvent& event) noexcept
 {
     while (!done_) {
+        // The halt sweep an S 'S' started: one Status Halted per selected
+        // locate that has no trading state yet, in locate order.
+        while (halt_sweep_ < symbols_.size()) {
+            const std::size_t stock_locate = halt_sweep_++;
+            if (symbols_[stock_locate] != no_symbol && !has_status_[stock_locate]) {
+                has_status_[stock_locate] = true;
+                event = MarketEvent{.timestamp = halt_sweep_time_, .symbol = symbols_[stock_locate],
+                                    .type = MarketEventType::Status, .trading_state = TradingState::Halted};
+                ++statistics_.events;
+                return SourceResult::Event;
+            }
+        }
+
         message_start_ = reader_.position();
 
         ItchMessage message;
@@ -255,7 +313,19 @@ SourceResult ItchSource::next(MarketEvent& event) noexcept
             continue;
         }
 
-        if (!is_order_message(message.type)) {
+        if (!is_event_message(message.type)) {
+            // ITCH 5.0: a security left out of the pre-open trading action
+            // spin is halted from the start of system hours (S, event code 'S').
+            if (message.type == SYSTEM_EVENT && message.payload.size() == SystemEventPayloadSize &&
+                message.payload[10] == std::byte{'S'}) {
+                ByteReader reader{message.payload};
+                std::span<const std::byte> unused;
+                std::uint64_t ns{0};
+                reader.read_bytes(4, unused);  // locate, tracking number
+                reader.read_u48_be(ns);
+                halt_sweep_ = 0;
+                halt_sweep_time_ = static_cast<Timestamp>(ns) + session_midnight_;
+            }
             ++statistics_.skipped;
             continue;
         }
@@ -263,8 +333,10 @@ SourceResult ItchSource::next(MarketEvent& event) noexcept
         // Before decoding: unmapped locates are dropped unvalidated. A payload
         // too short to hold a locate goes on to decode, which rejects it.
         SymbolId symbol{0};
+        std::uint16_t stock_locate{0};
         if (message.payload.size() >= 2) {
-            symbol = symbols_[peek_locate(message.payload)];
+            stock_locate = peek_locate(message.payload);
+            symbol = symbols_[stock_locate];
             if (symbol == no_symbol) {
                 ++statistics_.filtered;
                 continue;
@@ -273,6 +345,9 @@ SourceResult ItchSource::next(MarketEvent& event) noexcept
 
         if (const SourceError error = decode(message, event); error != SourceError::None) {
             return finish(error);
+        }
+        if (message.type == TRADING_ACTION) {
+            has_status_[stock_locate] = true;
         }
         event.timestamp += session_midnight_;
         event.symbol = symbol;

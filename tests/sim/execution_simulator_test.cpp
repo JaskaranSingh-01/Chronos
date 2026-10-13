@@ -18,6 +18,11 @@ MarketEvent add(OrderId id, Side side, std::int64_t price, std::uint64_t quantit
                        .symbol = kSymbol, .type = MarketEventType::Add, .side = side};
 }
 
+MarketEvent status(TradingState state)
+{
+    return MarketEvent{.symbol = kSymbol, .type = MarketEventType::Status, .trading_state = state};
+}
+
 // Spec §4.10 worked example 1's asks, plus two bid levels:
 //   bids 999,900 x 300 (h4), 999,800 x 400 (h5)
 //   asks 1,000,000 x 300 (h1 200, h2 100), 1,000,100 x 500 (h3)
@@ -513,6 +518,56 @@ TEST_F(RestingOrderTest, IgnoresEventsTheBookRejects)
     execution_.on_market(replace(1, 1, kP + 100, 10), book_, out_);            // invalid replace
     EXPECT_EQ(out_, Reports{});
     EXPECT_EQ(execution_.find(1)->remaining, 50u);
+}
+
+// ---------------------------------------------------------------------------
+// Trading state: nothing matches while the book is not Trading
+// ---------------------------------------------------------------------------
+
+TEST_F(ExecutionSimulatorTest, RejectsArrivalsWhileNotTrading)
+{
+    for (const TradingState state : {TradingState::Halted, TradingState::Paused, TradingState::QuotationOnly}) {
+        ASSERT_EQ(book_.apply(status(state)), ApplyResult::Applied);
+        EXPECT_EQ(arrive(order(1, Side::Buy, 1'000'100, 400)),  // would sweep two levels
+                  (Reports{rejected(1, Side::Buy, 400, RejectReason::NotTrading)}));
+        EXPECT_EQ(arrive(day(2, Side::Sell, 1'000'050, 100)),  // would rest
+                  (Reports{rejected(2, Side::Sell, 100, RejectReason::NotTrading)}));
+    }
+    EXPECT_EQ(arrive(order(3, Side::Buy, 1'000'000, 0)),
+              (Reports{rejected(3, Side::Buy, 0, RejectReason::InvalidOrder)}));  // checked first
+
+    EXPECT_EQ(execution_.statistics().not_trading_rejects, 6u);
+    EXPECT_EQ(execution_.statistics().taker_fills, 0u);
+    EXPECT_EQ(execution_.open_orders(), 0u);
+
+    ASSERT_EQ(book_.apply(status(TradingState::Trading)), ApplyResult::Applied);
+    EXPECT_EQ(arrive(order(4, Side::Buy, 1'000'000, 150)), (Reports{fill(4, Side::Buy, 1'000'000, 150, 0)}));
+}
+
+// Halted, the book may cross and orders may still execute in the feed: no
+// rule (a), (c) or (d) fill, while rule (b) keeps our queue position.
+TEST_F(RestingOrderTest, NoFillsWhileNotTradingButTheQueueStillMoves)
+{
+    market(add(1, Side::Buy, kP, 200));        // h1, ahead of us
+    market(add(2, Side::Buy, kP - 100, 100));  // h2, a worse bid
+    EXPECT_EQ(arrive(day(1, Side::Buy, kP, 100)), (Reports{accepted(1, Side::Buy, 100)}));
+    EXPECT_EQ(ahead(1), 200u);
+
+    EXPECT_EQ(market(status(TradingState::Halted)), Reports{});
+    EXPECT_EQ(market(add(3, Side::Sell, kP - 100, 50)), Reports{});         // crosses us: no (c)
+    EXPECT_EQ(market(add(4, Side::Buy, kP, 40)), Reports{});                // behind us
+    EXPECT_EQ(market(reduce(MarketEventType::Execute, 4, 40)), Reports{});  // no (a)
+    EXPECT_EQ(market(reduce(MarketEventType::Execute, 2, 50)), Reports{});  // no (d)
+    EXPECT_EQ(market(replace(3, 5, kP - 200, 30)), Reports{});              // no (c) on a replacement
+    EXPECT_EQ(market(reduce(MarketEventType::Execute, 1, 150)), Reports{});
+    EXPECT_EQ(ahead(1), 50u);                                               // (b) still runs
+    EXPECT_EQ(execution_.find(1)->remaining, 100u);
+
+    EXPECT_EQ(market(status(TradingState::Trading)), Reports{});
+    EXPECT_EQ(market(reduce(MarketEventType::Execute, 1, 50)), Reports{});
+    EXPECT_EQ(ahead(1), 0u);
+    EXPECT_EQ(market(reduce(MarketEventType::Execute, 2, 50)), (Reports{maker(1, Side::Buy, kP, 50, 50, 0)}));  // (d)
+    EXPECT_EQ(execution_.statistics().fifo_anomalies, 0u);
 }
 
 } // namespace

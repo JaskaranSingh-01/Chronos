@@ -28,7 +28,7 @@ struct ReplayOptions
     std::uint64_t check_invariants_every{0};
 
     // session_midnight_ns() of the session: decides RTH (in_rth), where a
-    // crossed book is a violation.
+    // crossed book that is Trading is a violation.
     Timestamp session_midnight{0};
 
     // When set, after every `latency_batch` events read (applied or not) the
@@ -124,5 +124,6 @@ std::string_view to_string(MarketEventType type) noexcept;
 std::string_view to_string(ApplyResult result) noexcept;
 std::string_view to_string(SourceError error) noexcept;
 std::string_view to_string(InvariantError error) noexcept;
+std::string_view to_string(TradingState state) noexcept;
 
 } // namespace simulator

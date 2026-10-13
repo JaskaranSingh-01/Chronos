@@ -113,6 +113,7 @@ TEST(ItchBuilderTest, EachMessageHasSpecLength)
     cases.push_back({ItchBuilder{}.replace(1, 2, 3, 4, 5, 6), 35});
     cases.push_back({ItchBuilder{}.stock_directory(1, 2, "AAPL"), 39});
     cases.push_back({ItchBuilder{}.system_event(1, 2, 'O'), 12});
+    cases.push_back({ItchBuilder{}.trading_action(1, 2, "AAPL", 'H'), 25});
 
     for (const auto& c : cases)
     {
@@ -288,6 +289,14 @@ TEST(ItchBuilderTest, StockDirectoryHeaderAndStockMatchRealNasdaqBytes)
     builder.tracking(0).stock_directory(1, 11354325413976, "A");
 
     expect_matches_real(builder.bytes(), real_r, 19);
+}
+
+TEST(ItchBuilderTest, TradingActionMatchesRealNasdaqBytes)
+{
+    ItchBuilder builder;
+    builder.tracking(0).trading_action(1, 11354328694637, "A", 'T');
+
+    expect_matches_real(builder.bytes(), real_h);
 }
 
 } // namespace simulator::itch_test

@@ -31,6 +31,9 @@ ApplyResult MarketBook::apply(const MarketEvent& event) noexcept
         return replace(event);
     case MarketEventType::Trade:
         return ApplyResult::Applied;  // not tied to a visible order
+    case MarketEventType::Status:
+        trading_state_ = event.trading_state;
+        return ApplyResult::Applied;
     case MarketEventType::Modify:
     case MarketEventType::Clear:
         break;
@@ -256,7 +259,7 @@ bool MarketBook::check_invariants(InvariantError& error, bool rth) const noexcep
         error = InvariantError::PoolCountMismatch;
     }
 
-    if (error == InvariantError::None && rth && is_crossed()) {
+    if (error == InvariantError::None && rth && trading_state_ == TradingState::Trading && is_crossed()) {
         error = InvariantError::CrossedInRth;
     }
 

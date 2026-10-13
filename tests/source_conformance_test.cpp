@@ -87,6 +87,7 @@ constexpr MarketEvent vector_events[] = {
     {.timestamp = 4'000, .order_id = 1, .price = Price{1'000'100}, .quantity = Quantity{10},
      .symbol = 0, .type = MarketEventType::Add, .side = Side::Buy},
     {.timestamp = 4'500, .symbol = 0, .type = MarketEventType::Clear},
+    {.timestamp = 4'500, .symbol = 1, .type = MarketEventType::Status, .trading_state = TradingState::Halted},
 };
 
 std::unique_ptr<MarketEventSource> make_vector_source(
@@ -103,7 +104,8 @@ INSTANTIATE_TEST_SUITE_P(
     ::testing::Values(SourceCase{.name = "Vector", .factory = make_vector_source}));
 
 // ItchSource: ItchBuilder bytes held in memory, ticker AAPL. Every mapped ITCH
-// type appears, plus an S (skipped) and MSFT orders (filtered).
+// type appears (H as Status), plus S messages (skipped; the start of system
+// hours halts AAPL until its H) and MSFT messages (filtered).
 std::string to_string(std::span<const std::byte> bytes)
 {
     return {reinterpret_cast<const char*>(bytes.data()), bytes.size()};
@@ -114,6 +116,9 @@ const std::string itch_good = to_string(
         .system_event(0, 1, 'O')
         .stock_directory(1, 2, "AAPL")
         .stock_directory(2, 3, "MSFT")
+        .system_event(0, 3, 'S')
+        .trading_action(1, 4, "AAPL", 'T')
+        .trading_action(2, 4, "MSFT", 'H')
         .add_order(2, 10, 1, 'B', 100, "MSFT", 1'500'000)
         .add_order(1, 10, 1, 'S', 500, "AAPL", 2'900'100)
         .add_order_mpid(1, 11, 2, 'B', 300, "AAPL", 2'899'900, "GSCO")
@@ -255,6 +260,33 @@ TEST(SourceConformanceCheckTest, ReferenceCheckReportsACancelOfAnUnknownId)
 
     const auto violation = check_references(broken);
     EXPECT_TRUE(mentions(violation, "position 2")) << violation.value_or("no violation");
+}
+
+TEST(SourceConformanceCheckTest, ScaleCheckKeepsTheTradingStateToStatusEvents)
+{
+    constexpr MarketEvent halt{.symbol = 0, .type = MarketEventType::Status,
+                               .trading_state = TradingState::QuotationOnly};
+    MarketEvent halt_with_size = halt;
+    halt_with_size.quantity = Quantity{10};
+    MarketEvent unknown_state = halt;
+    unknown_state.trading_state = static_cast<TradingState>(4);
+    MarketEvent add_with_state = add(100, 1);
+    add_with_state.trading_state = TradingState::Halted;
+
+    InstrumentRegistry registry{1};
+    SymbolId id{};
+    registry.add(xnas_aapl, id);
+
+    const MarketEvent good[] = {add(100, 1), halt};
+    ScriptedSource good_source{good};
+    EXPECT_EQ(check_scales(good_source, registry), std::nullopt);
+
+    for (const MarketEvent& broken : {halt_with_size, unknown_state, add_with_state}) {
+        const MarketEvent events[] = {add(100, 1), broken};
+        ScriptedSource source{events};
+        const auto violation = check_scales(source, registry);
+        EXPECT_TRUE(mentions(violation, "position 2")) << violation.value_or("no violation");
+    }
 }
 
 TEST(SourceConformanceCheckTest, ErrorCheckWantsTheExpectedStickyError)

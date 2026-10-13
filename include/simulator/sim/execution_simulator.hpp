@@ -72,6 +72,7 @@ struct ExecutionStatistics
     std::uint64_t taker_quantity{0};
     std::uint64_t accepted_quantity{0};    // Day orders that rested
     std::uint64_t would_cross_rejects{0};
+    std::uint64_t not_trading_rejects{0};  // arrivals while the book was not Trading
     std::uint64_t cancelled{0};
     std::uint64_t cancel_rejects{0};
     std::uint64_t fifo_anomalies{0};       // rule (a) or (d) filled us while ahead_quantity > 0
@@ -114,6 +115,13 @@ struct ExecutionStatistics
 // price, then arrival), the total capped at the event's quantity; rule (b) is
 // applied to each order on its own. Events the book will not apply (another
 // symbol, unknown or duplicate ids, a bad quantity or replace) are ignored.
+//
+// While the book is not Trading (halted, paused or quotation only) nothing
+// matches. No historical event fills our orders: the book may cross without
+// trading, and rule (c) would invent fills. Rule (b) still moves our queue
+// position, resting orders stay, cancels are accepted, and arrivals are
+// Rejected/NotTrading. ponytail: no reopening cross is modelled (spec §2); its
+// executions fill ours only through rules (a)/(d), and only after the trading Status.
 class ExecutionSimulator
 {
 private:

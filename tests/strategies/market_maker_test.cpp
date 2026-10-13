@@ -43,6 +43,12 @@ struct Fixture
         ASSERT_EQ(book.apply(event), ApplyResult::Applied);
     }
 
+    void status(TradingState state)
+    {
+        ASSERT_EQ(book.apply(MarketEvent{.symbol = kSymbol, .type = MarketEventType::Status, .trading_state = state}),
+                  ApplyResult::Applied);
+    }
+
     std::vector<SimEvent> pushed()
     {
         std::vector<SimEvent> out;
@@ -211,6 +217,34 @@ TEST(MarketMakerTest, CountsFillsAndBacksOffAfterAWouldCrossReject)
     EXPECT_EQ(stats.fills, 1u);
     EXPECT_EQ(stats.bought, 100u);
     EXPECT_EQ(stats.sold, 0u);
+}
+
+// A halt pulls both quotes at once, inside the cooldown; nothing is quoted
+// until Trading resumes.
+TEST(MarketMakerTest, PullsItsQuotesAndStaysOutWhileNotTrading)
+{
+    Fixture f;
+    ASSERT_EQ(f.tick(5'000).size(), 2u);  // bid id 1, ask id 2
+
+    f.status(TradingState::Halted);
+    const std::vector<SimEvent> pulled = f.tick(5'100);
+    ASSERT_EQ(pulled.size(), 2u);
+    EXPECT_TRUE(is_cancel(pulled[0], 1));
+    EXPECT_TRUE(is_cancel(pulled[1], 2));
+
+    EXPECT_TRUE(f.deliver(5'200, ExecutionReport{.order_id = 1, .quantity = Quantity{100},
+                                                 .type = ReportType::Cancelled, .side = Side::Buy})
+                    .empty());
+    EXPECT_TRUE(f.deliver(5'200, ExecutionReport{.order_id = 2, .quantity = Quantity{100},
+                                                 .type = ReportType::Cancelled, .side = Side::Sell})
+                    .empty());
+    EXPECT_TRUE(f.tick(9'000).empty());
+
+    f.status(TradingState::Trading);
+    const std::vector<SimEvent> sent = f.tick(9'100);
+    ASSERT_EQ(sent.size(), 2u);
+    EXPECT_TRUE(is_quote(sent[0], Side::Buy, kBid));
+    EXPECT_TRUE(is_quote(sent[1], Side::Sell, kAsk));
 }
 
 } // namespace

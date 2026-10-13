@@ -56,14 +56,17 @@ void ExecutionSimulator::on_market(const MarketEvent& event, const MarketBook& b
         return;
     }
     const std::size_t before = out.size();
+    // Pre-event state. While not Trading nothing matches, so no historical
+    // event fills ours (a halted book may cross); rule (b) still runs.
+    const bool trading = book.trading_state() == TradingState::Trading;
 
     if (event.type == MarketEventType::Add) {
-        if (book.find(event.order_id) == nullptr) {  // else a duplicate the book rejects
+        if (trading && book.find(event.order_id) == nullptr) {  // else not trading, or a duplicate the book rejects
             cross(event.side, event.price, event.quantity.value(), event.timestamp, FillCause::RuleCAdd, out);
         }
     } else if (event.type == MarketEventType::Execute || event.type == MarketEventType::Cancel ||
                event.type == MarketEventType::Delete || event.type == MarketEventType::Replace) {
-        // Trade touches no visible order; Modify and Clear are not applied by MarketBook yet.
+        // Trade and Status touch no visible order; Modify and Clear are not applied by MarketBook yet.
         const Order* h = book.find(event.order_id);
         if (h == nullptr) {
             return;
@@ -78,7 +81,8 @@ void ExecutionSimulator::on_market(const MarketEvent& event, const MarketBook& b
 
         const Side side = h->side();
         const std::uint64_t removed = reduce ? event.quantity.value() : h->remaining_quantity().value();
-        std::uint64_t left = event.type == MarketEventType::Execute ? removed : 0;  // can fill us: (a), (d)
+        // Can fill us: (a), (d).
+        std::uint64_t left = trading && event.type == MarketEventType::Execute ? removed : 0;
         // ITCH C carries the trade's own price, which can beat h's displayed
         // one: a price-slid order ranks at a better, non-displayed price.
         const bool with_price = left != 0 && event.price.ticks != 0;
@@ -112,7 +116,7 @@ void ExecutionSimulator::on_market(const MarketEvent& event, const MarketBook& b
                 fill(o, filled, event.timestamp, cause, out);
             }
         }
-        if (replace) {
+        if (replace && trading) {
             cross(side, event.price, event.quantity.value(), event.timestamp, FillCause::RuleCReplace, out);
         }
     }
@@ -134,6 +138,9 @@ void ExecutionSimulator::on_order_arrive(const OrderRequest& request, Timestamp 
     LevelInfo best;
     if (request.quantity.is_zero()) {
         reason = RejectReason::InvalidOrder;
+    } else if (book.trading_state() != TradingState::Trading) {
+        reason = RejectReason::NotTrading;
+        ++statistics_.not_trading_rejects;
     } else if (request.time_in_force == TimeInForce::Day && book.best(opposite, best) &&
                (buy ? request.price >= best.price : request.price <= best.price)) {
         reason = RejectReason::WouldCross;

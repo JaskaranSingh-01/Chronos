@@ -20,6 +20,7 @@ TEST(MarketEventTest, DefaultsToZeroedAdd)
     EXPECT_EQ(event.symbol, SymbolId{0});
     EXPECT_EQ(event.type, MarketEventType::Add);
     EXPECT_EQ(event.side, Side::Buy);
+    EXPECT_EQ(event.trading_state, TradingState::Trading);
 }
 
 TEST(MarketEventTest, SupportsDesignatedInitialisation)
@@ -50,13 +51,14 @@ TEST(MarketEventTest, Is48Bytes)
     static_assert(std::is_trivially_copyable_v<MarketEvent>);
 }
 
-TEST(MarketEventTest, HasEightTypes)
+TEST(MarketEventTest, HasNineTypes)
 {
     static_assert(std::is_same_v<std::underlying_type_t<MarketEventType>, std::uint8_t>);
+    static_assert(std::is_same_v<std::underlying_type_t<TradingState>, std::uint8_t>);
     static_assert(std::is_same_v<SymbolId, std::uint32_t>);
 
-    EXPECT_EQ(market_event_type_count, 8u);
-    EXPECT_EQ(static_cast<std::size_t>(MarketEventType::Trade) + 1, market_event_type_count);
+    EXPECT_EQ(market_event_type_count, 9u);
+    EXPECT_EQ(static_cast<std::size_t>(MarketEventType::Status) + 1, market_event_type_count);
 }
 
 } // namespace

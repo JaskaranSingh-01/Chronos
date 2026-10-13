@@ -24,10 +24,11 @@ namespace simulator {
 //   Execute   E, C   4         F
 //   Clear     -      -         R
 //   Trade     P      5         T
+//   Status    H      7         status (StatusMsg)
 //
-// Not mapped (the source skips and counts them): ITCH S, Q, B and the
-// administrative types (R feeds InstrumentRegistry); LOBSTER 6 (cross trade)
-// and 7 (trading halt).
+// Not mapped (the source skips and counts them): ITCH S, Q, B, h (operational
+// halt, one market centre) and the administrative types (R feeds
+// InstrumentRegistry); LOBSTER 6 (cross trade).
 enum class MarketEventType : std::uint8_t {
     // A new visible order. order_id = new id, side, price = limit, quantity = size.
     // Book: joins the back of its price level.
@@ -65,12 +66,36 @@ enum class MarketEventType : std::uint8_t {
     // An execution not tied to a visible order. order_id = source id or 0,
     // price = trade price, quantity = size; side is informational, per adapter.
     // Book: none; the book ignores it.
-    Trade
+    Trade,
+
+    // The symbol's trading state changed. trading_state = the new state; every
+    // other field but timestamp and symbol is zero.
+    // Book: records it (MarketBook::trading_state()); no order changes.
+    Status
 };
 
-inline constexpr std::size_t market_event_type_count = 8;
+inline constexpr std::size_t market_event_type_count = 9;
 
-static_assert(static_cast<std::size_t>(MarketEventType::Trade) + 1 == market_event_type_count);
+static_assert(static_cast<std::size_t>(MarketEventType::Status) + 1 == market_event_type_count);
+
+// A symbol's trading state, carried by Status. Anything but Trading means no
+// matching: the venue queues orders without executing them, so the book may cross.
+//   State          ITCH H state   LOBSTER 7 price   Databento status action
+//   Trading        'T'            1                 Trading
+//   Halted         'H'            -1                Halt, Suspend, NotAvailableForTrading
+//   Paused         'P' (LULD)     -                 Pause
+//   QuotationOnly  'Q'            0                 Quoting
+// LOBSTER 7 with any other price is SourceError::InvalidTradingState, as is an
+// unknown ITCH state byte. ITCH also halts a security left out of the pre-open
+// trading action spin (ItchSource). Databento's other StatusAction values (dbn:
+// None, PreOpen, PreCross, Cross, Rotation, NewPriceIndication, PreClose,
+// Close, PostClose, SsrChange) are session phases or flags and emit no Status.
+enum class TradingState : std::uint8_t {
+    Trading,  // zero: a source without Status events always trades
+    Halted,
+    Paused,
+    QuotationOnly
+};
 
 // Plain data, no behaviour. order_id is unique within one symbol while the
 // order is live.
@@ -84,9 +109,10 @@ struct MarketEvent
     SymbolId symbol{0};
     MarketEventType type{MarketEventType::Add};
     Side side{Side::Buy};        // Add (informational on Trade); Modify and Replace inherit it
+    TradingState trading_state{TradingState::Trading};  // Status only
 };
 
-// 46 bytes of fields with no inner padding, rounded up to 48.
+// 47 bytes of fields with no inner padding, rounded up to 48.
 static_assert(sizeof(MarketEvent) == 48);
 
 } // namespace simulator
