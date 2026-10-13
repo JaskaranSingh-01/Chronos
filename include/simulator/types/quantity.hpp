@@ -31,9 +31,6 @@ namespace simulator
             assert(other.value_ <= value_);
             return Quantity{value_ - other.value_};
         }
-        // constexpr Quantity subtract(Quantity other) const noexcept {
-        //     return Quantity{value_ - other.value_};
-        // }
 
     };
 } // namespace simulator

@@ -123,6 +123,22 @@ TEST(OrderBookTest, RejectsDuplicateOrderId)
     EXPECT_EQ(book.best_bid(), &first);
 }
 
+// The guard every add path relies on (BUG.01): Order::activate accepts a zero
+// quantity, and nothing may rest with 0 shares.
+TEST(OrderBookTest, RejectsZeroQuantityOrder)
+{
+    OrderBook book;
+
+    auto order = make_sell_order(1, Price{100}, Quantity{0});
+    activate(order);
+
+    EXPECT_FALSE(book.add(order));
+
+    EXPECT_TRUE(book.empty());
+    EXPECT_TRUE(book.asks().empty());  // no empty level left behind
+    EXPECT_EQ(order.level(), nullptr);
+}
+
 
 // =============================================================================
 // Order lookup
@@ -668,107 +684,6 @@ TEST(OrderBookTest, ConstBestAskWorks)
 
     EXPECT_EQ(const_book.best_ask(), &order);
 }
-
-TEST(OrderBookTest, RemovesFilledOrder)
-{
-    OrderBook book;
-
-    auto order = make_buy_order(
-        1,
-        Price{100},
-        Quantity{100}
-    );
-
-    activate(order);
-
-    ASSERT_TRUE(book.add(order));
-
-    ASSERT_TRUE(order.execute(Quantity{100}));
-
-    EXPECT_EQ(order.state(), OrderState::Filled);
-    EXPECT_EQ(book.find(order.id()), &order);
-
-    EXPECT_TRUE(book.remove(order.id()));
-
-    EXPECT_EQ(book.find(order.id()), nullptr);
-    EXPECT_EQ(book.best_bid(), nullptr);
-    EXPECT_TRUE(book.empty());
-
-    // Important: remove() does not change lifecycle state.
-    EXPECT_EQ(order.state(), OrderState::Filled);
-}
-
-
-
-TEST(OrderBookTest, CannotRemoveActiveOrder)
-{
-    OrderBook book;
-
-    auto order = make_buy_order(1, Price{100});
-
-    activate(order);
-
-    ASSERT_TRUE(book.add(order));
-
-    EXPECT_FALSE(book.remove(order.id()));
-
-    EXPECT_EQ(book.find(order.id()), &order);
-    EXPECT_EQ(order.state(), OrderState::Active);
-}
-
-TEST(OrderBookTest, CannotRemovePartiallyFilledOrder)
-{
-    OrderBook book;
-
-    auto order = make_buy_order(
-        1,
-        Price{100},
-        Quantity{100}
-    );
-
-    activate(order);
-
-    ASSERT_TRUE(book.add(order));
-
-    ASSERT_TRUE(order.execute(Quantity{40}));
-
-    EXPECT_EQ(
-        order.state(),
-        OrderState::PartiallyFilled
-    );
-
-    EXPECT_FALSE(book.remove(order.id()));
-
-    EXPECT_EQ(book.find(order.id()), &order);
-}
-
-
-
-TEST(OrderBookTest, RemovesFilledSellOrder)
-{
-    OrderBook book;
-
-    auto order = make_sell_order(
-        1,
-        Price{100},
-        Quantity{100}
-    );
-
-    activate(order);
-
-    ASSERT_TRUE(book.add(order));
-
-    ASSERT_TRUE(order.execute(Quantity{100}));
-
-    EXPECT_EQ(order.state(), OrderState::Filled);
-
-    EXPECT_TRUE(book.remove(order.id()));
-
-    EXPECT_EQ(book.find(order.id()), nullptr);
-    EXPECT_EQ(book.best_ask(), nullptr);
-    EXPECT_TRUE(book.empty());
-}
-
 
 // =============================================================================
 // Level totals

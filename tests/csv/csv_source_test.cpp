@@ -286,7 +286,7 @@ TEST(CsvSourceTest, ReportsEachRowErrorWithItsLine)
     using E = SourceError;
     const Case cases[] = {
         {header6, "100,ADD,1,BUY,100", E::InvalidRow},
-        {header6, "100,ADD,1,BUY,100,10,", E::InvalidRow},  // the legacy reader took it
+        {header6, "100,ADD,1,BUY,100,10,", E::InvalidRow},  // a trailing comma is a 7th column
         {header7, "100,ADD,1,BUY,100,10,,1", E::InvalidRow},
         {header7, "100,ADD,1,BUY,100,10", E::InvalidRow},
         {header6, "x,MODIFY,-1,HOLD,+1", E::InvalidRow},           // columns first,
@@ -323,7 +323,6 @@ TEST(CsvSourceTest, ReportsEachRowErrorWithItsLine)
     }
 }
 
-// Port of ReplayEngineTest.ReplaysEventsDirectlyFromCsv.
 TEST(CsvSourceTest, ReplaysBasicFileThroughMarketReplay)
 {
     MappedFile file;
@@ -346,7 +345,6 @@ TEST(CsvSourceTest, ReplaysBasicFileThroughMarketReplay)
     EXPECT_TRUE(book.is_crossed());
 }
 
-// Port of ReplayEngineTest.ReportsMalformedCsvAsReaderError.
 TEST(CsvSourceTest, MarketReplayStopsAtTheMalformedLine)
 {
     MappedFile file;

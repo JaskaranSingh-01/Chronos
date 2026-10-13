@@ -1,0 +1,562 @@
+# Chronos
+
+Chronos is a deterministic, single-threaded C++20 event-driven market simulator. It rebuilds the L3 order book
+of every symbol of a NASDAQ TotalView-ITCH 5.0 day in one pass, and backtests strategies against that book with
+exact queue position. Simulated orders never change the replayed history. At run time it needs only the C++
+standard library and POSIX.
+
+## Verified results
+
+**Data:** NASDAQ's public TotalView-ITCH 5.0 sample for 2019-12-30, `12302019.NASDAQ_ITCH50`: 8,251,407,909 bytes
+decompressed, 268,744,780 messages. The replay numbers come from the benchmark runs in
+[`bench/results/2026-10-13-a5ed53b-dirty-m2.04/`](bench/results/2026-10-13-a5ed53b-dirty-m2.04/summary.md),
+measured on 2026-10-13. A later full-day re-run of the final replay code gave the same counts and digest.
+
+### Full day, every symbol in one pass
+
+| | |
+|---|---|
+| Events | 264,460,539 |
+| By type | Add 118,631,456 · Delete 114,360,997 · Replace 21,639,067 · Execute 5,822,741 · Cancel 2,787,676 · Trade 1,218,602 |
+| Rejected | 0 |
+| Books | 8,906, every one empty after the last event (20:00:00.097 ET) |
+| Peak live orders | 1,924,078, all books together |
+| Invariants | pass for all 8,906 books at the end of the run |
+| Combined digest | `6897f945bcef75c2`, identical in all 9 full-day benchmark runs |
+
+From [`full-1.log`](bench/results/2026-10-13-a5ed53b-dirty-m2.04/full-1.log):
+
+```text
+Source
+  messages 268744780: 0 other symbols, 4275335 unused types, 264460539 events
+  truncated tail   no
+Events 264460539, 04:00:00.000724386 to 20:00:00.097129306 local
+  Add              118631456
+  Modify           0
+  Replace          21639067
+  Cancel           2787676
+  Delete           114360997
+  Execute          5822741
+  Clear            0
+  Trade            1218602
+
+Applied 264460539, rejected 0
+
+Books 8906: 8906 empty at the end, 0 not empty
+...
+Live orders       peak 1924078, 0 at the end, all books together (capacity 4194304)
+Invariants at end: ok, all 8906 books
+                   0 periodic checks passed
+Digest (combined) 6897f945bcef75c2
+```
+
+What this evidence shows, and what it does not:
+
+- **0 rejections.** Every Add found a new order id and a free slot. Every Execute, Cancel, Delete and Replace
+  named a live order and stayed within its remaining size. A decoder or book bug (a skipped `F` or `C` message, a
+  wrong field offset, a wrong replace) typically shows up as `UnknownOrder` or `ExceedsRemaining` rejections.
+- **Every book empty after the last message.** Every order added during the day was removed by later messages.
+- **Invariants** are checked at the end of the run: the order index matches the levels, level totals match their
+  orders, no level is empty, sequence numbers rise from head to tail (FIFO), and the pool count matches.
+  `--check-invariants N` also checks the book of every N-th applied event. Only those periodic checks test "not
+  crossed during regular trading hours", because the end-of-run check falls after 16:00. The runs above used the
+  end-of-run check only.
+- **The combined digest** is FNV-1a over (symbol, last sequence, book digest) for every book. With every book empty
+  at the end, it fingerprints each symbol's count of Adds and Replaces. It is a regression check across code
+  changes, not a proof of correctness.
+- **The 256 MiB slice** (pre-market only, below) replays every symbol with 0 rejections, but `--all` on it exits 1:
+  6 books are crossed after 09:30. All six are halted (ITCH trading state `H`), which Chronos does not model yet
+  (see [Status and roadmap](#status-and-roadmap)).
+
+### Backtest: SPY market maker
+
+The `mm` strategy quotes 100 shares at the best bid and the best ask with post-only orders.
+
+| Run | Maker fills | Fill rate (of quoted shares) | FIFO anomalies | Total PnL |
+|---|---|---|---|---|
+| Full day, no fees | 12,843 | 19.69 % | 0 | −$2,726.78 |
+| 256 MiB slice (pre-market), no fees | 143 (13,693 shares) | 3.65 % | 0 | $4.77 |
+
+The full-day row was recorded on 2026-10-13 at commit `a5ed53b`; its log is not in the repository, so re-run the
+command in [Backtest](#backtest) to reproduce it. The slice row is the example output under
+[Backtest](#backtest). These are toy strategies: the PnL is not a trading result.
+
+**The FIFO-anomaly counter found a fill-model bug.** It counts fills by rules (a) or (d) (see
+[Fill model](#d2-the-fill-model)) while the model still had historical shares ahead of our order. The same full-day
+run before the trade-price guard, also recorded on 2026-10-13, had 583 such anomalies among 13,539 maker fills. The
+fill attribution table traced all of them to ITCH `C` executions of price-slid orders: displayed at our price, but
+ranked and executed one tick better, so the aggressor never reached our price. With the guard, the count is 0.
+
+### Tests
+
+- `simulator_tests`: 458 pass and 5 skip in both RelWithDebInfo and Debug. Four of the skips are the real-data
+  tests, which need `CHRONOS_ITCH_FILE`; the fifth is the error check of the conformance suite, which does not apply
+  to `VectorSource`. `alloc_counter_test`: 3 pass. `ctest` runs 471 tests, including 5 CLI exit-code tests.
+- 0 compiler warnings with `-Wall -Wextra -Wpedantic` (Apple clang 17). A local g++ 14 build passes the suite
+  with 23 warnings, not yet fixed.
+- UBSan (`-DCHRONOS_SANITIZE=undefined`, where any report aborts): 471 of 471 in RelWithDebInfo and in Debug.
+- With `CHRONOS_ITCH_FILE` set to the slice, the 4 real-data tests pass.
+
+## Performance
+
+Full day, `--all`, median of 3 runs. Each column adds one change to the one before it. Every run gave the same
+digest and 0 rejections.
+
+| | baseline | `unlink` through the order's level | open-addressing order index |
+|---|---|---|---|
+| CPU s (user + sys) | 210.9 | 185.8 | 122.2 |
+| wall s | 222.2 | 195.7 | 131.3 |
+| events/s | 1,190,206 | 1,351,231 | 2,013,783 |
+| ns/event, mean | 840.2 | 740.1 | 496.6 |
+| ns/event p50 / p99 / p99.9 | 799 / 1,727 / 4,607 | 735 / 1,471 / 3,583 | 463 / 1,087 / 3,199 |
+| allocations per event | 0.697 | 0.697 | 0.166 |
+| peak footprint MB | 571 | 571 | 593 |
+| results | [baseline](bench/results/2026-10-13-a5ed53b-dirty-baseline/summary.md) | [m2.12](bench/results/2026-10-13-a5ed53b-dirty-m2.12/summary.md) | [m2.04](bench/results/2026-10-13-a5ed53b-dirty-m2.04/summary.md) |
+
+From the baseline to the order-index change, CPU time fell 42.0 % and events/s rose 69 %.
+
+- **Machine:** Apple M4 (4 performance + 6 efficiency cores), 16 GiB, macOS 27.0.1, Apple clang 17.0.0, CMake
+  `Release` (`-O3 -DNDEBUG`), one thread.
+- **Latency percentiles** are of the mean ns/event of each batch of 1,024 events, not of single events.
+  `steady_clock` ticks every 41.67 ns on this machine, so single events cannot be timed. Each value is a histogram
+  bucket's upper bound, at most 6.25 % high.
+- **I/O.** The 8.25 GB file does not stay in the page cache of a 16 GiB machine, so every full-day run read it from
+  disk again (about 500,000 major faults). Wall time includes that wait; CPU time is the stable metric.
+- **Memory.** Peak RSS counts the resident pages of the mapped input, so the table shows the peak footprint, the
+  process's own memory.
+- **Profile** (`/usr/bin/sample`, 1 ms, last column), self time inside the replay loop: `OrderBook::unlink`
+  21.7 %, `OrderBook::add` 18.6 %, `OrderBook::find` 14.7 %, `ItchSource::next` 10.2 % (28.1 % with its decode
+  callees). The remaining allocations are almost all `std::map` price-level nodes.
+
+[`bench/RESULTS.md`](bench/RESULTS.md) has the protocol, the min-max ranges, the slice runs, the Google Benchmark
+micro-benchmarks, the profiles, the decisions (including a rejected candidate) and the caveats. Reproduce with
+`bench/run.sh` (below).
+
+## Quick start
+
+**Requirements:** CMake 3.20 or newer, a C++20 compiler and a POSIX system. Developed on macOS arm64 with Apple
+clang 17. GoogleTest v1.16.0, and Google Benchmark v1.9.1 with `-DCHRONOS_BENCH=ON`, come in through FetchContent,
+so the first configure needs network access.
+
+### Build and test
+
+```bash
+cmake -S . -B build                  # RelWithDebInfo unless CMAKE_BUILD_TYPE is set
+cmake --build build -j
+ctest --test-dir build               # simulator_tests, alloc_counter_test and the CLI exit-code tests
+```
+
+A Debug build:
+
+```bash
+cmake -S . -B build/debug -DCMAKE_BUILD_TYPE=Debug
+cmake --build build/debug -j
+ctest --test-dir build/debug
+```
+
+**Sanitizers.** `CHRONOS_SANITIZE` is `OFF` (the default), `ON` (= `address,undefined`) or any `-fsanitize=` list.
+Every sanitized build adds `-fno-sanitize-recover=all`, so any report aborts and a passing test is a clean one.
+
+```bash
+cmake -S . -B build/ubsan -DCHRONOS_SANITIZE=undefined
+cmake --build build/ubsan -j
+ctest --test-dir build/ubsan
+```
+
+**ASan note.** On macOS 27 with Apple clang 17, AddressSanitizer hangs at process startup, so
+`-DCHRONOS_SANITIZE=ON` does not work on the development machine and Chronos has not been run under ASan there.
+Use `undefined` locally. The GitHub Actions workflow in [`.github/workflows/ci.yml`](.github/workflows/ci.yml)
+runs ASan with UBSan under g++ on Ubuntu, and UBSan under clang on Ubuntu and macOS; it has not run yet.
+
+**Formatting.** [`scripts/check-format.sh`](scripts/check-format.sh) `[FILE...]` checks files against
+[`.clang-format`](.clang-format) and changes nothing. Use the version CI pins: `pipx install clang-format==20.1.8`.
+The existing code has not been reformatted yet.
+
+### Get the data
+
+NASDAQ publishes sample TotalView-ITCH 5.0 days at `https://emi.nasdaq.com/ITCH/Nasdaq ITCH/`, one gzip file per
+day named `MMDDYYYY.NASDAQ_ITCH50.gz`. Everything in this README uses 2019-12-30:
+
+```bash
+mkdir -p data/itch
+curl -fL -o data/itch/12302019.NASDAQ_ITCH50.gz 'https://emi.nasdaq.com/ITCH/Nasdaq%20ITCH/12302019.NASDAQ_ITCH50.gz'
+gzip -t data/itch/12302019.NASDAQ_ITCH50.gz
+gunzip -c data/itch/12302019.NASDAQ_ITCH50.gz > data/itch/12302019.NASDAQ_ITCH50.bin
+```
+
+The download is 3,524,013,057 bytes (its size on 2026-10-13), and the `.bin` is 8,251,407,909 bytes. Chronos maps
+the uncompressed file; it does not read gzip. `data/` is in `.gitignore`: market data is never committed or
+redistributed here.
+
+An optional slice, the first 256 MiB, for quick runs and the real-data tests:
+
+```bash
+head -c 268435456 data/itch/12302019.NASDAQ_ITCH50.bin > data/itch/12302019.NASDAQ_ITCH50.first-256MiB.bin
+```
+
+It covers 04:00 to 09:30:10 ET, so it is pre-market only, and its last message is cut, so pass
+`--allow-truncated-tail`.
+
+### Replay
+
+```bash
+./build/simulator replay data/itch/12302019.NASDAQ_ITCH50.first-256MiB.bin --symbol AAPL --date 2019-12-30 --allow-truncated-tail
+```
+
+Output on the slice (exit status 0):
+
+```text
+Source
+  messages 7844756: 6521447 other symbols, 1314891 unused types, 8417 events; locate 13
+  truncated tail   yes (last partial message ignored)
+
+Events 8417, 04:00:00.007075802 to 09:30:10.715766934 local
+  Add              4672
+  Modify           0
+  Replace          58
+  Cancel           10
+  Delete           2998
+  Execute          494
+  Clear            0
+  Trade            185
+
+Applied 8417, rejected 0
+
+Book, top 5 levels per side
+  side          price         size   orders
+  ask        289.4900          100        1
+  ask        289.4700            9        1
+  ask        289.4300          100        1
+  ask        289.4100          300        1
+  ask        289.3800          587        4
+  bid        289.3200           65        1
+  bid        289.2900          135        3
+  bid        289.2800            2        1
+  bid        289.2700          304        2
+  bid        289.2500          741        6
+  spread 0.0600, orders 1391, peak orders 1391, crossed no, locked no
+
+Invariants at end: ok (0 periodic checks passed)
+Digest            7f1e922654415cf3
+```
+
+The run also prints its configuration, and `Elapsed` and `Memory` lines. Several symbols, or every symbol, in one
+pass, each into its own book:
+
+```bash
+./build/simulator replay data/itch/12302019.NASDAQ_ITCH50.first-256MiB.bin --symbols AAPL,MSFT --date 2019-12-30 --allow-truncated-tail
+./build/simulator replay data/itch/12302019.NASDAQ_ITCH50.bin --all --date 2019-12-30
+```
+
+The second command is the full-day run of [Verified results](#verified-results). Its replay loop took about 131 s
+of wall time on the machine described under [Performance](#performance).
+
+### Backtest
+
+```bash
+./build/simulator backtest data/itch/12302019.NASDAQ_ITCH50.first-256MiB.bin --symbol SPY --date 2019-12-30 --allow-truncated-tail --strategy mm
+```
+
+Part of the output on the slice (exit status 0):
+
+```text
+Execution
+  maker fills      143 (13693 shares)
+  taker fills      0 (0 shares)
+  fill rate        3.65% of 375000 shares quoted
+  cancels          3612 done, 64 rejected (too late)
+  would cross      1 rejected
+  FIFO anomalies   0
+
+Fill attribution (maker fills/FIFO anomalies; crosses = first second of 09:30, 16:00)
+  rule, msg         pre-open    open cross       regular   close cross    post-close
+  (a) E                 26/0           2/0           3/0           0/0           0/0
+  (a) C                  0/0           0/0           0/0           0/0           0/0
+  (d) E                  5/0           0/0           1/0           0/0           0/0
+  (d) C                  0/0           0/0           0/0           0/0           0/0
+  (c) Add               86/0           2/0          14/0           0/0           0/0
+  (c) Replace            0/0           0/0           4/0           0/0           0/0
+
+Portfolio
+  position         -233 shares
+  cash             $75289.4000
+  realised PnL     $10.7069
+  unrealised PnL   -$5.9369
+  fees             $0.0000
+  total PnL        $4.7700 (realised + unrealised - fees)
+  max drawdown     $141.0200
+  max |position|   468 shares
+  open orders      2 at the end
+```
+
+Its history digest, `e9f436a5ac864f40`, equals that of `replay --symbol SPY` on the same file: the strategy's
+orders did not change the replayed book.
+
+Full-day runs: the market maker without fees (the row in [Verified results](#verified-results)), with a $0.0020
+per share maker rebate, and the imbalance taker paying $0.0030 per share (the Reg NMS access-fee cap):
+
+```bash
+./build/simulator backtest data/itch/12302019.NASDAQ_ITCH50.bin --symbol SPY --date 2019-12-30 --strategy mm
+./build/simulator backtest data/itch/12302019.NASDAQ_ITCH50.bin --symbol SPY --date 2019-12-30 --strategy mm --maker-fee-ticks -20
+./build/simulator backtest data/itch/12302019.NASDAQ_ITCH50.bin --symbol SPY --date 2019-12-30 --strategy imbalance --taker-fee-ticks 30
+```
+
+### Real-data tests
+
+```bash
+CHRONOS_ITCH_FILE=data/itch/12302019.NASDAQ_ITCH50.first-256MiB.bin ./build/simulator_tests --gtest_filter='ItchRealDataTest.*:BacktestDeterminismTest.*'
+```
+
+`CHRONOS_ITCH_SYMBOL` defaults to `AAPL` and `CHRONOS_ITCH_DATE` to `2019-12-30`. Without `CHRONOS_ITCH_FILE` the
+real-data tests skip. Use the slice: these tests read the file several times.
+
+### Benchmarks
+
+```bash
+bench/run.sh [label]
+```
+
+It builds `Release` with `-DCHRONOS_BENCH=ON` in `build/bench`, replays the full day 3 times and the slice 5 times,
+runs `simulator_bench` 5 times, profiles one more full-day replay with `sample` (macOS), and writes everything to
+`bench/results/<date>-<commit>[-dirty][-label]/`. It needs both data files and takes about 13 minutes.
+`bench/summary.py <folder>...` prints and compares the tables.
+
+## How it works
+
+```text
+ITCH 5.0 file ─► MappedFile ─► ItchSource ── R messages ──► InstrumentRegistry (SymbolId → scales)
+                  (mmap)        locate filter, then decode A F U X D E C P
+                                       │ MarketEvent (48 bytes) through MarketEventSource::next()
+                                       │ (CsvSource and VectorSource implement it too)
+            ┌──────────────────────────┴──────────────────────────┐
+            ▼ replay                                              ▼ backtest
+    MarketReplay::run                              EventLoop<Strategy>, per market event e:
+            │                                        ① ExecutionSimulator::on_market(e)   pre-event
+            ▼                                        ② MarketBook::apply(e)   the only writer
+    MarketBooks: a MarketBook per symbol             ③ Portfolio::mark
+    on one shared OrderPool (the history)            ④ Strategy::on_market(e)             post-event
+                                                   our orders, through SimQueue:
+                                                     Strategy ─► OrderGateway ─► ExecutionSimulator
+                                                     ExecutionSimulator ─► Portfolio, Strategy
+```
+
+| Path | Contents |
+|---|---|
+| `include/simulator/types/` | `Price`, `Quantity` (`uint64`), `Timestamp` (ns since the Unix epoch, UTC), `OrderId`, `SymbolId` (`uint32`), `Side` |
+| `include/simulator/orders/` | `Order`, `PriceLevel`, `OrderBook`, `OrderIndex` (open addressing), `OrderPool`: the internals of `MarketBook` |
+| `include/simulator/market/` | `MarketEvent`, `InstrumentRegistry`, `MarketEventSource`, `VectorSource`, `MarketBook`, `MarketBooks`, `MarketReplay` |
+| `include/simulator/io/` | `MappedFile` |
+| `include/simulator/itch/` | `ItchSource` with its framing (`ItchMessageReader`, `ByteReader`) and `ItchDecoder` |
+| `include/simulator/csv/` | `CsvSource`, a CSV event source for the library and tests (the CLI reads ITCH) |
+| `include/simulator/sim/` | `SimEvent` and `SimQueue`, `OrderGateway`, `ExecutionReport`, `ExecutionSimulator` |
+| `include/simulator/portfolio/` | `Portfolio`, `RiskLimits`, `FeeSchedule` |
+| `include/simulator/engine/` | `EventLoop<S>`, the `Strategy` concept, `StrategyContext`, `NullStrategy` |
+| `include/simulator/strategies/` | `ImbalanceTaker` and `MarketMaker`, both toys |
+| `include/simulator/metrics/` | `LatencyHistogram` |
+| `include/simulator/cli/` | argument parsing and the usage text |
+| `src/` | the implementations, mirroring `include/simulator/` |
+| `app/` | `main.cpp`, and `alloc_counter.cpp`, a counting `operator new` linked only into executables |
+| `bench/` | `simulator_bench.cpp`, `run.sh`, `summary.py`, [`RESULTS.md`](bench/RESULTS.md) and `results/` |
+| `tests/` | one suite per component; `tests/support/` holds the source conformance suite; `tests/itch/` holds a byte-exact ITCH builder and real NASDAQ message bytes it is checked against |
+
+### D1: history and simulation never mix
+
+- `MarketBook` is the historical L3 book of one symbol. `MarketBook::apply` is its only mutator, and only the two
+  loops below call it, with market events.
+- The execution simulator, the portfolio and the strategies get `const` references to the book. Our orders live in
+  `ExecutionSimulator` as shadow orders and are never inserted into `MarketBook`. Historical orders are never matched
+  against each other.
+- So a backtest leaves the same history digest as a plain replay of the same file, which
+  `BacktestDeterminismTest` asserts.
+
+### D3: one deterministic loop
+
+- `EventLoop<S>` merges the market stream with `SimQueue`, which holds only our events (`OrderArrive`,
+  `CancelArrive`, `ReportDeliver`, `Timer`). Events run in (timestamp, stream, sequence) order, and a tie goes to
+  the market event. That is pessimistic on purpose: an order that arrives at `t` queues behind every historical Add
+  stamped `t`.
+- Per market event, in this order: ① `ExecutionSimulator::on_market` on the pre-event book, because the fill rules
+  need the historical order that the event references; ② `MarketBook::apply`; ③ `Portfolio::mark` while a position
+  is open; ④ `Strategy::on_market`, only if the book applied the event, on the post-event book.
+- Two constant latencies, 50,000 ns each by default: the order latency (strategy to exchange, which also stands for
+  the market-data delay) and the report latency (exchange back to the strategy and the portfolio). An order sent in
+  ④ arrives after the event that triggered it, so there is no look-ahead.
+- At the end of the market stream, the events still in `SimQueue` are drained against the final book, at most
+  100,000 of them. New timers are refused from then on.
+- The loop never reads a wall clock. The same input and flags give the same output.
+- `replay` runs `MarketReplay::run`, a market-only loop with the same counting and checks.
+
+### D2: the fill model
+
+From the comment in [`include/simulator/sim/execution_simulator.hpp`](include/simulator/sim/execution_simulator.hpp):
+
+- **IOC**, at arrival: walk the visible opposite levels best first while they cross, and fill
+  min(remaining, level quantity) at each level's price as taker. Whatever is left expires. Fills take no
+  liquidity from the book (no market impact).
+- **Day orders are post-only.** One that would take liquidity is rejected (`WouldCross`). Otherwise it rests
+  virtually: `anchor_sequence` = the book's last sequence and `ahead_quantity` = the visible quantity at its price,
+  so every historical order already at that price is ahead of it.
+- **On each market event**, before the book applies it, for each of our resting orders `o`:
+  - **(b)** an Execute, Cancel, Delete or Replace of a historical order ahead of `o` at `o`'s price shrinks
+    `ahead_quantity`;
+  - **(a)** an Execute of a historical order behind `o` at `o`'s price fills `o` at its price;
+  - **(d)** an Execute of a same-side order at a worse price fills `o`: a trade-through would have hit `o` first;
+  - **(c)** an Add, or a Replace's new order, that crosses `o` from the opposite side fills `o` at its price.
+- **Trade-price guard.** Rules (a) and (d) fill `o` only if the trade price is not better than `o`'s price. The
+  trade price is the execution price of an ITCH `C`, else the historical order's price.
+- One event fills our orders in our priority order (best price, then arrival), and the total is capped at the
+  event's quantity. Every such fill is maker liquidity.
+- **Diagnostics.** A rule (a) or (d) fill while `ahead_quantity > 0` counts as a FIFO anomaly, and the first 10 are
+  kept with their context. `backtest` prints maker fills and anomalies by rule, message type and session phase.
+- **Portfolio.** Reports are booked at delivery, `report latency` after they happened, just before the strategy sees
+  them. Longs are marked at the best bid and shorts at the best ask. Fees are per share in price ticks; a negative
+  fee is a rebate. Money is integer: tick-shares ($0.0001) for ITCH, with `__int128` products. PnL is realised +
+  unrealised − fees.
+
+### Source-agnostic events
+
+- `MarketEvent` is 48 bytes: timestamp (`int64` ns since the Unix epoch, UTC), order id, new order id, price
+  (`int64` ticks at the instrument's price scale), quantity (`uint64`), `SymbolId`, type and side.
+- Eight types: Add, Modify, Replace, Cancel, Delete, Execute, Clear and Trade. ITCH maps `A`/`F` to Add, `U` to
+  Replace, `X` to Cancel, `D` to Delete, `E`/`C` to Execute (`C` carries its execution price) and `P` to Trade,
+  which the book ignores. Modify and Clear exist for future sources; `MarketBook` rejects them as `Unsupported`.
+- `ItchSource` reads the locate field before decoding, so messages of unselected symbols are never decoded. The
+  `R` message of each selected symbol registers its instrument (venue XNAS, price scale 4). ITCH times are ns after
+  midnight; the source adds the session midnight, from `--date` and the US Eastern offset of that date, or
+  `--utc-offset`.
+- Every source must pass `SourceConformanceTest`: timestamps never go backwards, references name live orders of an
+  earlier Add, sizes stay within the remaining quantity, symbols are registered first, the same bytes give the same
+  events, and errors are sticky with a position. It is instantiated for `VectorSource`, `CsvSource` and `ItchSource`.
+
+### How correctness is checked
+
+- `ItchBuilderTest.*MatchesRealNasdaqBytes`: the test-side ITCH builder reproduces real NASDAQ messages byte for
+  byte, so every ITCH test runs on the real wire layout.
+- `MarketBookTest.RandomStreamKeepsInvariantsAndIsDeterministic`: 10,000 seeded random events of every type, valid
+  and invalid. The invariants hold after every event, a rejected event never changes the digest, and two runs end
+  with the same digest.
+- `ExecutionSimulatorTest.WorkedExample1SweepsThenExpiresAndRepeatsIdentically`,
+  `RestingOrderTest.WorkedExample2QueuePosition`, `RestingOrderTest.WorkedExample3CrossingAddFillsAtOurPrice` and
+  `EventLoopTest.TieGoesToMarketInTheSpecWalkthrough` pin the fill rules and the loop order with hand-worked
+  examples.
+- `BacktestDeterminismTest.*`: two backtests are identical and leave the history digest of a plain replay;
+  synthetic always, and on real data when `CHRONOS_ITCH_FILE` is set.
+- `ItchRealDataTest.*`: one symbol and every symbol of a real file, with 0 rejections and periodic invariant
+  checks.
+- The full-day replay in [Verified results](#verified-results).
+
+## CLI reference
+
+`./build/simulator --help` prints:
+
+```text
+usage: simulator replay <itch-file> (--symbol AAPL | --symbols AAPL,MSFT | --all)
+                        --date 2019-12-30 [options]
+       simulator backtest <itch-file> --symbol AAPL --date 2019-12-30 [options] [backtest options]
+       simulator -h | --help | --version
+
+options, both commands:
+  --symbol AAPL           one symbol, 1-8 characters (backtest takes only --symbol)
+  --date YYYY-MM-DD       the session date (required)
+  --utc-offset -05:00     offset from UTC (+HH:MM or -HH:MM); default US Eastern for --date
+  --allow-truncated-tail  a file cut mid-message ends there instead of failing
+  --depth N               book levels to print per side, at most 1000 (default 5)
+  --check-invariants N    check the book every N applied events (default 0 = only at the end)
+  --capacity N            order slots reserved for the book, at most 1073741824 (default 1048576);
+                          with --symbols or --all, shared by every book (default 4194304)
+  --json PATH             also write the results, metrics, build and input as JSON;
+                          backtest adds its config, fills, fees and PnL
+
+replay only:
+  --symbols A,B,C         several symbols in one pass, each into its own book
+  --all                   every symbol in the file
+  --latency               time every batch of 1024 events; print ns/event percentiles
+                          over the batches
+  --latency-batch N       events per timed batch (implies --latency)
+
+backtest runs a toy strategy against the replayed book, which our orders never change:
+  --strategy S            imbalance (default): IOCs on top-of-book imbalance;
+                          mm: post-only quotes at the best bid and ask
+  --order-latency-ns N    strategy to exchange, in nanoseconds (default 50000)
+  --order-latency-us N    the same in microseconds
+  --report-latency-ns N   exchange back to strategy and portfolio (default 50000)
+  --report-latency-us N   the same in microseconds
+risk limits (the largest order is the strategy's own --clip or --quote-size):
+  --max-position N        |position| limit in shares (default 500)
+  --max-open-orders N     live orders at once (default 1 for imbalance, 2 for mm)
+fees, per share in price ticks ($0.0001 for ITCH):
+  --taker-fee-ticks N     paid when taking liquidity (default 0)
+  --maker-fee-ticks N     paid when providing it; negative = rebate (default 0)
+imbalance only:
+  --threshold X           trade when one top-of-book size >= X times the other (>= 1, default 3)
+  --clip N                shares per order (default 100)
+  --cooldown-ms N         wait after each order (default 100)
+mm only:
+  --quote-size N          shares per quote (default 100)
+  --requote-ms N          a quote lives at least this long before it is moved (default 100)
+
+  -h, --help              print this help
+  --version               print the commit, build type and compiler
+
+exit status:
+  0  the run succeeded and every check passed (also --help and --version)
+  1  the run failed: a source error (a file cut mid-message without --allow-truncated-tail,
+     no stock directory message for --symbol, ...), an out-of-order timestamp, or a failed
+     book invariant (e.g. a book crossed in regular trading hours); rejected events alone
+     are counted, not failures
+  2  bad usage, an input file that cannot be opened, or a --json file that cannot be written
+```
+
+A bad argument prints a two-line error on stderr and exits 2. `--json PATH` writes one JSON object with
+`"schema": 1` and the members `build`, `machine`, `input`, `run`, `result`, `time`, `memory` and `latency`;
+`backtest` adds a `backtest` member. `bench/summary.py` reads these files.
+
+## Limitations and assumptions
+
+- **No market impact.** Our fills never remove historical liquidity, so repeated IOCs can take the same visible
+  shares again. Fill rates for aggressive orders are optimistic.
+- **L3 data only.** Every source emits per-order events. The CLI reads NASDAQ TotalView-ITCH 5.0; `CsvSource` is
+  available to the library and tests only.
+- **Order types:** IOC and post-only Day orders. A marketable Day order is rejected, not partly filled.
+- **The fill rules are (a), (b), (c) and (d) with the trade-price guard.** Hidden and non-displayed liquidity is
+  invisible: ITCH `P` prints never fill our orders, and neither do cross trades (`Q`). Opening and closing crosses
+  and trading halts are not modelled in fills.
+- **Constant latencies.** The order latency also stands for the market-data delay. There are no latency
+  distributions.
+- **One symbol per backtest.** `replay` takes one symbol, a list or all of them; `backtest` takes one.
+- **Fees are per share only:** maker and taker fees or rebates. Regulatory fees are not modelled yet: SEC Section 31
+  and the FINRA TAF on sells.
+- **Session times.** Regular trading hours are fixed at 09:30 to 16:00 ET, so half-day sessions are not handled. The
+  default US Eastern offset follows the daylight-saving rules in force since 2007; pass `--utc-offset` for earlier
+  dates.
+- **Platforms.** POSIX only (`mmap`). Built and measured only on macOS on an Apple M4. Linux is unverified until the
+  CI workflow runs.
+- **Sanitizers.** ASan has not run (see the [ASan note](#build-and-test)); UBSan is clean.
+- **The digest** is a regression check, not a proof (see [Verified results](#verified-results)).
+- **The strategies are toys,** written to exercise the fill model, not to make money.
+
+## Status and roadmap
+
+**Built:**
+- The source-agnostic event contract, the source conformance suite, and `VectorSource`, `CsvSource` and
+  `ItchSource`.
+- The L3 `MarketBook`, with invariant checks and digests. Multi-symbol replay over a shared order pool.
+- The full-day replay of every symbol with 0 rejections.
+- The benchmark harness, a profile, and two profile-driven optimisations (above).
+- The strategy layer: event loop, latency, fill model, portfolio with risk limits and fees, two toy strategies.
+- The CLI with `--help`, `--version`, documented exit codes and `--json`.
+- A GitHub Actions workflow and `.clang-format` / `.clang-tidy` configuration.
+
+**Not yet:**
+- **Trading status.** ITCH `H` messages are skipped today, so a halted book that is crossed in regular hours fails
+  the invariant check (the slice's `--all` run above). Status events would make that check halt-aware.
+- **Regulatory sell fees:** SEC Section 31 and FINRA TAF.
+- **More performance work, each gated on the profile:** price-indexed levels in place of `std::map`, which is now the
+  largest book cost and the source of the remaining allocations, then cheaper ITCH decoding.
+- **LOBSTER:** a second real adapter, and a check of `MarketBook` against LOBSTER's own book after every message.
+- **`MergedSource`:** a k-way merge by timestamp, for multi-venue or multi-day replay.
+- **Replay through `EventLoop`:** run the replay through `EventLoop` with a null strategy once its throughput is
+  shown to match `MarketReplay::run`.
+- **CI and formatting:** a first green CI run, then one formatting-only commit with `.clang-format`.
+- **Small fixes:** order state after a partial cancel, and the cause of an ITCH decode error in source errors.
+- **Open question:** CSV input in the CLI.

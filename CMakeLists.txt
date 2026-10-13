@@ -45,15 +45,9 @@ add_library(simulator_lib
     src/orders/order.cpp
     src/orders/order_pool.cpp
     src/orders/order_index.cpp
-    src/matching/matching_engine.cpp
-    src/simulator/simulator.cpp
-    src/replay/replay_engine.cpp
-    src/replay/csv_replay_event_reader.cpp
     src/itch/byte_reader.cpp
     src/itch/itch_message_reader.cpp
     src/itch/itch_decoder.cpp
-    src/itch/itch_normalizer.cpp
-    src/itch/itch_replay_event_reader.cpp
     src/market/instrument_registry.cpp
     src/market/market_book.cpp
     src/io/mapped_file.cpp
@@ -125,29 +119,18 @@ add_executable(simulator_tests
 
     tests/price_test.cpp
     tests/quantity_test.cpp
-    tests/clock_test.cpp
-    tests/event_test.cpp
     tests/timestamp_test.cpp
     tests/enums_test.cpp
     tests/order_test.cpp
     tests/price_level_test.cpp
     tests/order_book_test.cpp
-    tests/matching_engine_test.cpp
     tests/order_pool_test.cpp
     tests/order_index_test.cpp
     tests/order_pool_integration_test.cpp
-    tests/simulator/simulator_test.cpp
-    tests/simulator/simulator_matching_test.cpp
-    tests/simulator/simulator_replay_test.cpp
-    tests/replay/replay_engine_test.cpp
-    tests/replay/replay_event_reader_test.cpp
     tests/itch/byte_reader_test.cpp
     tests/itch/itch_message_reader_test.cpp
     tests/itch/itch_decoder_test.cpp
-    tests/itch/itch_normalizer_test.cpp
-    tests/itch/itch_replay_event_reader_test.cpp
     tests/itch/itch_test_builder_test.cpp
-    tests/replay/itch_replay_engine_test.cpp
     tests/market/market_event_test.cpp
     tests/market/market_event_source_test.cpp
     tests/market/instrument_registry_test.cpp

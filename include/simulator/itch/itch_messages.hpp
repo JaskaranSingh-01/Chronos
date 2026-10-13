@@ -67,8 +67,8 @@ struct ItchOrderReplace
 };
 
 /*
- * Maps a stock locate to its symbol. Not an order-book event, so it
- * is never normalised into a ReplayEvent.
+ * Maps a stock locate to its symbol. Not an order-book event: ItchSource
+ * registers the instrument from it and emits no MarketEvent.
  */
 struct ItchStockDirectory
 {

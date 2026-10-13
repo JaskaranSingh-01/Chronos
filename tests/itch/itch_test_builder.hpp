@@ -140,7 +140,7 @@ public:
     }
 
     // 'S' System Event (12 bytes). Chronos doesn't decode it; tests use it as
-    // a real message the replay reader must skip.
+    // a real message ItchSource must skip.
     ItchBuilder& system_event(std::uint16_t locate, std::uint64_t ts, char event_code)
     {
         const auto start = begin('S', locate, ts);

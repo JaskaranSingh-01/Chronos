@@ -462,18 +462,23 @@ TEST(EventLoopTest, FatalFailuresMatchMarketReplay)
     const std::vector<MarketEvent> out_of_order{add(10, 1, Side::Buy, 100, 5), add(20, 2, Side::Sell, 101, 5),
                                                 add(15, 3, Side::Buy, 99, 5), add(30, 4, Side::Buy, 98, 5)};
     const std::vector<MarketEvent> clean{add(10, 1, Side::Buy, 100, 5), add(20, 2, Side::Sell, 101, 5)};
+    // A bid above the ask in RTH: the invariant check after the second Add fails.
+    constexpr Timestamp midnight = 1'577'682'000'000'000'000;  // 2019-12-30, -05:00
+    const std::vector<MarketEvent> crossed_in_rth{add(midnight + RTH_OPEN_NS, 1, Side::Buy, 101, 5),
+                                                  add(midnight + RTH_OPEN_NS, 2, Side::Sell, 100, 5)};
 
-    auto compare = [](auto make_source, std::span<const MarketEvent> events, ReplayFailure failure) {
+    auto compare = [](auto make_source, std::span<const MarketEvent> events, const ReplayOptions& options,
+                      ReplayFailure failure) {
         auto replay_source = make_source(events);
         MarketBook replay_book{kSymbol, 8};
-        const ReplayReport expected = MarketReplay::run(replay_source, replay_book, {});
+        const ReplayReport expected = MarketReplay::run(replay_source, replay_book, options);
 
         auto source = make_source(events);
         MarketBook book{kSymbol, 8};
         ExecutionSimulator execution;
         Portfolio portfolio{kEquity, kWide, FeeSchedule{}};
         NullStrategy strategy;
-        EventLoop<NullStrategy> loop{source, book, execution, portfolio, strategy, LatencyConfig{}};
+        EventLoop<NullStrategy> loop{source, book, execution, portfolio, strategy, LatencyConfig{}, options};
         const LoopReport report = loop.run();
 
         EXPECT_EQ(expected.failure, failure);
@@ -481,9 +486,11 @@ TEST(EventLoopTest, FatalFailuresMatchMarketReplay)
         EXPECT_EQ(book.digest(), replay_book.digest());
     };
 
-    compare([](std::span<const MarketEvent> e) { return VectorSource{e}; }, out_of_order,
+    compare([](std::span<const MarketEvent> e) { return VectorSource{e}; }, out_of_order, {},
             ReplayFailure::OutOfOrderTimestamp);
-    compare([](std::span<const MarketEvent> e) { return FailingSource{e}; }, clean, ReplayFailure::SourceError);
+    compare([](std::span<const MarketEvent> e) { return FailingSource{e}; }, clean, {}, ReplayFailure::SourceError);
+    compare([](std::span<const MarketEvent> e) { return VectorSource{e}; }, crossed_in_rth,
+            {.check_invariants_every = 1, .session_midnight = midnight}, ReplayFailure::InvariantViolation);
 }
 
 TEST(EventLoopTest, NoDrainAfterAFatalFailure)

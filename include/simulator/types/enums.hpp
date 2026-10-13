@@ -8,16 +8,4 @@ namespace simulator
         Buy,
         Sell
     };
-
-    enum class OrderType : std::uint8_t{
-        Market,
-        Limit
-    };
-    
-    enum class EventType : std::uint8_t{
-        AddOrder,
-        CancelOrder,
-        ExecuteOrder,
-        Trade
-    };
 } // namespace simulator

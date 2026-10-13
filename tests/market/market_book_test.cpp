@@ -45,7 +45,7 @@ void expect_invariants(const MarketBook& book)
 }
 
 // ---------------------------------------------------------------------------
-// Add / Execute / Cancel / Delete (ported from SimulatorReplayTest)
+// Add / Execute / Cancel / Delete
 // ---------------------------------------------------------------------------
 
 TEST(MarketBookTest, AppliesHistoricalOrderLifecycle)

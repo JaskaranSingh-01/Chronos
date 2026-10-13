@@ -10,8 +10,6 @@
 #include "itch_test_builder.hpp"
 #include "simulator/itch/itch_decoder.hpp"
 #include "simulator/itch/itch_message_reader.hpp"
-#include "simulator/itch/itch_normalizer.hpp"
-#include "simulator/replay/replay_event.hpp"
 
 namespace simulator {
 namespace {
@@ -145,29 +143,6 @@ TEST(ItchDecoderTest, RejectsInvalidSide)
     );
 
     EXPECT_EQ(decoder.error(), ItchDecodeError::InvalidSide);
-}
-
-TEST(ItchDecoderTest, NormalizesAddOrder)
-{
-    ItchAddOrder order;
-
-    order.timestamp = Timestamp{100};
-    order.order_id = OrderId{123};
-    order.side = Side::Buy;
-    order.quantity = Quantity{500};
-    order.price = Price{10100};
-
-    ItchNormalizer normalizer;
-
-    const ReplayEvent event =
-        normalizer.normalize(order);
-
-    EXPECT_EQ(event.timestamp, Timestamp{100});
-    EXPECT_EQ(event.type, ReplayEventType::Add);
-    EXPECT_EQ(event.order_id, OrderId{123});
-    EXPECT_EQ(event.side, Side::Buy);
-    EXPECT_EQ(event.quantity, Quantity{500});
-    EXPECT_EQ(event.price, Price{10100});
 }
 
 TEST(ItchDecoderTest, DecodesOrderExecuted)

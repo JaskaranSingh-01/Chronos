@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cstddef>
+#include <cstdint>
 #include <string_view>
 #include <tuple>
 #include <vector>
@@ -10,6 +11,7 @@
 #include "itch_golden_messages.hpp"
 #include "itch_test_builder.hpp"
 #include "simulator/itch/itch_source.hpp"
+#include "simulator/market/market_replay.hpp"
 
 namespace simulator {
 namespace {
@@ -503,6 +505,127 @@ TEST(ItchSourceTest, NoSelectedRAtAllIsStillAnEmptyStreamForAList)
     EXPECT_EQ(source.next(event), SourceResult::EndOfStream);
     EXPECT_EQ(registry.size(), 0u);
     EXPECT_EQ(source.statistics().filtered, 2u);
+}
+
+
+// ---------------------------------------------------------------------------
+// ITCH bytes end to end: ItchSource -> MarketReplay -> MarketBook
+// ---------------------------------------------------------------------------
+
+// The R registers AAPL as SymbolId 0. These ITCH timestamps are pre-market,
+// where a crossed book is legitimate; invariants are checked after every event.
+ReplayReport replay_aapl(const ItchBuilder& itch, MarketBook& book)
+{
+    InstrumentRegistry registry{1};
+    ItchSource source{itch.bytes(), aapl, registry};
+    return MarketReplay::run(source, book, {.check_invariants_every = 1, .session_midnight = midnight});
+}
+
+std::uint64_t by_type(const ReplayReport& report, MarketEventType type)
+{
+    return report.by_type[static_cast<std::size_t>(type)];
+}
+
+// History is never matched: both crossing Adds rest until the feed's own
+// executions remove them.
+TEST(ItchEndToEndTest, CrossingAddsRestUntilTheFeedExecutesThem)
+{
+    ItchBuilder itch;
+    itch.stock_directory(1, 1, "AAPL")
+        .add_order(1, 100, 1, 'S', 100, "AAPL", 10000)
+        .add_order(1, 200, 2, 'B', 100, "AAPL", 10100)  // crosses order 1
+        .executed(1, 300, 1, 100, 1001)
+        .executed(1, 400, 2, 100, 1002);
+
+    MarketBook book{0, 16};
+    const ReplayReport report = replay_aapl(itch, book);
+
+    ASSERT_TRUE(report.succeeded()) << report.message;
+    EXPECT_EQ(report.events, 4u);
+    EXPECT_EQ(report.rejected(), 0u);
+    EXPECT_EQ(by_type(report, MarketEventType::Add), 2u);
+    EXPECT_EQ(by_type(report, MarketEventType::Execute), 2u);
+    EXPECT_EQ(report.invariant_checks, 4u);
+    EXPECT_EQ(report.last_timestamp, midnight + 400);
+    EXPECT_EQ(book.peak_order_count(), 2u);  // both rested at once
+    EXPECT_EQ(book.order_count(), 0u);
+}
+
+TEST(ItchEndToEndTest, PartialExecutionLeavesTheRemainderResting)
+{
+    ItchBuilder itch;
+    itch.stock_directory(1, 1, "AAPL")
+        .add_order(1, 100, 1, 'S', 100, "AAPL", 10000)
+        .executed(1, 200, 1, 40, 2001);
+
+    MarketBook book{0, 16};
+    const ReplayReport report = replay_aapl(itch, book);
+
+    ASSERT_TRUE(report.succeeded()) << report.message;
+    EXPECT_EQ(report.applied(), 2u);
+    EXPECT_EQ(report.rejected(), 0u);
+
+    const Order* order = book.find(1);
+    ASSERT_NE(order, nullptr);
+    EXPECT_EQ(order->remaining_quantity(), Quantity{60});
+    EXPECT_EQ(order->state(), OrderState::PartiallyFilled);
+    EXPECT_EQ(book.quantity_at(Side::Sell, Price{10000}), 60u);  // the level total follows
+}
+
+// Add -> Replace -> Execute: the execution names the replacement's id.
+TEST(ItchEndToEndTest, ReplaceThenExecuteActsOnTheReplacement)
+{
+    ItchBuilder itch;
+    itch.stock_directory(1, 1, "AAPL")
+        .add_order(1, 100, 1, 'S', 100, "AAPL", 10000)
+        .replace(1, 200, 1, 2, 80, 10100)
+        .executed(1, 300, 2, 30, 3001);
+
+    MarketBook book{0, 16};
+    const ReplayReport report = replay_aapl(itch, book);
+
+    ASSERT_TRUE(report.succeeded()) << report.message;
+    EXPECT_EQ(report.applied(), 3u);
+    EXPECT_EQ(report.rejected(), 0u);
+    EXPECT_EQ(by_type(report, MarketEventType::Replace), 1u);
+
+    EXPECT_EQ(book.find(1), nullptr);
+    const Order* order = book.find(2);
+    ASSERT_NE(order, nullptr);
+    EXPECT_EQ(order->side(), Side::Sell);  // inherited: U carries no side
+    EXPECT_EQ(order->price(), Price{10100});
+    EXPECT_EQ(order->remaining_quantity(), Quantity{50});
+    EXPECT_EQ(order->state(), OrderState::PartiallyFilled);
+
+    LevelInfo level{};
+    ASSERT_TRUE(book.best(Side::Sell, level));
+    EXPECT_EQ(level, (LevelInfo{Price{10100}, 50, 1}));
+    EXPECT_FALSE(book.best(Side::Buy, level));
+}
+
+// C carries an execution price; only its quantity reaches the book.
+TEST(ItchEndToEndTest, ExecutedWithPriceReducesTheOrderAtItsOwnPrice)
+{
+    ItchBuilder itch;
+    itch.stock_directory(1, 1, "AAPL")
+        .add_order_mpid(1, 100, 1, 'B', 100, "AAPL", 10000, "GSCO")
+        .executed_with_price(1, 200, 1, 40, 4001, true, 10050);
+
+    MarketBook book{0, 16};
+    const ReplayReport report = replay_aapl(itch, book);
+
+    ASSERT_TRUE(report.succeeded()) << report.message;
+    EXPECT_EQ(by_type(report, MarketEventType::Add), 1u);
+    EXPECT_EQ(by_type(report, MarketEventType::Execute), 1u);
+    EXPECT_EQ(report.rejected(), 0u);
+
+    const Order* order = book.find(1);
+    ASSERT_NE(order, nullptr);
+    EXPECT_EQ(order->side(), Side::Buy);
+    EXPECT_EQ(order->price(), Price{10000});
+    EXPECT_EQ(order->remaining_quantity(), Quantity{60});
+    EXPECT_EQ(book.quantity_at(Side::Buy, Price{10000}), 60u);
+    EXPECT_EQ(book.quantity_at(Side::Buy, Price{10050}), 0u);
 }
 
 } // namespace
