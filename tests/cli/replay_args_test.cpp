@@ -89,6 +89,10 @@ TEST(ReplayArgsTest, RejectsBadValues)
     EXPECT_FALSE(with("--depth", "5x"));
     EXPECT_FALSE(with("--depth", "-1"));
     EXPECT_FALSE(with("--capacity", "0"));
+    EXPECT_FALSE(with("--depth", "1001"));  // print_book allocates depth levels per side
+    EXPECT_TRUE(with("--depth", "1000"));
+    EXPECT_FALSE(with("--capacity", "1073741825"));  // 2^30 + 1
+    EXPECT_TRUE(with("--capacity", "1073741824"));
     EXPECT_FALSE(with("--check-invariants", ""));
     EXPECT_FALSE(with("--check-invariants", "99999999999999999999999"));
     EXPECT_FALSE(with("--utc-offset", "05:00"));    // no sign
@@ -114,8 +118,8 @@ TEST(ReplayArgsTest, ParsesBacktestOptions)
     EXPECT_EQ(p.args.symbol, "SPY");
     EXPECT_TRUE(p.args.allow_truncated_tail);
     EXPECT_EQ(p.args.capacity, 4'096u);
-    EXPECT_EQ(p.args.backtest.order_latency_us, 20u);
-    EXPECT_EQ(p.args.backtest.report_latency_us, 30u);
+    EXPECT_EQ(p.args.backtest.order_latency_ns, 20'000u);
+    EXPECT_EQ(p.args.backtest.report_latency_ns, 30'000u);
     EXPECT_EQ(p.args.backtest.threshold, 2.5);
     EXPECT_EQ(p.args.backtest.clip, 200u);
     EXPECT_EQ(p.args.backtest.max_position, 1'000);
@@ -127,8 +131,8 @@ TEST(ReplayArgsTest, BacktestDefaultsAndFlagsOnlyForBacktest)
 {
     const Parsed p = parse({"backtest", "day.bin", "--symbol", "SPY", "--date", "2019-12-30"});
     ASSERT_TRUE(p.ok) << p.error;
-    EXPECT_EQ(p.args.backtest.order_latency_us, 50u);
-    EXPECT_EQ(p.args.backtest.report_latency_us, 50u);
+    EXPECT_EQ(p.args.backtest.order_latency_ns, 50'000u);
+    EXPECT_EQ(p.args.backtest.report_latency_ns, 50'000u);
     EXPECT_EQ(p.args.backtest.threshold, 3.0);
     EXPECT_EQ(p.args.backtest.clip, 100u);
     EXPECT_EQ(p.args.backtest.max_position, 500);
@@ -261,7 +265,7 @@ TEST(ReplayArgsTest, BacktestTakesOnlyOneSymbol)
     }
 }
 
-TEST(ReplayArgsTest, ParsesLatencyAndJsonForReplayOnly)
+TEST(ReplayArgsTest, ParsesLatencyForReplayOnlyAndJsonForBoth)
 {
     const Parsed off = parse({"replay", "day.bin", "--all", "--date", "2019-12-30"});
     ASSERT_TRUE(off.ok) << off.error;
@@ -284,8 +288,157 @@ TEST(ReplayArgsTest, ParsesLatencyAndJsonForReplayOnly)
     }
 
     EXPECT_FALSE(parse({"replay", "day.bin", "--all", "--date", "2019-12-30", "--latency-batch", "0"}).ok);
-    EXPECT_FALSE(parse({"backtest", "day.bin", "--symbol", "SPY", "--date", "2019-12-30", "--latency"}).ok);
-    EXPECT_FALSE(parse({"backtest", "day.bin", "--symbol", "SPY", "--date", "2019-12-30", "--json", "a.json"}).ok);
+    const Parsed latency = parse({"backtest", "day.bin", "--symbol", "SPY", "--date", "2019-12-30", "--latency"});
+    EXPECT_FALSE(latency.ok);
+    EXPECT_NE(latency.error.find("unknown backtest option --latency"), std::string::npos) << latency.error;
+    EXPECT_FALSE(
+        parse({"backtest", "day.bin", "--symbol", "SPY", "--date", "2019-12-30", "--latency-batch", "64"}).ok);
+
+    const Parsed json = parse({"backtest", "day.bin", "--symbol", "SPY", "--date", "2019-12-30", "--json", "a.json"});
+    ASSERT_TRUE(json.ok) << json.error;
+    EXPECT_EQ(json.args.json, "a.json");
+}
+
+TEST(ReplayArgsTest, HelpAndVersionWinAnywhere)
+{
+    for (const std::vector<std::string_view>& argv :
+         {std::vector<std::string_view>{"--help"}, std::vector<std::string_view>{"-h"},
+          std::vector<std::string_view>{"replay", "--help"},
+          std::vector<std::string_view>{"backtest", "day.bin", "--clip", "0", "-h"},
+          std::vector<std::string_view>{"play", "--help"}}) {
+        const Parsed p = parse(argv);
+        ASSERT_TRUE(p.ok) << p.error;
+        EXPECT_EQ(p.args.command, CliCommand::Help);
+    }
+    for (const std::vector<std::string_view>& argv :
+         {std::vector<std::string_view>{"--version"}, std::vector<std::string_view>{"replay", "day.bin", "--version"}}) {
+        const Parsed p = parse(argv);
+        ASSERT_TRUE(p.ok) << p.error;
+        EXPECT_EQ(p.args.command, CliCommand::Version);
+    }
+}
+
+TEST(ReplayArgsTest, ParsesLatencyInNanoseconds)
+{
+    auto backtest = [](std::vector<std::string_view> flags) {
+        std::vector<std::string_view> argv{"backtest", "day.bin", "--symbol", "SPY", "--date", "2019-12-30"};
+        argv.insert(argv.end(), flags.begin(), flags.end());
+        return parse(argv);
+    };
+
+    const Parsed ns = backtest({"--order-latency-ns", "300", "--report-latency-ns", "0"});
+    ASSERT_TRUE(ns.ok) << ns.error;
+    EXPECT_EQ(ns.args.backtest.order_latency_ns, 300u);
+    EXPECT_EQ(ns.args.backtest.report_latency_ns, 0u);
+
+    const Parsed last = backtest({"--order-latency-us", "5", "--order-latency-ns", "300"});
+    ASSERT_TRUE(last.ok) << last.error;
+    EXPECT_EQ(last.args.backtest.order_latency_ns, 300u);  // the last flag wins
+
+    const Parsed us = backtest({"--report-latency-us", "7"});
+    ASSERT_TRUE(us.ok) << us.error;
+    EXPECT_EQ(us.args.backtest.report_latency_ns, 7'000u);
+
+    EXPECT_TRUE(backtest({"--order-latency-ns", "1000000000000"}).ok);  // 1,000 s, as for -us
+    EXPECT_FALSE(backtest({"--order-latency-ns", "1000000000001"}).ok);
+    EXPECT_FALSE(backtest({"--report-latency-ns", "-1"}).ok);
+    EXPECT_FALSE(parse({"replay", "day.bin", "--symbol", "SPY", "--date", "2019-12-30", "--order-latency-ns", "300"}).ok);
+}
+
+TEST(ReplayArgsTest, ErrorsNameTheCommandAndOption)
+{
+    auto error = [](std::vector<std::string_view> argv) {
+        const Parsed p = parse(std::move(argv));
+        EXPECT_FALSE(p.ok);
+        return p.error;
+    };
+
+    const std::string clip = error({"replay", "day.bin", "--symbol", "SPY", "--date", "2019-12-30", "--clip", "100"});
+    EXPECT_NE(clip.find("unknown replay option --clip"), std::string::npos) << clip;
+
+    // Unknown, not "needs a value", even as the last argument.
+    const std::string last = error({"replay", "day.bin", "--symbol", "SPY", "--date", "2019-12-30", "--frobnicate"});
+    EXPECT_NE(last.find("unknown replay option --frobnicate"), std::string::npos) << last;
+    EXPECT_EQ(last.find("needs a value"), std::string::npos) << last;
+
+    const std::string value = error({"replay", "day.bin", "--date", "2019-12-30", "--symbol"});
+    EXPECT_NE(value.find("--symbol needs a value"), std::string::npos) << value;
+
+    const std::string command = error({"play", "day.bin"});
+    EXPECT_NE(command.find("'play'"), std::string::npos) << command;
+
+    const std::string none = error({});
+    EXPECT_NE(none.find("missing"), std::string::npos) << none;
+
+    const std::string depth = error({"replay", "day.bin", "--symbol", "SPY", "--date", "2019-12-30", "--depth", "five"});
+    EXPECT_NE(depth.find("--depth"), std::string::npos) << depth;
+    EXPECT_NE(depth.find("'five'"), std::string::npos) << depth;
+}
+
+// An example of every flag: each parses, and each appears in the help as
+// " --flag ". A flag added to the parser needs a row here.
+TEST(ReplayArgsTest, UsageDocumentsEveryOption)
+{
+    using Argv = std::vector<std::string_view>;
+    auto replay = [](Argv flags) {
+        Argv argv{"replay", "day.bin", "--all", "--date", "2019-12-30"};
+        argv.insert(argv.end(), flags.begin(), flags.end());
+        return argv;
+    };
+    auto backtest = [](Argv flags) {
+        Argv argv{"backtest", "day.bin", "--symbol", "SPY", "--date", "2019-12-30"};
+        argv.insert(argv.end(), flags.begin(), flags.end());
+        return argv;
+    };
+
+    const std::vector<Argv> examples{
+        {"replay", "day.bin", "--symbol", "AAPL", "--date", "2019-12-30"},
+        {"replay", "day.bin", "--symbols", "AAPL,MSFT", "--date", "2019-12-30"},
+        replay({"--utc-offset", "-04:00"}),
+        replay({"--allow-truncated-tail"}),
+        replay({"--depth", "10"}),
+        replay({"--check-invariants", "1000"}),
+        replay({"--capacity", "4096"}),
+        replay({"--latency"}),
+        replay({"--latency-batch", "64"}),
+        replay({"--json", "out.json"}),
+        backtest({"--json", "out.json"}),
+        backtest({"--strategy", "mm"}),
+        backtest({"--order-latency-ns", "300"}),
+        backtest({"--order-latency-us", "20"}),
+        backtest({"--report-latency-ns", "300"}),
+        backtest({"--report-latency-us", "20"}),
+        backtest({"--max-position", "10"}),
+        backtest({"--max-open-orders", "3"}),
+        backtest({"--taker-fee-ticks", "30"}),
+        backtest({"--maker-fee-ticks", "-20"}),
+        backtest({"--threshold", "2.5"}),
+        backtest({"--clip", "200"}),
+        backtest({"--cooldown-ms", "5"}),
+        backtest({"--quote-size", "200"}),
+        backtest({"--requote-ms", "250"}),
+        {"--help"},
+        {"--version"},
+    };
+
+    for (const Argv& argv : examples) {
+        const Parsed p = parse(argv);
+        EXPECT_TRUE(p.ok) << argv[0] << " " << argv.back() << ": " << p.error;
+        for (const std::string_view token : argv) {
+            if (token.starts_with("--")) {
+                EXPECT_NE(usage.find(" " + std::string{token} + " "), std::string_view::npos) << token;
+            }
+        }
+    }
+    EXPECT_NE(usage.find("-h, --help"), std::string_view::npos);
+    EXPECT_NE(usage.find("exit status"), std::string_view::npos);
+
+    ASSERT_TRUE(usage.ends_with('\n'));
+    for (std::size_t start = 0; start < usage.size();) {
+        const std::size_t end = usage.find('\n', start);
+        EXPECT_LE(end - start, 100u) << usage.substr(start, end - start);
+        start = end + 1;
+    }
 }
 
 TEST(ReplayArgsTest, ParsesDatesAndOffsets)

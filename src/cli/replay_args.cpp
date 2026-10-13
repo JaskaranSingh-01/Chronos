@@ -60,6 +60,26 @@ bool parse_symbols(std::string_view text, std::vector<std::string_view>& symbols
 // multiplied by a price (clip, position) they stay far below int64 overflow.
 constexpr std::uint64_t max_value = 1'000'000'000;
 
+// print_book allocates --depth levels per side: a huge value throws length_error.
+constexpr std::size_t max_depth = 1'000;
+
+// 2^30 slots x (a 96 B pool slot + up to 32 B of OrderIndex) is far past any
+// machine's memory, and keeps OrderIndex's bit_ceil(2 * capacity) and the
+// pool's byte count far from overflow.
+constexpr std::size_t max_capacity = std::size_t{1} << 30;
+
+// A latency in units of unit_ns (1 for -ns, 1'000 for -us) as ns, at most
+// 1,000 s; writes `ns` only on success.
+bool parse_latency(std::string_view text, std::uint64_t unit_ns, std::uint64_t& ns) noexcept
+{
+    std::uint64_t value{0};
+    if (!parse_number(text, value) || value > max_value * 1'000 / unit_ns) {
+        return false;
+    }
+    ns = value * unit_ns;
+    return true;
+}
+
 } // namespace
 
 bool parse_date(std::string_view text, std::chrono::year_month_day& date) noexcept
@@ -101,8 +121,21 @@ bool parse_utc_offset(std::string_view text, std::chrono::minutes& offset) noexc
 
 bool parse_replay_args(std::span<const std::string_view> args, ReplayArgs& out, std::string& error)
 {
-    if (args.empty() || (args[0] != "replay" && args[0] != "backtest")) {
-        error = "expected the command 'replay' or 'backtest'";
+    // Help or version wins anywhere, even over a bad command or option; the first one given.
+    for (const std::string_view arg : args) {
+        if (arg == "-h" || arg == "--help" || arg == "--version") {
+            out = ReplayArgs{};
+            out.command = arg == "--version" ? CliCommand::Version : CliCommand::Help;
+            return true;
+        }
+    }
+
+    if (args.empty()) {
+        error = "missing the command: replay or backtest";
+        return false;
+    }
+    if (args[0] != "replay" && args[0] != "backtest") {
+        error = "unknown command '" + std::string{args[0]} + "': expected replay or backtest";
         return false;
     }
 
@@ -139,11 +172,9 @@ bool parse_replay_args(std::span<const std::string_view> args, ReplayArgs& out, 
             continue;
         }
 
-        if (i + 1 == args.size()) {
-            error = std::string{arg} + " needs a value";
-            return false;
-        }
-        const std::string_view value = args[++i];
+        // Checked after the option is known, so an unknown last option says so.
+        const bool has_value = i + 1 < args.size();
+        const std::string_view value = has_value ? args[++i] : std::string_view{};
         bool ok = true;
 
         if (arg == "--symbol") {
@@ -156,20 +187,21 @@ bool parse_replay_args(std::span<const std::string_view> args, ReplayArgs& out, 
         } else if (arg == "--utc-offset") {
             ok = has_offset = parse_utc_offset(value, parsed.utc_offset);
         } else if (arg == "--depth") {
-            ok = parse_number(value, parsed.depth);
+            ok = parse_number(value, parsed.depth) && parsed.depth <= max_depth;
         } else if (arg == "--check-invariants") {
             ok = parse_number(value, parsed.check_invariants_every);
         } else if (arg == "--capacity") {
-            ok = has_capacity = parse_number(value, parsed.capacity) && parsed.capacity > 0;
+            ok = has_capacity =
+                parse_number(value, parsed.capacity) && parsed.capacity > 0 && parsed.capacity <= max_capacity;
         } else if (!backtest && arg == "--latency-batch") {
             ok = parse_number(value, parsed.latency_batch) && parsed.latency_batch > 0;
-        } else if (!backtest && arg == "--json") {
+        } else if (arg == "--json") {
             parsed.json = value;
             ok = !value.empty();
-        } else if (backtest && arg == "--order-latency-us") {
-            ok = parse_number(value, b.order_latency_us) && b.order_latency_us <= max_value;
-        } else if (backtest && arg == "--report-latency-us") {
-            ok = parse_number(value, b.report_latency_us) && b.report_latency_us <= max_value;
+        } else if (backtest && (arg == "--order-latency-ns" || arg == "--order-latency-us")) {
+            ok = parse_latency(value, arg.ends_with("-us") ? 1'000 : 1, b.order_latency_ns);
+        } else if (backtest && (arg == "--report-latency-ns" || arg == "--report-latency-us")) {
+            ok = parse_latency(value, arg.ends_with("-us") ? 1'000 : 1, b.report_latency_ns);
         } else if (backtest && arg == "--threshold") {
             ok = parse_threshold(value, b.threshold);
         } else if (backtest && arg == "--clip") {
@@ -194,10 +226,14 @@ bool parse_replay_args(std::span<const std::string_view> args, ReplayArgs& out, 
             ok = parse_number(value, b.maker_fee_ticks) && b.maker_fee_ticks >= -1'000'000 &&
                  b.maker_fee_ticks <= 1'000'000;
         } else {
-            error = "unknown option " + std::string{arg};
+            error = "unknown " + std::string{args[0]} + " option " + std::string{arg};
             return false;
         }
 
+        if (!has_value) {
+            error = std::string{arg} + " needs a value";
+            return false;
+        }
         if (!ok) {
             error = "bad value for " + std::string{arg} + ": '" + std::string{value} + "'";
             return false;

@@ -1,8 +1,10 @@
 #include <algorithm>
+#include <cerrno>
 #include <chrono>
 #include <cinttypes>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <ctime>
 #include <numeric>
 #include <span>
@@ -292,7 +294,7 @@ void print_metrics(const RunRecord& run, std::uint64_t file_bytes)
     std::printf("Elapsed           %.2f s wall, %.2f s CPU (user %.2f, sys %.2f); %.0f events/s, %.1f ns/event, "
                 "%.0f messages/s, %.1f MB/s\n",
                 m.wall_s, m.user_s + m.sys_s, m.user_s, m.sys_s, ratio(events, m.wall_s), ratio(m.wall_s * 1e9, events),
-                static_cast<double>(run.messages) / m.wall_s, static_cast<double>(file_bytes) / 1e6 / m.wall_s);
+                ratio(static_cast<double>(run.messages), m.wall_s), ratio(static_cast<double>(file_bytes) / 1e6, m.wall_s));
     std::printf("Memory            %" PRIu64 " allocations (%.4f per event), peak RSS %.1f MB, peak footprint "
                 "%.1f MB, %" PRIu64 " major faults\n",
                 m.allocations, ratio(static_cast<double>(m.allocations), events), static_cast<double>(m.peak_rss) / 1e6,
@@ -368,14 +370,16 @@ std::string symbols_mode(const ReplayArgs& args)
     return list;
 }
 
-// --json: the build, machine and input, then the run. False if the file
-// cannot be written.
-bool write_json(const ReplayArgs& args, std::span<const std::byte> input, const RunRecord& run)
+// --json: the build, machine and input, then the run; `extra`, a complete
+// member such as backtest_json(), goes just before "latency". False if the
+// file cannot be written.
+bool write_json(const ReplayArgs& args, std::span<const std::byte> input, const RunRecord& run,
+                std::string_view extra = {})
 {
     const std::string path{args.json};
     std::FILE* out = std::fopen(path.c_str(), "w");
     if (out == nullptr) {
-        std::fprintf(stderr, "error: cannot write %s\n", path.c_str());
+        std::fprintf(stderr, "error: cannot write %s: %s\n", path.c_str(), std::strerror(errno));
         return false;
     }
 
@@ -414,6 +418,7 @@ bool write_json(const ReplayArgs& args, std::span<const std::byte> input, const 
                  "\"peak_rss_bytes\": %" PRIu64 ", \"peak_footprint_bytes\": %" PRIu64 ", \"major_faults\": %" PRIu64 "},\n",
                  m.allocations, ratio(static_cast<double>(m.allocations), events), m.peak_rss, m.peak_footprint,
                  m.major_faults);
+    std::fprintf(out, "%.*s", static_cast<int>(extra.size()), extra.data());
     if (m.latency == nullptr) {
         std::fprintf(out, "  \"latency\": null\n}\n");
     } else {
@@ -426,6 +431,48 @@ bool write_json(const ReplayArgs& args, std::span<const std::byte> input, const 
                      h.percentile(0.99), h.percentile(0.999), h.max());
     }
     return std::fclose(out) == 0;
+}
+
+// The result fields of a one-book run, replay or backtest alike.
+void fill_record(RunRecord& run, const ReplayReport& report, const MarketBook& book, std::uint64_t messages,
+                 bool invariants) noexcept
+{
+    run.events = report.events;
+    run.messages = messages;
+    run.rejected = report.rejected();
+    run.digest = book.digest();
+    run.books = 1;
+    run.books_not_empty = book.order_count() != 0;
+    run.peak_live_orders = book.peak_order_count();
+    run.succeeded = report.succeeded() && invariants;
+}
+
+// backtest --json: the numbers backtest prints, as exact integers; money in
+// units of 10^-money_scale, fees per share in price ticks (10^-price_scale).
+std::string backtest_json(const BacktestArgs& b, const RiskLimits& limits, const Instrument& instrument,
+                          const LoopReport& loop, const ExecutionStatistics& e, const Portfolio& p)
+{
+    char text[4'096];  // about 1,300 bytes at most: 30 numbers of at most 20 digits
+    std::snprintf(
+        text, sizeof text,
+        "  \"backtest\": {\"strategy\": \"%s\", \"order_latency_ns\": %" PRIu64 ", \"report_latency_ns\": %" PRIu64
+        ", \"max_position\": %" PRId64 ", \"max_order_quantity\": %" PRIu64 ", \"max_open_orders\": %zu"
+        ", \"maker_fee_ticks\": %" PRId64 ", \"taker_fee_ticks\": %" PRIu64 ", \"price_scale\": %u, \"money_scale\": %u,\n"
+        "    \"sim_events\": %" PRIu64 ", \"drained_sim_events\": %" PRIu64 ", \"discarded_sim_events\": %" PRIu64 ",\n"
+        "    \"maker_fills\": %" PRIu64 ", \"maker_quantity\": %" PRIu64 ", \"taker_fills\": %" PRIu64
+        ", \"taker_quantity\": %" PRIu64 ", \"accepted_quantity\": %" PRIu64 ", \"cancelled\": %" PRIu64
+        ", \"cancel_rejects\": %" PRIu64 ", \"would_cross_rejects\": %" PRIu64 ", \"fifo_anomalies\": %" PRIu64 ",\n"
+        "    \"position\": %" PRId64 ", \"max_abs_position\": %" PRId64 ", \"open_orders\": %zu, \"cash\": %" PRId64
+        ", \"realised_pnl\": %" PRId64 ", \"unrealised_pnl\": %" PRId64 ", \"fees\": %" PRId64 ", \"pnl\": %" PRId64
+        ", \"max_drawdown\": %" PRId64 "},\n",
+        b.strategy == StrategyKind::MarketMaker ? "mm" : "imbalance", b.order_latency_ns, b.report_latency_ns,
+        limits.max_position, limits.max_order_quantity.value(), limits.max_open_orders, b.maker_fee_ticks,
+        b.taker_fee_ticks, unsigned{instrument.price_scale}, unsigned{instrument.price_scale} + instrument.quantity_scale,
+        loop.sim_events, loop.drained_sim_events, loop.discarded_sim_events, e.maker_fills, e.maker_quantity,
+        e.taker_fills, e.taker_quantity, e.accepted_quantity, e.cancelled, e.cancel_rejects, e.would_cross_rejects,
+        e.fifo_anomalies, p.position(), p.max_abs_position(), p.open_orders(), p.cash(), p.realised_pnl(),
+        p.unrealised_pnl(), p.fees(), p.pnl(), p.max_drawdown());
+    return text;
 }
 
 // The options both replays share, with --latency wired to `latency`.
@@ -489,14 +536,7 @@ int replay(const ReplayArgs& args)
     const bool invariants =
         print_final_book(book, report, args.depth, source.instrument().price_scale, midnight);
 
-    run.events = report.events;
-    run.messages = stats.messages;
-    run.rejected = report.rejected();
-    run.digest = book.digest();
-    run.books = 1;
-    run.books_not_empty = book.order_count() != 0;
-    run.peak_live_orders = book.peak_order_count();
-    run.succeeded = report.succeeded() && invariants;
+    fill_record(run, report, book, stats.messages, invariants);
     run.metrics.latency = options.latency;
     run.metrics.latency_batch = options.latency_batch;
     print_metrics(run, file.bytes().size());
@@ -781,8 +821,8 @@ int backtest(const ReplayArgs& args)
                                   .utc_offset = args.utc_offset,
                                   .allow_truncated_tail = args.allow_truncated_tail};
     const Timestamp midnight = session_midnight_ns(args.date, args.utc_offset);
-    const LatencyConfig latency{.order_latency = static_cast<Timestamp>(b.order_latency_us) * 1'000,
-                                .report_latency = static_cast<Timestamp>(b.report_latency_us) * 1'000};
+    const LatencyConfig latency{.order_latency = static_cast<Timestamp>(b.order_latency_ns),
+                                .report_latency = static_cast<Timestamp>(b.report_latency_ns)};
     const ImbalanceTakerParams imbalance_params{.threshold = b.threshold, .clip = b.clip,
                                                 .max_position = b.max_position,
                                                 .cooldown_ns = static_cast<Timestamp>(b.cooldown_ms) * 1'000'000};
@@ -803,8 +843,8 @@ int backtest(const ReplayArgs& args)
     const unsigned money_scale = instrument.price_scale + instrument.quantity_scale;
 
     print_config("backtest", args, file);
-    std::printf("  latency          order %" PRIu64 " us, report %" PRIu64 " us\n", b.order_latency_us,
-                b.report_latency_us);
+    std::printf("  latency          order %" PRIu64 " ns, report %" PRIu64 " ns\n", b.order_latency_ns,
+                b.report_latency_ns);
     if (mm) {
         std::printf("  strategy         MarketMaker (a toy): quote size %" PRIu64 ", max position %" PRId64
                     ", requote cooldown %" PRIu64 " ms, joins the best bid and ask\n",
@@ -826,9 +866,8 @@ int backtest(const ReplayArgs& args)
     auto run = [&]<Strategy S>(S& strategy) {
         EventLoop<S> loop{source, book, execution, portfolio, strategy, latency, options};
 
-        const auto start = std::chrono::steady_clock::now();
-        const LoopReport report = loop.run();
-        const std::chrono::duration<double> elapsed = std::chrono::steady_clock::now() - start;
+        RunRecord record;
+        const LoopReport report = measured([&] { return loop.run(); }, record.metrics);
         const ReplayReport& replay = report.replay;
 
         std::printf("\nReplay\n");
@@ -862,12 +901,15 @@ int backtest(const ReplayArgs& args)
         std::printf("  open orders      %zu at the end\n", portfolio.open_orders());
 
         const bool invariants = print_final_book(book, replay, args.depth, price_scale, midnight);
+        fill_record(record, replay, book, source.statistics().messages, invariants);
+        print_metrics(record, file.bytes().size());
 
-        const double seconds = elapsed.count();
-        std::printf("Elapsed           %.1f ms, %.0f events/s\n", seconds * 1e3,
-                    static_cast<double>(replay.events) / seconds);
-
-        return replay.succeeded() && invariants ? 0 : 1;
+        if (!args.json.empty() &&
+            !write_json(args, file.bytes(), record,
+                        backtest_json(b, limits, instrument, report, execution.statistics(), portfolio))) {
+            return 2;
+        }
+        return record.succeeded ? 0 : 1;
     };
 
     if (mm) {
@@ -886,12 +928,23 @@ int main(int argc, char** argv)
     ReplayArgs parsed;
     std::string error;
 
+    // Exit status, as --help documents it: 0 ok, 1 the run failed, 2 bad usage or file.
     if (!parse_replay_args(args, parsed, error)) {
-        std::fprintf(stderr, "error: %s\n\n%.*s", error.c_str(), static_cast<int>(usage.size()), usage.data());
+        std::fprintf(stderr, "error: %s\nrun 'simulator --help' for the options and exit codes\n", error.c_str());
         return 2;
     }
-    if (parsed.command == CliCommand::Backtest) {
+    switch (parsed.command) {
+    case CliCommand::Help:
+        std::fwrite(usage.data(), 1, usage.size(), stdout);
+        return 0;
+    case CliCommand::Version:
+        std::printf("Chronos simulator, commit %s%s, %s build, %s\n", build_commit, build_dirty ? " (dirty)" : "",
+                    build_type, __VERSION__);
+        return 0;
+    case CliCommand::Backtest:
         return backtest(parsed);
+    case CliCommand::Replay:
+        break;
     }
     return parsed.symbol.empty() ? replay_books(parsed) : replay(parsed);
 }

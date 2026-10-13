@@ -201,6 +201,19 @@ target_link_libraries(alloc_counter_test PRIVATE GTest::gtest_main)
 
 gtest_discover_tests(alloc_counter_test)
 
+# main()'s exit codes as `simulator --help` documents them. CTest alone only
+# tells zero from non-zero, so sh compares the code.
+function(chronos_cli_test name exit_code)
+    add_test(NAME SimulatorCliTest.${name}
+             COMMAND sh -c "\"$0\" \"$@\"; test $? -eq ${exit_code}" $<TARGET_FILE:simulator> ${ARGN})
+endfunction()
+
+chronos_cli_test(HelpExitsZero 0 --help)
+chronos_cli_test(VersionExitsZero 0 --version)
+chronos_cli_test(BadOptionExitsTwo 2 replay day.bin --symbol AAPL --date 2019-12-30 --frobnicate)
+chronos_cli_test(MissingFileExitsTwo 2 replay /nonexistent/chronos-missing.itch --symbol AAPL --date 2019-12-30)
+chronos_cli_test(FailedRunExitsOne 1 replay /dev/null --symbol AAPL --date 2019-12-30)
+
 
 # -------------------------
 # Benchmarks: -DCHRONOS_BENCH=ON (bench/run.sh)
