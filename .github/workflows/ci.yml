@@ -1,4 +1,4 @@
-# CI (M4.02): build and ctest on every push and pull request.
+# CI: build and ctest on every push and pull request.
 # - Ubuntu (gcc, clang) and macOS (Apple clang), each in Release and Debug.
 # - Release also builds simulator_bench (CHRONOS_BENCH=ON); it is not run.
 # - Debug runs under sanitizers, and any report fails the test. gcc: ASan+UBSan.
@@ -6,7 +6,7 @@
 #   new that app/alloc_counter.cpp replaces. macOS: UBSan only, as ASan hangs at
 #   startup on the developer's macOS 27 and is untried with that operator new.
 # - The real-data tests skip: CHRONOS_ITCH_FILE is not set.
-# - format: non-blocking until the formatting-only commit (M4.03 follow-up).
+# - format: every C++ file must match .clang-format (clang-format 20.1.8).
 name: CI
 
 on: [push, pull_request]
@@ -52,6 +52,5 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - run: pipx install clang-format==20.1.8
-      - name: clang-format (non-blocking until the formatting-only commit; then delete continue-on-error)
+      - name: clang-format
         run: bash scripts/check-format.sh
-        continue-on-error: true

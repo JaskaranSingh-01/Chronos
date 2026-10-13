@@ -1,4 +1,4 @@
-# clang-tidy (M4.03): bugprone, performance and modernize checks, minus those
+# clang-tidy: bugprone, performance and modernize checks, minus those
 # that flag this codebase's deliberate conventions (noexcept functions that may
 # allocate, C buffers for snprintf, no trailing return types or blanket
 # [[nodiscard]]) or are style-only noise. Not run in CI yet. Use clang-tidy 20:

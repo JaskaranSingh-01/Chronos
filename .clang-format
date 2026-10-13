@@ -1,4 +1,4 @@
-# Chronos C++ style (M4.03), measured against the code. Check with
+# Chronos C++ style. Check with
 # scripts/check-format.sh; rewrite a file with clang-format -i FILE. Use the
 # clang-format version .github/workflows/ci.yml pins: other versions differ.
 BasedOnStyle: LLVM
