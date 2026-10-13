@@ -31,6 +31,13 @@ if(CHRONOS_SANITIZE)
     add_link_options(-fsanitize=${chronos_sanitizers})
 endif()
 
+# ASan replaces operator new itself, so the allocation counter's replacement would clash with it.
+if(chronos_sanitizers MATCHES "address")
+    set(CHRONOS_COUNT_ALLOCATIONS OFF)
+else()
+    set(CHRONOS_COUNT_ALLOCATIONS ON)
+endif()
+
 set(CHRONOS_WARNINGS -Wall -Wextra -Wpedantic)
 
 
@@ -78,6 +85,10 @@ add_executable(simulator
 )
 
 target_compile_options(simulator PRIVATE ${CHRONOS_WARNINGS})
+
+if(NOT CHRONOS_COUNT_ALLOCATIONS)
+    target_compile_definitions(simulator PRIVATE CHRONOS_NO_ALLOC_COUNTER)
+endif()
 
 # generated/build_info.hpp: the commit, dirty flag and build type for
 # `replay --json`. Checked on every build, rewritten only when it changes.
@@ -177,19 +188,21 @@ include(GoogleTest)
 gtest_discover_tests(simulator_tests)
 
 # Its own executable: the counting operator new must stay out of simulator_tests.
-add_executable(alloc_counter_test
+if(CHRONOS_COUNT_ALLOCATIONS)
+    add_executable(alloc_counter_test
 
-    tests/alloc_counter_test.cpp
-    app/alloc_counter.cpp
-)
+        tests/alloc_counter_test.cpp
+        app/alloc_counter.cpp
+    )
 
-target_compile_options(alloc_counter_test PRIVATE ${CHRONOS_WARNINGS})
+    target_compile_options(alloc_counter_test PRIVATE ${CHRONOS_WARNINGS})
 
-target_include_directories(alloc_counter_test PRIVATE ${PROJECT_SOURCE_DIR}/app)
+    target_include_directories(alloc_counter_test PRIVATE ${PROJECT_SOURCE_DIR}/app)
 
-target_link_libraries(alloc_counter_test PRIVATE GTest::gtest_main)
+    target_link_libraries(alloc_counter_test PRIVATE GTest::gtest_main)
 
-gtest_discover_tests(alloc_counter_test)
+    gtest_discover_tests(alloc_counter_test)
+endif()
 
 # main()'s exit codes as `simulator --help` documents them. CTest alone only
 # tells zero from non-zero, so sh compares the code.

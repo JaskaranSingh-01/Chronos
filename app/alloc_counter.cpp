@@ -10,6 +10,7 @@ namespace {
 
 std::atomic<std::uint64_t> allocations{0};
 
+#ifndef CHRONOS_NO_ALLOC_COUNTER
 void* allocate(std::size_t size)
 {
     allocations.fetch_add(1, std::memory_order_relaxed);
@@ -28,6 +29,7 @@ void* allocate(std::size_t size, std::align_val_t align)
     }
     throw std::bad_alloc{};
 }
+#endif
 
 } // namespace
 
@@ -36,6 +38,7 @@ std::uint64_t simulator::allocation_count() noexcept
     return allocations.load(std::memory_order_relaxed);
 }
 
+#ifndef CHRONOS_NO_ALLOC_COUNTER
 // Replacing global new/delete affects the whole program, so this lives in the executable, never in simulator_lib.
 void* operator new(std::size_t size) { return allocate(size); }
 void* operator new[](std::size_t size) { return allocate(size); }
@@ -50,3 +53,4 @@ void operator delete(void* p, std::align_val_t) noexcept { std::free(p); }
 void operator delete[](void* p, std::align_val_t) noexcept { std::free(p); }
 void operator delete(void* p, std::size_t, std::align_val_t) noexcept { std::free(p); }
 void operator delete[](void* p, std::size_t, std::align_val_t) noexcept { std::free(p); }
+#endif
