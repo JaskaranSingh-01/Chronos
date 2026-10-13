@@ -95,8 +95,6 @@ bool Order::cancel(Quantity cancelled) noexcept
 
     if (remaining_quantity_.is_zero()) {
         state_ = OrderState::Cancelled;
-    } else {
-        state_ = OrderState::PartiallyFilled;
     }
 
     return true;

@@ -89,12 +89,11 @@ ranked and executed one tick better, so the aggressor never reached our price. W
 
 ### Tests
 
-- `simulator_tests`: 458 pass and 5 skip in both RelWithDebInfo and Debug. Four of the skips are the real-data
+- `simulator_tests`: 384 pass and 5 skip in both RelWithDebInfo and Debug. Four of the skips are the real-data
   tests, which need `CHRONOS_ITCH_FILE`; the fifth is the error check of the conformance suite, which does not apply
-  to `VectorSource`. `alloc_counter_test`: 3 pass. `ctest` runs 471 tests, including 5 CLI exit-code tests.
-- 0 compiler warnings with `-Wall -Wextra -Wpedantic` (Apple clang 17). A local g++ 14 build passes the suite
-  with 23 warnings, not yet fixed.
-- UBSan (`-DCHRONOS_SANITIZE=undefined`, where any report aborts): 471 of 471 in RelWithDebInfo and in Debug.
+  to `VectorSource`. `alloc_counter_test`: 3 pass. `ctest` runs 397 tests, including 5 CLI exit-code tests.
+- 0 compiler warnings with `-Wall -Wextra -Wpedantic` under Apple clang 17 and g++ 14, Release and Debug.
+- UBSan (`-DCHRONOS_SANITIZE=undefined`, where any report aborts): 397 of 397 in RelWithDebInfo and in Debug.
 - With `CHRONOS_ITCH_FILE` set to the slice, the 4 real-data tests pass.
 
 ## Performance
@@ -558,5 +557,4 @@ A bad argument prints a two-line error on stderr and exits 2. `--json PATH` writ
 - **Replay through `EventLoop`:** run the replay through `EventLoop` with a null strategy once its throughput is
   shown to match `MarketReplay::run`.
 - **CI and formatting:** a first green CI run, then one formatting-only commit with `.clang-format`.
-- **Small fixes:** order state after a partial cancel, and the cause of an ITCH decode error in source errors.
 - **Open question:** CSV input in the CLI.

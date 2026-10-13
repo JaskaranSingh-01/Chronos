@@ -186,6 +186,7 @@ std::string_view to_string(SourceError error) noexcept
     case SourceError::NumberOutOfRange: return "NumberOutOfRange";
     case SourceError::InvalidEventType: return "InvalidEventType";
     case SourceError::InvalidTradingState: return "InvalidTradingState";
+    case SourceError::InvalidPrintable: return "InvalidPrintable";
     }
     return "?";
 }

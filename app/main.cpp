@@ -153,13 +153,16 @@ void print_applied(const ReplayReport& report, const char* indent)
     }
 }
 
-void print_failure(const ReplayReport& report, const ReplayArgs& args)
+void print_failure(const ReplayReport& report, const ReplayArgs& args, std::uint8_t failed_message_type)
 {
     if (report.succeeded()) {
         return;
     }
-    std::printf("\nFAILED: %.*s at position %" PRIu64 " (byte offset)\n",
-                static_cast<int>(report.message.size()), report.message.data(), report.failed_position);
+    std::printf("\nFAILED: %.*s", static_cast<int>(report.message.size()), report.message.data());
+    if (failed_message_type != 0) {
+        std::printf(" in message type '%c'", failed_message_type);
+    }
+    std::printf(" at position %" PRIu64 " (byte offset)\n", report.failed_position);
     if (report.source_error == SourceError::TruncatedMessage) {
         std::printf("  hint: the file ends inside a message (a slice cut at a byte count?);"
                     " pass --allow-truncated-tail to stop there instead\n");
@@ -525,7 +528,7 @@ int replay(const ReplayArgs& args)
 
     std::printf("\n");
     print_applied(report, "");
-    print_failure(report, args);
+    print_failure(report, args, source.failed_message_type());
 
     const bool invariants =
         print_final_book(book, report, args.depth, source.instrument().price_scale, midnight);
@@ -621,7 +624,7 @@ int replay_books(const ReplayArgs& args)
 
     std::printf("\n");
     print_applied(total, "");
-    print_failure(total, args);
+    print_failure(total, args, source.failed_message_type());
     if (total.failure == ReplayFailure::InvariantViolation) {
         const std::string_view failed = name(*registry.find(report.failed_symbol));
         std::printf("  in symbol %.*s\n", static_cast<int>(failed.size()), failed.data());
@@ -885,7 +888,7 @@ int backtest(const ReplayArgs& args)
         std::printf("  sim events       %" PRIu64 " handled (%" PRIu64 " drained after end of stream), %" PRIu64
                     " discarded\n",
                     report.sim_events, report.drained_sim_events, report.discarded_sim_events);
-        print_failure(replay, args);
+        print_failure(replay, args, source.failed_message_type());
 
         print_strategy(strategy.stats());
         print_execution(execution.statistics());

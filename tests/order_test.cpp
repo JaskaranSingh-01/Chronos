@@ -134,6 +134,41 @@ TEST(OrderTest, CanCancelPartiallyFilledOrder) {
     EXPECT_EQ(order.remaining_quantity().value(), 60);
 }
 
+TEST(OrderTest, PartialCancelKeepsActiveState) {
+    auto order = make_test_order();
+
+    ASSERT_TRUE(order.activate());
+
+    EXPECT_TRUE(order.cancel(Quantity{30}));
+
+    EXPECT_EQ(order.state(), OrderState::Active);
+    EXPECT_EQ(order.remaining_quantity().value(), 70);
+}
+
+TEST(OrderTest, PartialCancelKeepsPartiallyFilledState) {
+    auto order = make_test_order();
+
+    ASSERT_TRUE(order.activate());
+    ASSERT_TRUE(order.execute(Quantity{40}));
+
+    EXPECT_TRUE(order.cancel(Quantity{20}));
+
+    EXPECT_EQ(order.state(), OrderState::PartiallyFilled);
+    EXPECT_EQ(order.remaining_quantity().value(), 40);
+}
+
+TEST(OrderTest, CancellingEveryRemainingShareCancelsTheOrder) {
+    auto order = make_test_order();
+
+    ASSERT_TRUE(order.activate());
+    ASSERT_TRUE(order.cancel(Quantity{30}));
+
+    EXPECT_TRUE(order.cancel(Quantity{70}));
+
+    EXPECT_EQ(order.state(), OrderState::Cancelled);
+    EXPECT_EQ(order.remaining_quantity().value(), 0);
+}
+
 TEST(OrderTest, CannotCancelNewOrder) {
     auto order = make_test_order();
 

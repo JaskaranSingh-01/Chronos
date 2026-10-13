@@ -39,10 +39,10 @@ using SourceFactory = std::unique_ptr<MarketEventSource> (*)(
 struct SourceCase
 {
     std::string_view name;
-    std::string_view data_file;             // under tests/data/conformance/; empty: no file
-    std::string_view data;                  // in-memory good input, used when data_file is empty
+    std::string_view data_file{};           // under tests/data/conformance/; empty: no file
+    std::string_view data{};                // in-memory good input, used when data_file is empty
     SourceFactory factory{nullptr};         // registers its instruments in `registry`
-    std::string_view bad_input;             // must end in expected_error
+    std::string_view bad_input{};           // must end in expected_error
     SourceError expected_error{SourceError::None};  // None: cannot fail, the error check is skipped
     std::uint64_t expected_position{0};
 };

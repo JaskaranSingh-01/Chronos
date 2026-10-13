@@ -8,7 +8,7 @@
 namespace simulator {
 namespace {
 
-using Int128 = __int128;
+__extension__ using Int128 = __int128;
 
 // Narrows money computed in __int128 to int64; a value that does not fit is a logic bug.
 std::int64_t to_money(Int128 value) noexcept

@@ -158,6 +158,7 @@ TEST(ItchSourceTest, AnUnknownTradingStateIsAnError)
     for (int call = 0; call < 2; ++call) {
         ASSERT_EQ(source.next(event), SourceResult::Error) << "call " << call;
         EXPECT_EQ(source.error(), SourceError::InvalidTradingState);
+        EXPECT_EQ(source.failed_message_type(), 'H');
         EXPECT_EQ(source.position(), 41u);
     }
 }
@@ -276,6 +277,7 @@ TEST(ItchSourceTest, NoRForTheTickerIsSymbolNotFoundAtTheEnd)
 
     ASSERT_EQ(source.next(event), SourceResult::Error);
     EXPECT_EQ(source.error(), SourceError::SymbolNotFound);
+    EXPECT_EQ(source.failed_message_type(), 0);
     EXPECT_EQ(source.position(), itch.bytes().size());
 }
 
@@ -387,8 +389,44 @@ TEST(ItchSourceTest, ErrorsAreSticky)
     for (int call = 0; call < 2; ++call) {
         ASSERT_EQ(source.next(event), SourceResult::Error) << "call " << call;
         EXPECT_EQ(source.error(), SourceError::InvalidSide);
+        EXPECT_EQ(source.failed_message_type(), 'A');
         EXPECT_EQ(source.position(), 41u);
     }
+}
+
+TEST(ItchSourceTest, ReportsInvalidPayloadLengthCause)
+{
+    ItchBuilder itch;
+    itch.stock_directory(1, 1, "AAPL").erase(1, 2, 7);
+    std::vector<std::byte> bytes(itch.bytes().begin(), itch.bytes().end());
+    bytes[42] = std::byte{20};  // the D's length, one more than its 19 bytes
+    bytes.push_back(std::byte{0});
+
+    InstrumentRegistry registry{4};
+    ItchSource source{bytes, aapl, registry};
+    MarketEvent event;
+
+    ASSERT_EQ(source.next(event), SourceResult::Error);
+    EXPECT_EQ(source.error(), SourceError::InvalidPayloadLength);
+    EXPECT_EQ(source.failed_message_type(), 'D');
+    EXPECT_EQ(source.position(), 41u);
+}
+
+TEST(ItchSourceTest, ReportsInvalidPrintableCause)
+{
+    ItchBuilder itch;
+    itch.stock_directory(1, 1, "AAPL").executed_with_price(1, 2, 7, 100, 3, true, 2'900'000);
+    std::vector<std::byte> bytes(itch.bytes().begin(), itch.bytes().end());
+    bytes[41 + 33] = std::byte{'X'};  // the C's printable flag
+
+    InstrumentRegistry registry{4};
+    ItchSource source{bytes, aapl, registry};
+    MarketEvent event;
+
+    ASSERT_EQ(source.next(event), SourceResult::Error);
+    EXPECT_EQ(source.error(), SourceError::InvalidPrintable);
+    EXPECT_EQ(source.failed_message_type(), 'C');
+    EXPECT_EQ(source.position(), 41u);
 }
 
 Instrument xnas(std::string_view ticker)
@@ -618,6 +656,109 @@ TEST(ItchEndToEndTest, ExecutedWithPriceReducesTheOrderAtItsOwnPrice)
     EXPECT_EQ(order->remaining_quantity(), Quantity{60});
     EXPECT_EQ(book.quantity_at(Side::Buy, Price{10000}), 60u);
     EXPECT_EQ(book.quantity_at(Side::Buy, Price{10050}), 0u);
+}
+
+// SPY has an R but is not selected; AAPL and MSFT share one OrderPool.
+TEST(ItchEndToEndTest, TwoSymbolsReplayIntoTheirOwnBooks)
+{
+    ItchBuilder itch;
+    itch.stock_directory(1, 1, "AAPL")
+        .stock_directory(2, 2, "MSFT")
+        .stock_directory(3, 3, "SPY")
+        .add_order(1, 100, 1, 'B', 100, "AAPL", 2'900'000)
+        .add_order_mpid(2, 110, 3, 'S', 200, "MSFT", 1'500'000, "GSCO")
+        .add_order(1, 120, 2, 'S', 300, "AAPL", 2'901'000)
+        .add_order(2, 130, 4, 'B', 100, "MSFT", 1'499'000)
+        .add_order(3, 135, 6, 'B', 100, "SPY", 3'210'000)
+        .cancel(1, 140, 2, 100)
+        .executed_with_price(2, 150, 3, 50, 1, true, 1'500'000)
+        .executed(1, 160, 1, 40, 2)
+        .cancel(2, 170, 3, 20)
+        .replace(1, 180, 1, 5, 80, 2'899'000)
+        .erase(2, 190, 4)
+        .executed(1, 200, 5, 30, 3)
+        .trade(1, 210, 0, 'B', 100, "AAPL", 2'900'500, 4)
+        .trade(2, 220, 0, 'S', 100, "MSFT", 1'499'500, 5);
+
+    const std::string_view tickers[] = {"AAPL", "MSFT"};
+    ItchSourceConfig config = aapl;
+    config.ticker = {};
+    config.tickers = tickers;
+
+    InstrumentRegistry registry{2};
+    ItchSource source{itch.bytes(), config, registry};
+    OrderPool pool{8};
+    MarketBooks books{registry, pool};
+    const BooksReplayReport report =
+        MarketReplay::run(source, books, {.check_invariants_every = 1, .session_midnight = midnight});
+    const ReplayReport& total = report.total;
+
+    ASSERT_TRUE(total.succeeded()) << total.message;
+    EXPECT_EQ(total.events, 13u);
+    EXPECT_EQ(total.rejected(), 0u);
+    EXPECT_EQ(total.invariant_checks, 13u);
+    EXPECT_EQ(total.first_timestamp, midnight + 100);
+    EXPECT_EQ(total.last_timestamp, midnight + 220);
+    EXPECT_EQ(by_type(total, MarketEventType::Add), 4u);
+    EXPECT_EQ(by_type(total, MarketEventType::Execute), 3u);
+    EXPECT_EQ(by_type(total, MarketEventType::Cancel), 2u);
+    EXPECT_EQ(by_type(total, MarketEventType::Replace), 1u);
+    EXPECT_EQ(by_type(total, MarketEventType::Delete), 1u);
+    EXPECT_EQ(by_type(total, MarketEventType::Trade), 2u);
+
+    const ItchSourceStatistics& stats = source.statistics();
+    EXPECT_EQ(stats.messages, 17u);
+    EXPECT_EQ(stats.filtered, 2u);  // R SPY, A SPY
+    EXPECT_EQ(stats.events, 13u);
+
+    ASSERT_EQ(registry.size(), 2u);
+    EXPECT_EQ(*registry.find(0), xnas("AAPL"));
+    EXPECT_EQ(*registry.find(1), xnas("MSFT"));
+    ASSERT_EQ(books.size(), 2u);
+    ASSERT_EQ(report.symbols.size(), 2u);
+
+    const SymbolReport& aapl_report = report.symbols[0];
+    EXPECT_EQ(aapl_report.events, 7u);
+    EXPECT_EQ(aapl_report.applied(), 7u);
+    EXPECT_EQ(aapl_report.peak_orders, 2u);
+    EXPECT_EQ(aapl_report.orders_left, 2u);
+
+    const SymbolReport& msft_report = report.symbols[1];
+    EXPECT_EQ(msft_report.events, 6u);
+    EXPECT_EQ(msft_report.applied(), 6u);
+    EXPECT_EQ(msft_report.peak_orders, 2u);
+    EXPECT_EQ(msft_report.orders_left, 1u);
+
+    EXPECT_EQ(report.peak_live_orders, 4u);
+    EXPECT_EQ(pool.in_use(), 3u);
+
+    // Trades leave both books as the order messages left them.
+    const MarketBook& aapl_book = books[0];
+    LevelInfo level{};
+    ASSERT_TRUE(aapl_book.best(Side::Buy, level));
+    EXPECT_EQ(level, (LevelInfo{Price{2'899'000}, 50, 1}));
+    ASSERT_TRUE(aapl_book.best(Side::Sell, level));
+    EXPECT_EQ(level, (LevelInfo{Price{2'901'000}, 200, 1}));
+    EXPECT_EQ(aapl_book.find(1), nullptr);
+    ASSERT_NE(aapl_book.find(5), nullptr);
+    EXPECT_EQ(aapl_book.find(5)->state(), OrderState::PartiallyFilled);
+    ASSERT_NE(aapl_book.find(2), nullptr);
+    EXPECT_EQ(aapl_book.find(2)->state(), OrderState::Active);  // cancelled from, never filled
+
+    const MarketBook& msft_book = books[1];
+    EXPECT_FALSE(msft_book.best(Side::Buy, level));
+    ASSERT_TRUE(msft_book.best(Side::Sell, level));
+    EXPECT_EQ(level, (LevelInfo{Price{1'500'000}, 130, 1}));
+    ASSERT_NE(msft_book.find(3), nullptr);
+    EXPECT_EQ(msft_book.find(3)->state(), OrderState::PartiallyFilled);
+
+    InvariantError error{InvariantError::None};
+    SymbolId failed{0};
+    EXPECT_TRUE(books.check_invariants(error, failed)) << to_string(error);
+
+    EXPECT_EQ(aapl_book.digest(), 0x0aea5cceb65717a0u);
+    EXPECT_EQ(msft_book.digest(), 0x82cdf53e816cbd93u);
+    EXPECT_EQ(books.digest(), 0xc9221e0c79b01f1au);
 }
 
 } // namespace

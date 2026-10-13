@@ -44,13 +44,14 @@ std::uint16_t peek_locate(std::span<const std::byte> payload) noexcept
         std::to_integer<std::uint16_t>(payload[0]) << 8 | std::to_integer<std::uint16_t>(payload[1]));
 }
 
-// The decoders check the payload size first, so TruncatedPayload cannot
-// happen; a bad C printable flag has no SourceError of its own.
+// The decoders check the payload size first, so TruncatedPayload cannot happen.
 SourceError to_source_error(const ItchDecoder& decoder) noexcept
 {
-    return decoder.error() == ItchDecodeError::InvalidSide
-        ? SourceError::InvalidSide
-        : SourceError::InvalidPayloadLength;
+    switch (decoder.error()) {
+    case ItchDecodeError::InvalidSide: return SourceError::InvalidSide;
+    case ItchDecodeError::InvalidPrintable: return SourceError::InvalidPrintable;
+    default: return SourceError::InvalidPayloadLength;
+    }
 }
 
 SourceError decode_trade(const ItchMessage& message, MarketEvent& event) noexcept
@@ -229,10 +230,11 @@ bool ItchSource::selected(const std::array<char, 8>& stock) const noexcept
     return all_tickers_ || std::find(tickers_.begin(), tickers_.end(), stock) != tickers_.end();
 }
 
-SourceResult ItchSource::finish(SourceError error) noexcept
+SourceResult ItchSource::finish(SourceError error, std::uint8_t message_type) noexcept
 {
     done_ = true;
     error_ = error;
+    failed_message_type_ = message_type;
     return error == SourceError::None ? SourceResult::EndOfStream : SourceResult::Error;
 }
 
@@ -283,7 +285,7 @@ SourceResult ItchSource::next(MarketEvent& event) noexcept
             ItchStockDirectory directory;
 
             if (decoder.decode_stock_directory(message, directory) != ItchDecodeResult::Success) {
-                return finish(to_source_error(decoder));
+                return finish(to_source_error(decoder), message.type);
             }
             if (!selected(directory.stock)) {
                 ++statistics_.filtered;
@@ -300,7 +302,7 @@ SourceResult ItchSource::next(MarketEvent& event) noexcept
             SymbolId symbol{0};
             const RegisterResult added = registry_.add(instrument, symbol);
             if (added == RegisterResult::Conflict || added == RegisterResult::Full) {
-                return finish(SourceError::InstrumentRejected);
+                return finish(SourceError::InstrumentRejected, message.type);
             }
             symbols_[directory.stock_locate] = symbol;
             locate_ = directory.stock_locate;
@@ -338,7 +340,7 @@ SourceResult ItchSource::next(MarketEvent& event) noexcept
         }
 
         if (const SourceError error = decode(message, event); error != SourceError::None) {
-            return finish(error);
+            return finish(error, message.type);
         }
         if (message.type == TRADING_ACTION) {
             has_status_[stock_locate] = true;

@@ -9,11 +9,12 @@
 namespace simulator {
 namespace {
 
+const void* volatile sink;
+
 // Escapes through a volatile store, so the optimiser cannot drop the allocation.
 template <class T>
 void keep(T* pointer)
 {
-    static T* volatile sink;
     sink = pointer;
 }
 

@@ -25,7 +25,8 @@ enum class SourceError : std::uint8_t {
     InvalidNumber,         // CSV: not a number
     NumberOutOfRange,      // CSV: e.g. quantity > UINT64_MAX or negative
     InvalidEventType,      // CSV
-    InvalidTradingState    // ITCH H: unknown trading state byte
+    InvalidTradingState,   // ITCH H: unknown trading state byte
+    InvalidPrintable       // ITCH C: printable flag neither Y nor N
 };
 
 // Pull-based stream of MarketEvents with non-decreasing timestamps. EndOfStream and Error

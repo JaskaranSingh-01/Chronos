@@ -19,10 +19,10 @@ struct ItchSourceConfig
 {
     // 1-8 ASCII chars matched against R's stock field; without its R the stream
     // ends in SymbolNotFound.
-    std::string_view ticker;
+    std::string_view ticker{};
 
     // Matched like `ticker`; one with no R is never registered, which is not an error.
-    std::span<const std::string_view> tickers;
+    std::span<const std::string_view> tickers{};
 
     bool all_tickers{false};  // every R
     std::chrono::year_month_day session_date{};
@@ -67,9 +67,10 @@ private:
     bool done_{false};
     bool truncated_tail_{false};
     SourceError error_{SourceError::None};
+    std::uint8_t failed_message_type_{0};
     ItchSourceStatistics statistics_{};
 
-    SourceResult finish(SourceError error) noexcept;
+    SourceResult finish(SourceError error, std::uint8_t message_type = 0) noexcept;
     SourceResult end_of_data() noexcept;  // SymbolNotFound or EndOfStream
     bool selected(const std::array<char, 8>& stock) const noexcept;
 
@@ -92,6 +93,12 @@ public:
     SourceError error() const noexcept override
     {
         return error_;
+    }
+
+    // Type byte of the message at position() that failed to decode or register; 0 otherwise.
+    std::uint8_t failed_message_type() const noexcept
+    {
+        return failed_message_type_;
     }
 
     // True once a partial last message ended the stream (allow_truncated_tail).
