@@ -50,6 +50,7 @@ add_library(simulator_lib
     src/market/instrument_registry.cpp
     src/market/market_book.cpp
     src/io/mapped_file.cpp
+    src/csv/csv_source.cpp
     src/itch/itch_source.cpp
     src/market/market_replay.cpp
     src/cli/replay_args.cpp
@@ -147,6 +148,7 @@ add_executable(simulator_tests
     tests/market/market_book_test.cpp
     tests/source_conformance_test.cpp
     tests/io/mapped_file_test.cpp
+    tests/csv/csv_source_test.cpp
     tests/itch/itch_source_test.cpp
     tests/market/market_replay_test.cpp
     tests/cli/replay_args_test.cpp

@@ -7,6 +7,7 @@
 #include <string>
 
 #include "itch/itch_test_builder.hpp"
+#include "simulator/csv/csv_source.hpp"
 #include "simulator/itch/itch_source.hpp"
 #include "simulator/market/vector_source.hpp"
 #include "support/source_conformance.hpp"
@@ -148,6 +149,24 @@ INSTANTIATE_TEST_SUITE_P(
     ::testing::Values(SourceCase{
         .name = "Itch", .data = itch_good, .factory = make_itch_source, .bad_input = itch_bad,
         .expected_error = SourceError::InvalidSide, .expected_position = 41}));
+
+// CsvSource: tests/data/conformance/basic.csv holds every CSV action at
+// xnas_aapl's scale 4 and tick 100. The bad input has a negative quantity (BUG.08).
+std::unique_ptr<MarketEventSource> make_csv_source(
+    std::span<const std::byte> data, InstrumentRegistry& registry)
+{
+    SymbolId id{};
+    registry.add(xnas_aapl, id);
+    return std::make_unique<CsvSource>(data, id);
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    Csv, SourceConformanceTest,
+    ::testing::Values(SourceCase{
+        .name = "Csv", .data_file = "basic.csv", .factory = make_csv_source,
+        .bad_input = "timestamp,event_type,order_id,side,price,quantity,new_order_id\n"
+                     "1577716200000000000,ADD,1,BUY,1000000,-5,\n",
+        .expected_error = SourceError::NumberOutOfRange, .expected_position = 2}));
 
 // ---------------------------------------------------------------------------
 // The checks themselves, run against deliberately broken in-test sources.
