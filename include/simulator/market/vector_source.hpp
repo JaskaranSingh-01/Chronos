@@ -17,7 +17,8 @@ private:
 
 public:
     explicit VectorSource(std::span<const MarketEvent> events) noexcept
-        : events_(events) {}
+        : events_(events)
+    {}
 
     SourceResult next(MarketEvent& event) noexcept override
     {

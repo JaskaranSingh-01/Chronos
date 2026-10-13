@@ -33,7 +33,14 @@ struct OrderRequest
     TimeInForce time_in_force{TimeInForce::Ioc};
 };
 
-enum class ReportType : std::uint8_t { Accepted, Rejected, Fill, Cancelled, CancelRejected, Expired };
+enum class ReportType : std::uint8_t {
+    Accepted,
+    Rejected,
+    Fill,
+    Cancelled,
+    CancelRejected,
+    Expired
+};
 
 enum class RejectReason : std::uint8_t {
     None,
@@ -42,7 +49,11 @@ enum class RejectReason : std::uint8_t {
     NotTrading    // the symbol is halted, paused or quotation only
 };
 
-enum class Liquidity : std::uint8_t { None, Maker, Taker };
+enum class Liquidity : std::uint8_t {
+    None,
+    Maker,
+    Taker
+};
 
 struct ExecutionReport
 {
@@ -60,6 +71,12 @@ struct ExecutionReport
 };
 
 // Portfolio::reserve's pre-trade verdict; checks run in this order.
-enum class RiskCheck : std::uint8_t { Accepted, InvalidOrder, OrderTooLarge, PositionLimit, TooManyOpenOrders };
+enum class RiskCheck : std::uint8_t {
+    Accepted,
+    InvalidOrder,
+    OrderTooLarge,
+    PositionLimit,
+    TooManyOpenOrders
+};
 
 } // namespace simulator

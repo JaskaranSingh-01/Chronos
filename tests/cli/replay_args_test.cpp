@@ -29,9 +29,9 @@ Parsed parse(std::vector<std::string_view> argv)
 
 TEST(ReplayArgsTest, ParsesEveryOption)
 {
-    const Parsed p = parse({"replay", "day.bin", "--symbol", "MSFT", "--date", "2019-12-30",
-                            "--utc-offset", "+05:30", "--allow-truncated-tail", "--depth", "10",
-                            "--check-invariants", "10000", "--capacity", "4096"});
+    const Parsed p =
+        parse({"replay", "day.bin", "--symbol", "MSFT", "--date", "2019-12-30", "--utc-offset", "+05:30",
+               "--allow-truncated-tail", "--depth", "10", "--check-invariants", "10000", "--capacity", "4096"});
 
     ASSERT_TRUE(p.ok) << p.error;
     EXPECT_EQ(p.args.file, "day.bin");
@@ -60,8 +60,8 @@ TEST(ReplayArgsTest, DefaultsAndUsEasternOffsetFromDate)
     ASSERT_TRUE(summer.ok) << summer.error;
     EXPECT_EQ(summer.args.utc_offset, -4h);
 
-    const Parsed negative = parse({"replay", "day.bin", "--symbol", "AAPL", "--date", "2012-06-21",
-                                   "--utc-offset", "-03:30"});
+    const Parsed negative =
+        parse({"replay", "day.bin", "--symbol", "AAPL", "--date", "2012-06-21", "--utc-offset", "-03:30"});
     ASSERT_TRUE(negative.ok) << negative.error;
     EXPECT_EQ(negative.args.utc_offset, -(3h + 30min));
 }
@@ -108,10 +108,29 @@ TEST(ReplayArgsTest, RejectsBadValues)
 
 TEST(ReplayArgsTest, ParsesBacktestOptions)
 {
-    const Parsed p = parse({"backtest", "day.bin", "--symbol", "SPY", "--date", "2019-12-30",
-                            "--allow-truncated-tail", "--capacity", "4096", "--order-latency-us", "20",
-                            "--report-latency-us", "30", "--threshold", "2.5", "--clip", "200",
-                            "--max-position", "1000", "--cooldown-ms", "5", "--taker-fee-ticks", "30"});
+    const Parsed p = parse({"backtest",
+                            "day.bin",
+                            "--symbol",
+                            "SPY",
+                            "--date",
+                            "2019-12-30",
+                            "--allow-truncated-tail",
+                            "--capacity",
+                            "4096",
+                            "--order-latency-us",
+                            "20",
+                            "--report-latency-us",
+                            "30",
+                            "--threshold",
+                            "2.5",
+                            "--clip",
+                            "200",
+                            "--max-position",
+                            "1000",
+                            "--cooldown-ms",
+                            "5",
+                            "--taker-fee-ticks",
+                            "30"});
 
     ASSERT_TRUE(p.ok) << p.error;
     EXPECT_EQ(p.args.command, CliCommand::Backtest);
@@ -162,9 +181,26 @@ TEST(ReplayArgsTest, BacktestDefaultsAndFlagsOnlyForBacktest)
 
 TEST(ReplayArgsTest, ParsesMarketMakerOptions)
 {
-    const Parsed p = parse({"backtest", "day.bin", "--symbol", "SPY", "--date", "2019-12-30", "--strategy", "mm",
-                            "--quote-size", "200", "--max-position", "800", "--requote-ms", "250",
-                            "--maker-fee-ticks", "-20", "--taker-fee-ticks", "30", "--max-open-orders", "4"});
+    const Parsed p = parse({"backtest",
+                            "day.bin",
+                            "--symbol",
+                            "SPY",
+                            "--date",
+                            "2019-12-30",
+                            "--strategy",
+                            "mm",
+                            "--quote-size",
+                            "200",
+                            "--max-position",
+                            "800",
+                            "--requote-ms",
+                            "250",
+                            "--maker-fee-ticks",
+                            "-20",
+                            "--taker-fee-ticks",
+                            "30",
+                            "--max-open-orders",
+                            "4"});
 
     ASSERT_TRUE(p.ok) << p.error;
     const BacktestArgs& b = p.args.backtest;
@@ -291,8 +327,7 @@ TEST(ReplayArgsTest, ParsesLatencyForReplayOnlyAndJsonForBoth)
     const Parsed latency = parse({"backtest", "day.bin", "--symbol", "SPY", "--date", "2019-12-30", "--latency"});
     EXPECT_FALSE(latency.ok);
     EXPECT_NE(latency.error.find("unknown backtest option --latency"), std::string::npos) << latency.error;
-    EXPECT_FALSE(
-        parse({"backtest", "day.bin", "--symbol", "SPY", "--date", "2019-12-30", "--latency-batch", "64"}).ok);
+    EXPECT_FALSE(parse({"backtest", "day.bin", "--symbol", "SPY", "--date", "2019-12-30", "--latency-batch", "64"}).ok);
 
     const Parsed json = parse({"backtest", "day.bin", "--symbol", "SPY", "--date", "2019-12-30", "--json", "a.json"});
     ASSERT_TRUE(json.ok) << json.error;
@@ -311,7 +346,8 @@ TEST(ReplayArgsTest, HelpAndVersionWinAnywhere)
         EXPECT_EQ(p.args.command, CliCommand::Help);
     }
     for (const std::vector<std::string_view>& argv :
-         {std::vector<std::string_view>{"--version"}, std::vector<std::string_view>{"replay", "day.bin", "--version"}}) {
+         {std::vector<std::string_view>{"--version"},
+          std::vector<std::string_view>{"replay", "day.bin", "--version"}}) {
         const Parsed p = parse(argv);
         ASSERT_TRUE(p.ok) << p.error;
         EXPECT_EQ(p.args.command, CliCommand::Version);
@@ -342,7 +378,8 @@ TEST(ReplayArgsTest, ParsesLatencyInNanoseconds)
     EXPECT_TRUE(backtest({"--order-latency-ns", "1000000000000"}).ok);  // 1,000 s, as for -us
     EXPECT_FALSE(backtest({"--order-latency-ns", "1000000000001"}).ok);
     EXPECT_FALSE(backtest({"--report-latency-ns", "-1"}).ok);
-    EXPECT_FALSE(parse({"replay", "day.bin", "--symbol", "SPY", "--date", "2019-12-30", "--order-latency-ns", "300"}).ok);
+    EXPECT_FALSE(
+        parse({"replay", "day.bin", "--symbol", "SPY", "--date", "2019-12-30", "--order-latency-ns", "300"}).ok);
 }
 
 TEST(ReplayArgsTest, ErrorsNameTheCommandAndOption)
@@ -370,7 +407,8 @@ TEST(ReplayArgsTest, ErrorsNameTheCommandAndOption)
     const std::string none = error({});
     EXPECT_NE(none.find("missing"), std::string::npos) << none;
 
-    const std::string depth = error({"replay", "day.bin", "--symbol", "SPY", "--date", "2019-12-30", "--depth", "five"});
+    const std::string depth =
+        error({"replay", "day.bin", "--symbol", "SPY", "--date", "2019-12-30", "--depth", "five"});
     EXPECT_NE(depth.find("--depth"), std::string::npos) << depth;
     EXPECT_NE(depth.find("'five'"), std::string::npos) << depth;
 }

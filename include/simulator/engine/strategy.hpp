@@ -18,8 +18,14 @@ struct StrategyContext
     const Portfolio& portfolio;
     OrderGateway& gateway;
 
-    Timestamp now() const noexcept { return gateway.now(); }
-    bool set_timer(Timestamp at, std::uint64_t timer_id) const noexcept { return gateway.set_timer(at, timer_id); }
+    Timestamp now() const noexcept
+    {
+        return gateway.now();
+    }
+    bool set_timer(Timestamp at, std::uint64_t timer_id) const noexcept
+    {
+        return gateway.set_timer(at, timer_id);
+    }
 };
 
 // on_market runs only for events the book applied and sees the post-event book; on_report runs

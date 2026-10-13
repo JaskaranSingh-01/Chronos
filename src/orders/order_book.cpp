@@ -25,12 +25,11 @@ bool OrderBook::unlink(Order& order) noexcept
 
 bool OrderBook::add(Order& order) noexcept
 {
-    if(order.remaining_quantity().is_zero()){
+    if (order.remaining_quantity().is_zero()) {
         return false;
     }
 
-    if (order.state() != OrderState::Active &&
-        order.state() != OrderState::PartiallyFilled) {
+    if (order.state() != OrderState::Active && order.state() != OrderState::PartiallyFilled) {
         return false;
     }
 
@@ -40,11 +39,7 @@ bool OrderBook::add(Order& order) noexcept
 
     if (order.side() == Side::Buy) {
 
-        auto [it, inserted] =
-            bids_.try_emplace(
-                order.price(),
-                order.price()
-            );
+        auto [it, inserted] = bids_.try_emplace(order.price(), order.price());
 
         PriceLevel& level = it->second;
 
@@ -58,11 +53,7 @@ bool OrderBook::add(Order& order) noexcept
 
     } else {
 
-        auto [it, inserted] =
-            asks_.try_emplace(
-                order.price(),
-                order.price()
-            );
+        auto [it, inserted] = asks_.try_emplace(order.price(), order.price());
 
         PriceLevel& level = it->second;
 
@@ -88,8 +79,7 @@ bool OrderBook::cancel(OrderId id) noexcept
         return false;
     }
 
-    if (order->state() != OrderState::Active &&
-        order->state() != OrderState::PartiallyFilled) {
+    if (order->state() != OrderState::Active && order->state() != OrderState::PartiallyFilled) {
         return false;
     }
 
@@ -139,10 +129,7 @@ bool OrderBook::empty() const noexcept
     return orders_.size() == 0;
 }
 
-bool OrderBook::execute(
-    OrderId id,
-    Quantity quantity
-) noexcept
+bool OrderBook::execute(OrderId id, Quantity quantity) noexcept
 {
     Order* order = orders_.find(id);
 
@@ -169,10 +156,7 @@ bool OrderBook::execute(
     return true;
 }
 
-bool OrderBook::cancel(
-    OrderId id,
-    Quantity quantity
-) noexcept
+bool OrderBook::cancel(OrderId id, Quantity quantity) noexcept
 {
     Order* order = orders_.find(id);
 

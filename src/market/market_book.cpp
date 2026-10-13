@@ -6,10 +6,12 @@
 namespace simulator {
 
 MarketBook::MarketBook(SymbolId symbol, std::size_t order_capacity)
-    : symbol_(symbol), owned_pool_(std::in_place, order_capacity), pool_(&*owned_pool_), book_(order_capacity) {}
+    : symbol_(symbol), owned_pool_(std::in_place, order_capacity), pool_(&*owned_pool_), book_(order_capacity)
+{}
 
 MarketBook::MarketBook(SymbolId symbol, OrderPool& pool) noexcept
-    : symbol_(symbol), pool_(&pool) {}
+    : symbol_(symbol), pool_(&pool)
+{}
 
 // Every case validates before mutating, so a rejected event leaves the book unchanged.
 ApplyResult MarketBook::apply(const MarketEvent& event) noexcept
@@ -185,14 +187,12 @@ std::uint64_t MarketBook::quantity_at(Side side, Price price) const noexcept
 
 bool MarketBook::is_crossed() const noexcept
 {
-    return !book_.bids().empty() && !book_.asks().empty() &&
-           book_.bids().begin()->first > book_.asks().begin()->first;
+    return !book_.bids().empty() && !book_.asks().empty() && book_.bids().begin()->first > book_.asks().begin()->first;
 }
 
 bool MarketBook::is_locked() const noexcept
 {
-    return !book_.bids().empty() && !book_.asks().empty() &&
-           book_.bids().begin()->first == book_.asks().begin()->first;
+    return !book_.bids().empty() && !book_.asks().empty() && book_.bids().begin()->first == book_.asks().begin()->first;
 }
 
 bool MarketBook::check_invariants(InvariantError& error, bool rth) const noexcept

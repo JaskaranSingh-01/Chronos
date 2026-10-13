@@ -30,13 +30,19 @@ struct Recorded
     S strategy;
     std::vector<ExecutionReport> reports;
 
-    void on_market(StrategyContext& ctx, const MarketEvent& event) noexcept { strategy.on_market(ctx, event); }
+    void on_market(StrategyContext& ctx, const MarketEvent& event) noexcept
+    {
+        strategy.on_market(ctx, event);
+    }
     void on_report(StrategyContext& ctx, const ExecutionReport& report) noexcept
     {
         reports.push_back(report);
         strategy.on_report(ctx, report);
     }
-    void on_timer(StrategyContext& ctx, std::uint64_t timer_id) noexcept { strategy.on_timer(ctx, timer_id); }
+    void on_timer(StrategyContext& ctx, std::uint64_t timer_id) noexcept
+    {
+        strategy.on_timer(ctx, timer_id);
+    }
 };
 
 template <class Stats>
@@ -87,17 +93,19 @@ Outcome<ImbalanceTakerStats> imbalance(MarketEventSource& source, std::size_t ca
                                        const ImbalanceTakerParams& params, LatencyConfig latency)
 {
     return backtest(source, capacity, ImbalanceTaker{params},
-                    RiskLimits{.max_position = params.max_position, .max_order_quantity = Quantity{params.clip},
+                    RiskLimits{.max_position = params.max_position,
+                               .max_order_quantity = Quantity{params.clip},
                                .max_open_orders = 1},
                     FeeSchedule{.taker_fee_per_share = 30}, latency);
 }
 
-Outcome<MarketMakerStats> market_maker(MarketEventSource& source, std::size_t capacity,
-                                       const MarketMakerParams& params, LatencyConfig latency)
+Outcome<MarketMakerStats> market_maker(MarketEventSource& source, std::size_t capacity, const MarketMakerParams& params,
+                                       LatencyConfig latency)
 {
     return backtest(source, capacity, MarketMaker{params},
                     RiskLimits{.max_position = params.max_position,
-                               .max_order_quantity = Quantity{params.quote_size}, .max_open_orders = 2},
+                               .max_order_quantity = Quantity{params.quote_size},
+                               .max_open_orders = 2},
                     FeeSchedule{.maker_fee_per_share = -2, .taker_fee_per_share = 30}, latency);
 }
 
@@ -134,9 +142,12 @@ std::vector<MarketEvent> synthetic_market(std::uint64_t seed, std::size_t count)
             const Side side = rng() % 2 ? Side::Buy : Side::Sell;
             const auto offset = static_cast<std::int64_t>(100 * (1 + rng() % 3));
             const std::uint64_t quantity = 10 * (1 + rng() % 40);
-            events.push_back(MarketEvent{.timestamp = ts, .order_id = next_id,
+            events.push_back(MarketEvent{.timestamp = ts,
+                                         .order_id = next_id,
                                          .price = Price{side == Side::Buy ? 1'000'000 - offset : 1'000'000 + offset},
-                                         .quantity = Quantity{quantity}, .type = MarketEventType::Add, .side = side});
+                                         .quantity = Quantity{quantity},
+                                         .type = MarketEventType::Add,
+                                         .side = side});
             live.push_back({next_id++, quantity});
             continue;
         }
@@ -145,7 +156,9 @@ std::vector<MarketEvent> synthetic_market(std::uint64_t seed, std::size_t count)
         Live& order = live[pick];
         const bool execute = roll < 7;
         const std::uint64_t quantity = execute ? 1 + rng() % order.remaining : order.remaining;
-        events.push_back(MarketEvent{.timestamp = ts, .order_id = order.id, .quantity = Quantity{quantity},
+        events.push_back(MarketEvent{.timestamp = ts,
+                                     .order_id = order.id,
+                                     .quantity = Quantity{quantity},
                                      .type = execute ? MarketEventType::Execute : MarketEventType::Delete});
         order.remaining -= quantity;
         if (order.remaining == 0) {
@@ -236,8 +249,10 @@ bool open_real_data(RealData& data)
     std::chrono::year_month_day date{};
     EXPECT_TRUE(parse_date(env_or("CHRONOS_ITCH_DATE", "2019-12-30"), date));
     EXPECT_TRUE(data.file.open(path)) << data.file.error();
-    data.config = ItchSourceConfig{.ticker = env_or("CHRONOS_ITCH_SYMBOL", "AAPL"), .session_date = date,
-                                   .utc_offset = us_eastern_utc_offset(date), .allow_truncated_tail = true};
+    data.config = ItchSourceConfig{.ticker = env_or("CHRONOS_ITCH_SYMBOL", "AAPL"),
+                                   .session_date = date,
+                                   .utc_offset = us_eastern_utc_offset(date),
+                                   .allow_truncated_tail = true};
     return true;
 }
 
@@ -274,8 +289,7 @@ TEST(BacktestDeterminismTest, RealDataRunsAreIdenticalWithoutRejections)
     if (!open_real_data(data)) {
         GTEST_SKIP() << "set CHRONOS_ITCH_FILE to a NASDAQ ITCH 5.0 file";
     }
-    const ImbalanceTakerParams params{.threshold = 3.0, .clip = 100, .max_position = 500,
-                                      .cooldown_ns = 100'000'000};
+    const ImbalanceTakerParams params{.threshold = 3.0, .clip = 100, .max_position = 500, .cooldown_ns = 100'000'000};
     expect_deterministic(
         data,
         [&] {

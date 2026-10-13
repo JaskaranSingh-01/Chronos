@@ -14,8 +14,7 @@ RegisterResult InstrumentRegistry::add(const Instrument& instrument, SymbolId& i
     for (std::size_t i = 0; i < instruments_.size(); ++i) {
         const Instrument& known = instruments_[i];
 
-        if (known.venue != instrument.venue ||
-            known.native_symbol != instrument.native_symbol) {
+        if (known.venue != instrument.venue || known.native_symbol != instrument.native_symbol) {
             continue;
         }
 

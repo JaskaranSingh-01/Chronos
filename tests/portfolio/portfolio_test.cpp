@@ -13,14 +13,17 @@ constexpr SymbolId kSymbol = 1;
 // US equity: prices in $0.0001 ticks, whole shares, so money is in tick-shares.
 constexpr Instrument kEquity{.price_scale = 4, .quantity_scale = 0};
 
-constexpr RiskLimits kWide{.max_position = 1'000'000, .max_order_quantity = Quantity{1'000'000},
-                           .max_open_orders = 16};
+constexpr RiskLimits kWide{.max_position = 1'000'000, .max_order_quantity = Quantity{1'000'000}, .max_open_orders = 16};
 
 ExecutionReport fill(Side side, std::int64_t price, std::uint64_t quantity, std::uint64_t leaves,
                      Liquidity liquidity = Liquidity::Taker)
 {
-    return ExecutionReport{.price = Price{price}, .quantity = Quantity{quantity}, .leaves = Quantity{leaves},
-                           .type = ReportType::Fill, .liquidity = liquidity, .side = side};
+    return ExecutionReport{.price = Price{price},
+                           .quantity = Quantity{quantity},
+                           .leaves = Quantity{leaves},
+                           .type = ReportType::Fill,
+                           .liquidity = liquidity,
+                           .side = side};
 }
 
 // Cancelled, Expired or Rejected: `quantity` leaves the market.
@@ -42,14 +45,16 @@ void mark_at(Portfolio& portfolio, std::int64_t bid, std::int64_t ask)
 {
     MarketBook book{kSymbol, 4};
     if (bid != 0) {
-        ASSERT_EQ(book.apply(MarketEvent{.order_id = 1, .price = Price{bid}, .quantity = Quantity{100},
-                                         .symbol = kSymbol, .side = Side::Buy}),
-                  ApplyResult::Applied);
+        ASSERT_EQ(
+            book.apply(MarketEvent{
+                .order_id = 1, .price = Price{bid}, .quantity = Quantity{100}, .symbol = kSymbol, .side = Side::Buy}),
+            ApplyResult::Applied);
     }
     if (ask != 0) {
-        ASSERT_EQ(book.apply(MarketEvent{.order_id = 2, .price = Price{ask}, .quantity = Quantity{100},
-                                         .symbol = kSymbol, .side = Side::Sell}),
-                  ApplyResult::Applied);
+        ASSERT_EQ(
+            book.apply(MarketEvent{
+                .order_id = 2, .price = Price{ask}, .quantity = Quantity{100}, .symbol = kSymbol, .side = Side::Sell}),
+            ApplyResult::Applied);
     }
     portfolio.mark(book);
 }
@@ -184,10 +189,10 @@ TEST(PortfolioTest, MaxDrawdownIsTheLargestFallFromAPeak)
 // BTC-like: prices in cents, sizes in 1e-8 units, so money is in 1e-10 USD.
 TEST(PortfolioTest, QuantityScale8Instrument)
 {
-    Portfolio portfolio{Instrument{.price_scale = 2, .quantity_scale = 8},
-                        RiskLimits{.max_position = 100'000'000, .max_order_quantity = Quantity{100'000'000},
-                                   .max_open_orders = 4},
-                        FeeSchedule{}};
+    Portfolio portfolio{
+        Instrument{.price_scale = 2, .quantity_scale = 8},
+        RiskLimits{.max_position = 100'000'000, .max_order_quantity = Quantity{100'000'000}, .max_open_orders = 4},
+        FeeSchedule{}};
 
     trade(portfolio, Side::Buy, 6'000'000, 50'000'000);  // 0.5 @ $60,000.00
     EXPECT_EQ(portfolio.position(), 50'000'000);
@@ -202,7 +207,8 @@ TEST(PortfolioTest, QuantityScale8Instrument)
 TEST(PortfolioTest, ProductsNearTheScaleCapStayExact)
 {
     Portfolio portfolio{Instrument{.price_scale = 4, .quantity_scale = 8},
-                        RiskLimits{.max_position = 20'000'000'000, .max_order_quantity = Quantity{20'000'000'000},
+                        RiskLimits{.max_position = 20'000'000'000,
+                                   .max_order_quantity = Quantity{20'000'000'000},
                                    .max_open_orders = 4},
                         FeeSchedule{}};
 

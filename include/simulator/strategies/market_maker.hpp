@@ -13,17 +13,17 @@ struct MarketMakerParams
     std::uint64_t quote_size{100};                // shares per quote
     std::int64_t max_position{500};               // |position| a fill of the next quote may not exceed
     Timestamp requote_cooldown_ns{100'000'000};   // minimum quote age before a requote
-    std::int64_t improve_ticks{0};                // ticks inside the touch; used only while the spread is wider than twice this
+    std::int64_t improve_ticks{0};  // ticks inside the touch; used only while the spread is wider than twice this
 };
 
 struct MarketMakerStats
 {
-    std::uint64_t quotes{0};        // passed the gateway's risk check
+    std::uint64_t quotes{0};  // passed the gateway's risk check
     std::uint64_t risk_rejects{0};  // refused by the risk check
     std::uint64_t cancels{0};
     std::uint64_t fills{0};
-    std::uint64_t rejects{0};       // WouldCross, or NotTrading for a quote in flight when trading stops
-    std::uint64_t bought{0};        // shares
+    std::uint64_t rejects{0};  // WouldCross, or NotTrading for a quote in flight when trading stops
+    std::uint64_t bought{0};  // shares
     std::uint64_t sold{0};
 
     bool operator==(const MarketMakerStats&) const = default;
@@ -36,7 +36,7 @@ class MarketMaker
 private:
     struct Quote
     {
-        OrderId id{0};          // 0 = no order on this side
+        OrderId id{0};  // 0 = no order on this side
         Price price{};
         bool cancelling{false};
         Timestamp ready_at{0};  // no new quote or requote before this
@@ -46,7 +46,10 @@ private:
     MarketMakerStats stats_;
     std::array<Quote, 2> quotes_{};  // index = Side
 
-    static std::size_t index(Side side) noexcept { return static_cast<std::size_t>(side); }
+    static std::size_t index(Side side) noexcept
+    {
+        return static_cast<std::size_t>(side);
+    }
 
     // Sets `price` for `side`, or returns false if that side should have no quote now.
     bool target(const StrategyContext& ctx, Side side, Price& price) const noexcept
@@ -107,9 +110,13 @@ private:
 
 public:
     explicit MarketMaker(MarketMakerParams params) noexcept
-        : params_(params) {}
+        : params_(params)
+    {}
 
-    void on_market(StrategyContext& ctx, const MarketEvent&) noexcept { update(ctx); }
+    void on_market(StrategyContext& ctx, const MarketEvent&) noexcept
+    {
+        update(ctx);
+    }
 
     void on_report(StrategyContext& ctx, const ExecutionReport& report) noexcept
     {
@@ -126,8 +133,7 @@ public:
                 continue;
             }
             const bool done = report.type == ReportType::Cancelled || report.type == ReportType::Rejected ||
-                              report.type == ReportType::Expired ||
-                              (report.type == ReportType::Fill && report.leaves.is_zero());
+                report.type == ReportType::Expired || (report.type == ReportType::Fill && report.leaves.is_zero());
             if (done) {
                 quote.id = 0;
                 quote.cancelling = false;
@@ -143,7 +149,10 @@ public:
 
     void on_timer(StrategyContext&, std::uint64_t) noexcept {}
 
-    const MarketMakerStats& stats() const noexcept { return stats_; }
+    const MarketMakerStats& stats() const noexcept
+    {
+        return stats_;
+    }
 };
 
-} // namespace simulator
+}  // namespace simulator

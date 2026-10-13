@@ -62,10 +62,7 @@ TEST(ItchDecoderTest, DecodesAddOrder)
     ItchDecoder decoder;
     ItchAddOrder order;
 
-    ASSERT_EQ(
-        decoder.decode_add_order(read_one(builder.bytes()), order),
-        ItchDecodeResult::Success
-    );
+    ASSERT_EQ(decoder.decode_add_order(read_one(builder.bytes()), order), ItchDecodeResult::Success);
 
     EXPECT_EQ(decoder.error(), ItchDecodeError::None);
     EXPECT_EQ(order.timestamp, 0x010203040506);
@@ -84,10 +81,7 @@ TEST(ItchDecoderTest, DecodesSellOrder)
     ItchDecoder decoder;
     ItchAddOrder order;
 
-    ASSERT_EQ(
-        decoder.decode_add_order(read_one(builder.bytes()), order),
-        ItchDecodeResult::Success
-    );
+    ASSERT_EQ(decoder.decode_add_order(read_one(builder.bytes()), order), ItchDecodeResult::Success);
 
     EXPECT_EQ(order.side, Side::Sell);
     EXPECT_EQ(order.order_id, OrderId{2});
@@ -103,10 +97,7 @@ TEST(ItchDecoderTest, RejectsWrongMessageType)
     ItchDecoder decoder;
     ItchAddOrder order;
 
-    EXPECT_EQ(
-        decoder.decode_add_order(read_one(builder.bytes()), order),
-        ItchDecodeResult::UnsupportedMessage
-    );
+    EXPECT_EQ(decoder.decode_add_order(read_one(builder.bytes()), order), ItchDecodeResult::UnsupportedMessage);
 
     EXPECT_EQ(decoder.error(), ItchDecodeError::InvalidMessageType);
 }
@@ -121,10 +112,7 @@ TEST(ItchDecoderTest, RejectsWrongPayloadLength)
     ItchDecoder decoder;
     ItchAddOrder order;
 
-    EXPECT_EQ(
-        decoder.decode_add_order(read_one(bytes), order),
-        ItchDecodeResult::InvalidMessage
-    );
+    EXPECT_EQ(decoder.decode_add_order(read_one(bytes), order), ItchDecodeResult::InvalidMessage);
 
     EXPECT_EQ(decoder.error(), ItchDecodeError::InvalidPayloadLength);
 }
@@ -137,10 +125,7 @@ TEST(ItchDecoderTest, RejectsInvalidSide)
     ItchDecoder decoder;
     ItchAddOrder order;
 
-    EXPECT_EQ(
-        decoder.decode_add_order(read_one(builder.bytes()), order),
-        ItchDecodeResult::InvalidMessage
-    );
+    EXPECT_EQ(decoder.decode_add_order(read_one(builder.bytes()), order), ItchDecodeResult::InvalidMessage);
 
     EXPECT_EQ(decoder.error(), ItchDecodeError::InvalidSide);
 }
@@ -153,10 +138,7 @@ TEST(ItchDecoderTest, DecodesOrderExecuted)
     ItchDecoder decoder;
     ItchOrderExecuted order;
 
-    ASSERT_EQ(
-        decoder.decode_order_executed(read_one(builder.bytes()), order),
-        ItchDecodeResult::Success
-    );
+    ASSERT_EQ(decoder.decode_order_executed(read_one(builder.bytes()), order), ItchDecodeResult::Success);
 
     EXPECT_EQ(order.timestamp, 0x010203040506);
     EXPECT_EQ(order.order_id, 0x1122334455667788ULL);
@@ -174,10 +156,7 @@ TEST(ItchDecoderTest, DecodesOrderCancel)
     ItchDecoder decoder;
     ItchOrderCancel order;
 
-    ASSERT_EQ(
-        decoder.decode_order_cancel(read_one(builder.bytes()), order),
-        ItchDecodeResult::Success
-    );
+    ASSERT_EQ(decoder.decode_order_cancel(read_one(builder.bytes()), order), ItchDecodeResult::Success);
 
     EXPECT_EQ(order.timestamp, 0x010203040506);
     EXPECT_EQ(order.order_id, 0x1122334455667788ULL);
@@ -194,10 +173,7 @@ TEST(ItchDecoderTest, DecodesOrderDelete)
     ItchDecoder decoder;
     ItchOrderDelete order;
 
-    ASSERT_EQ(
-        decoder.decode_order_delete(read_one(builder.bytes()), order),
-        ItchDecodeResult::Success
-    );
+    ASSERT_EQ(decoder.decode_order_delete(read_one(builder.bytes()), order), ItchDecodeResult::Success);
 
     EXPECT_EQ(order.timestamp, 0x010203040506);
     EXPECT_EQ(order.order_id, 0x1122334455667788ULL);
@@ -213,10 +189,7 @@ TEST(ItchDecoderTest, OrderExecutedRejectsWrongMessageType)
     ItchDecoder decoder;
     ItchOrderExecuted order;
 
-    EXPECT_EQ(
-        decoder.decode_order_executed(read_one(builder.bytes()), order),
-        ItchDecodeResult::UnsupportedMessage
-    );
+    EXPECT_EQ(decoder.decode_order_executed(read_one(builder.bytes()), order), ItchDecodeResult::UnsupportedMessage);
 
     EXPECT_EQ(decoder.error(), ItchDecodeError::InvalidMessageType);
 }
@@ -231,10 +204,7 @@ TEST(ItchDecoderTest, OrderCancelRejectsWrongPayloadLength)
     ItchDecoder decoder;
     ItchOrderCancel order;
 
-    EXPECT_EQ(
-        decoder.decode_order_cancel(read_one(bytes), order),
-        ItchDecodeResult::InvalidMessage
-    );
+    EXPECT_EQ(decoder.decode_order_cancel(read_one(bytes), order), ItchDecodeResult::InvalidMessage);
 
     EXPECT_EQ(decoder.error(), ItchDecodeError::InvalidPayloadLength);
 }
@@ -249,10 +219,7 @@ TEST(ItchDecoderTest, OrderDeleteRejectsWrongPayloadLength)
     ItchDecoder decoder;
     ItchOrderDelete order;
 
-    EXPECT_EQ(
-        decoder.decode_order_delete(read_one(bytes), order),
-        ItchDecodeResult::InvalidMessage
-    );
+    EXPECT_EQ(decoder.decode_order_delete(read_one(bytes), order), ItchDecodeResult::InvalidMessage);
 
     EXPECT_EQ(decoder.error(), ItchDecodeError::InvalidPayloadLength);
 }
@@ -265,10 +232,7 @@ TEST(ItchDecoderTest, DecodesOrderReplace)
     ItchDecoder decoder;
     ItchOrderReplace order;
 
-    ASSERT_EQ(
-        decoder.decode_order_replace(read_one(builder.bytes()), order),
-        ItchDecodeResult::Success
-    );
+    ASSERT_EQ(decoder.decode_order_replace(read_one(builder.bytes()), order), ItchDecodeResult::Success);
 
     EXPECT_EQ(order.timestamp, 0x010203040506);
     EXPECT_EQ(order.original_order_id, 0x1122334455667788ULL);
@@ -289,10 +253,7 @@ TEST(ItchDecoderTest, RejectsReplaceWrongLength)
     ItchDecoder decoder;
     ItchOrderReplace order;
 
-    EXPECT_EQ(
-        decoder.decode_order_replace(read_one(bytes), order),
-        ItchDecodeResult::InvalidMessage
-    );
+    EXPECT_EQ(decoder.decode_order_replace(read_one(bytes), order), ItchDecodeResult::InvalidMessage);
 
     EXPECT_EQ(decoder.error(), ItchDecodeError::InvalidPayloadLength);
 }
@@ -305,10 +266,7 @@ TEST(ItchDecoderTest, DecodesAddOrderMpid)
     ItchDecoder decoder;
     ItchAddOrder order;
 
-    ASSERT_EQ(
-        decoder.decode_add_order_mpid(read_one(builder.bytes()), order),
-        ItchDecodeResult::Success
-    );
+    ASSERT_EQ(decoder.decode_add_order_mpid(read_one(builder.bytes()), order), ItchDecodeResult::Success);
 
     EXPECT_EQ(decoder.error(), ItchDecodeError::None);
     EXPECT_EQ(order.timestamp, 0x010203040506);
@@ -327,10 +285,7 @@ TEST(ItchDecoderTest, DecodesOrderExecutedWithPrice)
     ItchDecoder decoder;
     ItchOrderExecutedWithPrice order;
 
-    ASSERT_EQ(
-        decoder.decode_order_executed_with_price(read_one(builder.bytes()), order),
-        ItchDecodeResult::Success
-    );
+    ASSERT_EQ(decoder.decode_order_executed_with_price(read_one(builder.bytes()), order), ItchDecodeResult::Success);
 
     EXPECT_EQ(decoder.error(), ItchDecodeError::None);
     EXPECT_EQ(order.timestamp, 0x010203040506);
@@ -355,10 +310,7 @@ TEST(ItchDecoderTest, RejectsInvalidPrintableFlag)
     ItchDecoder decoder;
     ItchOrderExecutedWithPrice order;
 
-    EXPECT_EQ(
-        decoder.decode_order_executed_with_price(read_one(bytes), order),
-        ItchDecodeResult::InvalidMessage
-    );
+    EXPECT_EQ(decoder.decode_order_executed_with_price(read_one(bytes), order), ItchDecodeResult::InvalidMessage);
 
     EXPECT_EQ(decoder.error(), ItchDecodeError::InvalidPrintable);
 }
@@ -371,10 +323,7 @@ TEST(ItchDecoderTest, DecodesStockDirectory)
     ItchDecoder decoder;
     ItchStockDirectory directory;
 
-    ASSERT_EQ(
-        decoder.decode_stock_directory(read_one(builder.bytes()), directory),
-        ItchDecodeResult::Success
-    );
+    ASSERT_EQ(decoder.decode_stock_directory(read_one(builder.bytes()), directory), ItchDecodeResult::Success);
 
     EXPECT_EQ(decoder.error(), ItchDecodeError::None);
     EXPECT_EQ(directory.timestamp, 0x010203040506);
@@ -390,10 +339,7 @@ TEST(ItchDecoderTest, DecodesRealAddOrder)
     ItchDecoder decoder;
     ItchAddOrder order;
 
-    ASSERT_EQ(
-        decoder.decode_add_order(golden(itch_test::real_a), order),
-        ItchDecodeResult::Success
-    );
+    ASSERT_EQ(decoder.decode_add_order(golden(itch_test::real_a), order), ItchDecodeResult::Success);
 
     EXPECT_EQ(order.stock_locate, 496);
     EXPECT_EQ(order.timestamp, 14400000724386);
@@ -408,10 +354,7 @@ TEST(ItchDecoderTest, DecodesRealAddOrderMpid)
     ItchDecoder decoder;
     ItchAddOrder order;
 
-    ASSERT_EQ(
-        decoder.decode_add_order_mpid(golden(itch_test::real_f), order),
-        ItchDecodeResult::Success
-    );
+    ASSERT_EQ(decoder.decode_add_order_mpid(golden(itch_test::real_f), order), ItchDecodeResult::Success);
 
     EXPECT_EQ(order.stock_locate, 8899);
     EXPECT_EQ(order.timestamp, 14400063421370);
@@ -426,10 +369,7 @@ TEST(ItchDecoderTest, DecodesRealOrderExecuted)
     ItchDecoder decoder;
     ItchOrderExecuted order;
 
-    ASSERT_EQ(
-        decoder.decode_order_executed(golden(itch_test::real_e), order),
-        ItchDecodeResult::Success
-    );
+    ASSERT_EQ(decoder.decode_order_executed(golden(itch_test::real_e), order), ItchDecodeResult::Success);
 
     EXPECT_EQ(order.stock_locate, 6966);
     EXPECT_EQ(order.timestamp, 14400303314576);
@@ -443,10 +383,7 @@ TEST(ItchDecoderTest, DecodesRealOrderExecutedWithPrice)
     ItchDecoder decoder;
     ItchOrderExecutedWithPrice order;
 
-    ASSERT_EQ(
-        decoder.decode_order_executed_with_price(golden(itch_test::real_c), order),
-        ItchDecodeResult::Success
-    );
+    ASSERT_EQ(decoder.decode_order_executed_with_price(golden(itch_test::real_c), order), ItchDecodeResult::Success);
 
     EXPECT_EQ(order.stock_locate, 7603);
     EXPECT_EQ(order.timestamp, 34086523596953);
@@ -462,10 +399,7 @@ TEST(ItchDecoderTest, DecodesRealOrderCancel)
     ItchDecoder decoder;
     ItchOrderCancel order;
 
-    ASSERT_EQ(
-        decoder.decode_order_cancel(golden(itch_test::real_x), order),
-        ItchDecodeResult::Success
-    );
+    ASSERT_EQ(decoder.decode_order_cancel(golden(itch_test::real_x), order), ItchDecodeResult::Success);
 
     EXPECT_EQ(order.stock_locate, 5301);
     EXPECT_EQ(order.timestamp, 14400033107916);
@@ -478,10 +412,7 @@ TEST(ItchDecoderTest, DecodesRealOrderDelete)
     ItchDecoder decoder;
     ItchOrderDelete order;
 
-    ASSERT_EQ(
-        decoder.decode_order_delete(golden(itch_test::real_d), order),
-        ItchDecodeResult::Success
-    );
+    ASSERT_EQ(decoder.decode_order_delete(golden(itch_test::real_d), order), ItchDecodeResult::Success);
 
     EXPECT_EQ(order.stock_locate, 6644);
     EXPECT_EQ(order.timestamp, 14400019074978);
@@ -493,10 +424,7 @@ TEST(ItchDecoderTest, DecodesRealOrderReplace)
     ItchDecoder decoder;
     ItchOrderReplace order;
 
-    ASSERT_EQ(
-        decoder.decode_order_replace(golden(itch_test::real_u), order),
-        ItchDecodeResult::Success
-    );
+    ASSERT_EQ(decoder.decode_order_replace(golden(itch_test::real_u), order), ItchDecodeResult::Success);
 
     EXPECT_EQ(order.stock_locate, 3816);
     EXPECT_EQ(order.timestamp, 14400031359987);
@@ -511,10 +439,7 @@ TEST(ItchDecoderTest, DecodesRealStockDirectory)
     ItchDecoder decoder;
     ItchStockDirectory directory;
 
-    ASSERT_EQ(
-        decoder.decode_stock_directory(golden(itch_test::real_r), directory),
-        ItchDecodeResult::Success
-    );
+    ASSERT_EQ(decoder.decode_stock_directory(golden(itch_test::real_r), directory), ItchDecodeResult::Success);
 
     EXPECT_EQ(directory.stock_locate, 1);
     EXPECT_EQ(directory.timestamp, 11354325413976);

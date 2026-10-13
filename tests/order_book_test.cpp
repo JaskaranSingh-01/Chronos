@@ -5,34 +5,14 @@
 namespace simulator {
 namespace {
 
-Order make_buy_order(
-    OrderId id,
-    Price price,
-    Quantity quantity = Quantity{100},
-    Timestamp timestamp = 1)
+Order make_buy_order(OrderId id, Price price, Quantity quantity = Quantity{100}, Timestamp timestamp = 1)
 {
-    return Order{
-        id,
-        Side::Buy,
-        price,
-        quantity,
-        timestamp
-    };
+    return Order{id, Side::Buy, price, quantity, timestamp};
 }
 
-Order make_sell_order(
-    OrderId id,
-    Price price,
-    Quantity quantity = Quantity{100},
-    Timestamp timestamp = 1)
+Order make_sell_order(OrderId id, Price price, Quantity quantity = Quantity{100}, Timestamp timestamp = 1)
 {
-    return Order{
-        id,
-        Side::Sell,
-        price,
-        quantity,
-        timestamp
-    };
+    return Order{id, Side::Sell, price, quantity, timestamp};
 }
 
 void activate(Order& order)
@@ -366,11 +346,7 @@ TEST(OrderBookTest, PartiallyFilledOrderCanBeCancelled)
 {
     OrderBook book;
 
-    auto order = make_buy_order(
-        1,
-        Price{100},
-        Quantity{100}
-    );
+    auto order = make_buy_order(1, Price{100}, Quantity{100});
 
     activate(order);
 
@@ -378,15 +354,9 @@ TEST(OrderBookTest, PartiallyFilledOrderCanBeCancelled)
 
     ASSERT_TRUE(order.execute(Quantity{40}));
 
-    EXPECT_EQ(
-        order.state(),
-        OrderState::PartiallyFilled
-    );
+    EXPECT_EQ(order.state(), OrderState::PartiallyFilled);
 
-    EXPECT_EQ(
-        order.remaining_quantity(),
-        Quantity{60}
-    );
+    EXPECT_EQ(order.remaining_quantity(), Quantity{60});
 
     EXPECT_TRUE(book.cancel(order.id()));
 
@@ -500,11 +470,7 @@ TEST(OrderBookTest, CompleteOrderLifecycle)
 {
     OrderBook book;
 
-    auto order = make_buy_order(
-        1,
-        Price{100},
-        Quantity{100}
-    );
+    auto order = make_buy_order(1, Price{100}, Quantity{100});
 
     EXPECT_EQ(order.state(), OrderState::New);
 
@@ -518,15 +484,9 @@ TEST(OrderBookTest, CompleteOrderLifecycle)
 
     ASSERT_TRUE(order.execute(Quantity{40}));
 
-    EXPECT_EQ(
-        order.state(),
-        OrderState::PartiallyFilled
-    );
+    EXPECT_EQ(order.state(), OrderState::PartiallyFilled);
 
-    EXPECT_EQ(
-        order.remaining_quantity(),
-        Quantity{60}
-    );
+    EXPECT_EQ(order.remaining_quantity(), Quantity{60});
 
     EXPECT_EQ(book.find(order.id()), &order);
     EXPECT_EQ(book.best_bid(), &order);

@@ -15,23 +15,14 @@ OrderPool::OrderPool(std::size_t capacity)
     }
 
     for (std::size_t i = 0; i < capacity_; ++i) {
-        storage_[i].next =
-            (i + 1 < capacity_)
-                ? &storage_[i + 1]
-                : nullptr;
+        storage_[i].next = (i + 1 < capacity_) ? &storage_[i + 1] : nullptr;
     }
 
     free_list_ = &storage_[0];
 }
 
 
-Order* OrderPool::acquire(
-    OrderId id,
-    Side side,
-    Price price,
-    Quantity quantity,
-    Timestamp timestamp
-) noexcept
+Order* OrderPool::acquire(OrderId id, Side side, Price price, Quantity quantity, Timestamp timestamp) noexcept
 {
     if (free_list_ == nullptr) {
         return nullptr;
@@ -48,13 +39,7 @@ Order* OrderPool::acquire(
 
     --available_;
 
-    slot->order.initialize(
-        id,
-        side,
-        price,
-        quantity,
-        timestamp
-    );
+    slot->order.initialize(id, side, price, quantity, timestamp);
 
     return &slot->order;
 }
@@ -74,31 +59,24 @@ bool OrderPool::release(Order& order) noexcept
         return false;
     }
 
-    const auto address =
-        reinterpret_cast<std::uintptr_t>(&order);
+    const auto address = reinterpret_cast<std::uintptr_t>(&order);
 
-    const auto first_address =
-        reinterpret_cast<std::uintptr_t>(first);
+    const auto first_address = reinterpret_cast<std::uintptr_t>(first);
 
-    const auto slot_size =
-        sizeof(Slot);
+    const auto slot_size = sizeof(Slot);
 
     if ((address - first_address) % slot_size != 0) {
         return false;
     }
 
-    Slot* slot =
-        reinterpret_cast<Slot*>(
-            reinterpret_cast<char*>(&order) -
-            offsetof(Slot, order)
-        );
+    Slot* slot = reinterpret_cast<Slot*>(reinterpret_cast<char*>(&order) - offsetof(Slot, order));
 
     if (slot->is_available) {
         return false;
     }
-    
+
     // A linked order is still referenced by its PriceLevel.
-    if (order.level_ != nullptr){
+    if (order.level_ != nullptr) {
         return false;
     }
 

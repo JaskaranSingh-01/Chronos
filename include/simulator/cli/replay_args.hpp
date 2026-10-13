@@ -68,9 +68,17 @@ inline constexpr std::string_view usage =
     "     rejected events alone are counted, not failures\n"
     "  2  bad usage, an input file that cannot be opened, or a --json file that cannot be written\n";
 
-enum class CliCommand : std::uint8_t { Replay, Backtest, Help, Version };
+enum class CliCommand : std::uint8_t {
+    Replay,
+    Backtest,
+    Help,
+    Version
+};
 
-enum class StrategyKind : std::uint8_t { Imbalance, MarketMaker };
+enum class StrategyKind : std::uint8_t {
+    Imbalance,
+    MarketMaker
+};
 
 struct BacktestArgs
 {

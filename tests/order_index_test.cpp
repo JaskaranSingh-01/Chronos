@@ -6,8 +6,8 @@
 #include <unordered_map>
 #include <vector>
 
-#include "simulator/orders/order_index.hpp"
 #include "simulator/orders/order.hpp"
+#include "simulator/orders/order_index.hpp"
 
 namespace simulator {
 namespace {

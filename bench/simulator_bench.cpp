@@ -33,7 +33,10 @@ constexpr std::int64_t kMid = 1'000'000;     // $100.0000 at price scale 4
 constexpr std::int64_t kTick = 100;          // $0.01
 constexpr std::uint64_t kShares = 1'000'000; // so partial executes and cancels never empty an order
 
-double seconds(clock_type::duration d) { return std::chrono::duration<double>(d).count(); }
+double seconds(clock_type::duration d)
+{
+    return std::chrono::duration<double>(d).count();
+}
 
 // A busy symbol's order flow: ids rise with gaps, as ITCH ids do with other
 // symbols' orders in between; prices sit a geometric number of ticks off the
@@ -46,7 +49,10 @@ private:
     OrderId next_id_{0};
 
 public:
-    std::uint64_t below(std::uint64_t n) { return rng_() % n; }
+    std::uint64_t below(std::uint64_t n)
+    {
+        return rng_() % n;
+    }
 
     Price price(Side side)
     {
@@ -58,8 +64,8 @@ public:
     {
         next_id_ += 1 + below(200);
         const Side side = below(2) != 0 ? Side::Buy : Side::Sell;
-        return {.order_id = next_id_, .price = price(side), .quantity = Quantity{kShares}, .type = T::Add,
-                .side = side};
+        return {
+            .order_id = next_id_, .price = price(side), .quantity = Quantity{kShares}, .type = T::Add, .side = side};
     }
 };
 
@@ -70,7 +76,8 @@ struct FilledBook
     MarketBook book;
     std::vector<OrderId> live;
 
-    explicit FilledBook(std::size_t depth) : book{0, depth + 2 * kBatch}
+    explicit FilledBook(std::size_t depth)
+        : book{0, depth + 2 * kBatch}
     {
         live.reserve(depth);
         for (std::size_t i = 0; i < depth; ++i) {
@@ -178,8 +185,11 @@ void BM_Replace(benchmark::State& state)
         for (MarketEvent& replace : replaces) {
             const std::size_t i = b.flow.below(b.live.size());
             const MarketEvent next = b.flow.add();
-            replace = {.order_id = b.live[i], .new_order_id = next.order_id, .price = b.flow.price(sides[i]),
-                       .quantity = next.quantity, .type = T::Replace};
+            replace = {.order_id = b.live[i],
+                       .new_order_id = next.order_id,
+                       .price = b.flow.price(sides[i]),
+                       .quantity = next.quantity,
+                       .type = T::Replace};
             b.live[i] = next.order_id;
         }
         b.timed_apply(state, replaces);
@@ -244,8 +254,8 @@ void BM_ItchSourceNext(benchmark::State& state)
 {
     using namespace std::chrono_literals;
     const bool all = state.range(0) != 0;
-    const ItchSourceConfig config{.ticker = all ? "" : "S042", .all_tickers = all,
-                                  .session_date = 2019y / 12 / 30, .utc_offset = -5h};
+    const ItchSourceConfig config{
+        .ticker = all ? "" : "S042", .all_tickers = all, .session_date = 2019y / 12 / 30, .utc_offset = -5h};
     const std::span<const std::byte> bytes = itch_stream().bytes();
 
     for (auto _ : state) {
@@ -300,7 +310,7 @@ void BM_PoolReleaseAcquire(benchmark::State& state)
 // 4,096 batches of 256: ~1 M operations per run, fixed so every run does the same work.
 constexpr benchmark::IterationCount kIterations = 4'096;
 
-#define BOOK_BENCHMARK(...) \
+#define BOOK_BENCHMARK(...)                                                                                            \
     BENCHMARK(__VA_ARGS__)->ArgName("depth")->Arg(1'000)->Arg(1'000'000)->UseManualTime()->Iterations(kIterations)
 
 BOOK_BENCHMARK(BM_Add);
@@ -310,7 +320,11 @@ BOOK_BENCHMARK(BM_Reduce<T::Execute>)->Name("BM_ExecutePartial");
 BOOK_BENCHMARK(BM_Reduce<T::Cancel>)->Name("BM_Cancel");
 BOOK_BENCHMARK(BM_Replace);
 BENCHMARK(BM_ItchSourceNext)->ArgName("all")->Arg(1)->Arg(0)->UseManualTime()->Iterations(8);
-BENCHMARK(BM_PoolReleaseAcquire)->ArgName("capacity")->Arg(1'024)->Arg(4'194'304)->UseManualTime()
+BENCHMARK(BM_PoolReleaseAcquire)
+    ->ArgName("capacity")
+    ->Arg(1'024)
+    ->Arg(4'194'304)
+    ->UseManualTime()
     ->Iterations(kIterations);
 
 } // namespace

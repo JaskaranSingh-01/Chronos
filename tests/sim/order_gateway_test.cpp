@@ -14,8 +14,7 @@ struct Fixture
 {
     SimQueue queue{16};
     Portfolio portfolio{kEquity,
-                        RiskLimits{.max_position = 1'000, .max_order_quantity = Quantity{500},
-                                   .max_open_orders = 8},
+                        RiskLimits{.max_position = 1'000, .max_order_quantity = Quantity{500}, .max_open_orders = 8},
                         FeeSchedule{}};
     OrderGateway gateway{queue, portfolio, kLatency};
 };
@@ -26,8 +25,7 @@ TEST(OrderGatewayTest, AcceptedOrderArrivesAtNowPlusOrderLatency)
     f.gateway.set_now(1'000);
 
     OrderId id{0};
-    ASSERT_EQ(f.gateway.send(Side::Buy, Price{1'000'100}, Quantity{200}, TimeInForce::Ioc, id),
-              RiskCheck::Accepted);
+    ASSERT_EQ(f.gateway.send(Side::Buy, Price{1'000'100}, Quantity{200}, TimeInForce::Ioc, id), RiskCheck::Accepted);
     EXPECT_EQ(id, 1u);
     EXPECT_EQ(f.portfolio.open_quantity(Side::Buy), 200u);  // reserved synchronously
 
@@ -47,10 +45,8 @@ TEST(OrderGatewayTest, RiskRejectSchedulesNothingAndKeepsTheId)
     Fixture f;
     OrderId id{77};
 
-    EXPECT_EQ(f.gateway.send(Side::Buy, Price{100}, Quantity{501}, TimeInForce::Ioc, id),
-              RiskCheck::OrderTooLarge);
-    EXPECT_EQ(f.gateway.send(Side::Sell, Price{100}, Quantity{0}, TimeInForce::Ioc, id),
-              RiskCheck::InvalidOrder);
+    EXPECT_EQ(f.gateway.send(Side::Buy, Price{100}, Quantity{501}, TimeInForce::Ioc, id), RiskCheck::OrderTooLarge);
+    EXPECT_EQ(f.gateway.send(Side::Sell, Price{100}, Quantity{0}, TimeInForce::Ioc, id), RiskCheck::InvalidOrder);
     EXPECT_EQ(id, 77u);
     EXPECT_TRUE(f.queue.empty());
     EXPECT_EQ(f.portfolio.open_orders(), 0u);

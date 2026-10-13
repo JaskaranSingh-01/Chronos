@@ -12,13 +12,7 @@ TEST(OrderPoolIntegrationTest, PooledOrdersCanBeAddedToOrderBook)
     OrderPool pool{10};
     OrderBook book;
 
-    Order* order = pool.acquire(
-        1,
-        Side::Buy,
-        Price{100},
-        Quantity{100},
-        Timestamp{10}
-    );
+    Order* order = pool.acquire(1, Side::Buy, Price{100}, Quantity{100}, Timestamp{10});
 
     ASSERT_NE(order, nullptr);
 

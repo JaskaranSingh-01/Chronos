@@ -37,13 +37,7 @@ public:
     OrderPool& operator=(OrderPool&&) = delete;
 
     // nullptr when every slot is in use.
-    Order* acquire(
-        OrderId id,
-        Side side,
-        Price price,
-        Quantity quantity,
-        Timestamp timestamp
-    ) noexcept;
+    Order* acquire(OrderId id, Side side, Price price, Quantity quantity, Timestamp timestamp) noexcept;
 
     // False if `order` is not an in-use slot of this pool or is still linked into a level.
     bool release(Order& order) noexcept;

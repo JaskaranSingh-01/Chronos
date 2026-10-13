@@ -40,17 +40,20 @@ bool is_event_message(std::uint8_t type) noexcept
 // Payload bytes 0-1: the stock locate every ITCH 5.0 body starts with.
 std::uint16_t peek_locate(std::span<const std::byte> payload) noexcept
 {
-    return static_cast<std::uint16_t>(
-        std::to_integer<std::uint16_t>(payload[0]) << 8 | std::to_integer<std::uint16_t>(payload[1]));
+    return static_cast<std::uint16_t>(std::to_integer<std::uint16_t>(payload[0]) << 8 |
+                                      std::to_integer<std::uint16_t>(payload[1]));
 }
 
 // The decoders check the payload size first, so TruncatedPayload cannot happen.
 SourceError to_source_error(const ItchDecoder& decoder) noexcept
 {
     switch (decoder.error()) {
-    case ItchDecodeError::InvalidSide: return SourceError::InvalidSide;
-    case ItchDecodeError::InvalidPrintable: return SourceError::InvalidPrintable;
-    default: return SourceError::InvalidPayloadLength;
+    case ItchDecodeError::InvalidSide:
+        return SourceError::InvalidSide;
+    case ItchDecodeError::InvalidPrintable:
+        return SourceError::InvalidPrintable;
+    default:
+        return SourceError::InvalidPayloadLength;
     }
 }
 
@@ -81,13 +84,12 @@ SourceError decode_trade(const ItchMessage& message, MarketEvent& event) noexcep
         return SourceError::InvalidSide;
     }
 
-    event = MarketEvent{
-        .timestamp = static_cast<Timestamp>(timestamp),
-        .order_id = order_id,
-        .price = Price{price},
-        .quantity = Quantity{shares},
-        .type = MarketEventType::Trade,
-        .side = side == 'B' ? Side::Buy : Side::Sell};
+    event = MarketEvent{.timestamp = static_cast<Timestamp>(timestamp),
+                        .order_id = order_id,
+                        .price = Price{price},
+                        .quantity = Quantity{shares},
+                        .type = MarketEventType::Trade,
+                        .side = side == 'B' ? Side::Buy : Side::Sell};
     return SourceError::None;
 }
 
@@ -112,15 +114,24 @@ SourceError decode_trading_action(const ItchMessage& message, MarketEvent& event
 
     TradingState state{};
     switch (code) {
-    case 'T': state = TradingState::Trading; break;
-    case 'H': state = TradingState::Halted; break;
-    case 'P': state = TradingState::Paused; break;
-    case 'Q': state = TradingState::QuotationOnly; break;
-    default: return SourceError::InvalidTradingState;
+    case 'T':
+        state = TradingState::Trading;
+        break;
+    case 'H':
+        state = TradingState::Halted;
+        break;
+    case 'P':
+        state = TradingState::Paused;
+        break;
+    case 'Q':
+        state = TradingState::QuotationOnly;
+        break;
+    default:
+        return SourceError::InvalidTradingState;
     }
 
-    event = MarketEvent{.timestamp = static_cast<Timestamp>(timestamp), .type = MarketEventType::Status,
-                        .trading_state = state};
+    event = MarketEvent{
+        .timestamp = static_cast<Timestamp>(timestamp), .type = MarketEventType::Status, .trading_state = state};
     return SourceError::None;
 }
 
@@ -138,32 +149,36 @@ SourceError decode(const ItchMessage& message, MarketEvent& event) noexcept
     case itch::ADD_ORDER:
     case itch::ADD_ORDER_MPID: {
         ItchAddOrder m;
-        result = message.type == itch::ADD_ORDER
-            ? decoder.decode_add_order(message, m)
-            : decoder.decode_add_order_mpid(message, m);
-        event = {.timestamp = m.timestamp, .order_id = m.order_id, .price = m.price,
-                 .quantity = m.quantity, .type = T::Add, .side = m.side};
+        result = message.type == itch::ADD_ORDER ? decoder.decode_add_order(message, m)
+                                                 : decoder.decode_add_order_mpid(message, m);
+        event = {.timestamp = m.timestamp,
+                 .order_id = m.order_id,
+                 .price = m.price,
+                 .quantity = m.quantity,
+                 .type = T::Add,
+                 .side = m.side};
         break;
     }
     case itch::ORDER_EXECUTED: {
         ItchOrderExecuted m;
         result = decoder.decode_order_executed(message, m);
-        event = {.timestamp = m.timestamp, .order_id = m.order_id, .quantity = m.quantity,
-                 .type = T::Execute};
+        event = {.timestamp = m.timestamp, .order_id = m.order_id, .quantity = m.quantity, .type = T::Execute};
         break;
     }
     case itch::ORDER_EXECUTED_WITH_PRICE: {
         ItchOrderExecutedWithPrice m;
         result = decoder.decode_order_executed_with_price(message, m);
-        event = {.timestamp = m.timestamp, .order_id = m.order_id, .price = m.price,
-                 .quantity = m.quantity, .type = T::Execute};
+        event = {.timestamp = m.timestamp,
+                 .order_id = m.order_id,
+                 .price = m.price,
+                 .quantity = m.quantity,
+                 .type = T::Execute};
         break;
     }
     case itch::ORDER_CANCEL: {
         ItchOrderCancel m;
         result = decoder.decode_order_cancel(message, m);
-        event = {.timestamp = m.timestamp, .order_id = m.order_id, .quantity = m.quantity,
-                 .type = T::Cancel};
+        event = {.timestamp = m.timestamp, .order_id = m.order_id, .quantity = m.quantity, .type = T::Cancel};
         break;
     }
     case itch::ORDER_DELETE: {
@@ -175,9 +190,12 @@ SourceError decode(const ItchMessage& message, MarketEvent& event) noexcept
     case itch::REPLACE_ORDER: {
         ItchOrderReplace m;
         result = decoder.decode_order_replace(message, m);
-        event = {.timestamp = m.timestamp, .order_id = m.original_order_id,
-                 .new_order_id = m.replacement_order_id, .price = m.price,
-                 .quantity = m.quantity, .type = T::Replace};
+        event = {.timestamp = m.timestamp,
+                 .order_id = m.original_order_id,
+                 .new_order_id = m.replacement_order_id,
+                 .price = m.price,
+                 .quantity = m.quantity,
+                 .type = T::Replace};
         break;
     }
     case TRADING_ACTION:
@@ -191,10 +209,7 @@ SourceError decode(const ItchMessage& message, MarketEvent& event) noexcept
 
 } // namespace
 
-ItchSource::ItchSource(
-    std::span<const std::byte> data,
-    const ItchSourceConfig& config,
-    InstrumentRegistry& registry)
+ItchSource::ItchSource(std::span<const std::byte> data, const ItchSourceConfig& config, InstrumentRegistry& registry)
     : reader_(data),
       registry_(registry),
       all_tickers_(config.all_tickers),
@@ -251,8 +266,10 @@ SourceResult ItchSource::next(MarketEvent& event) noexcept
             const std::size_t stock_locate = halt_sweep_++;
             if (symbols_[stock_locate] != no_symbol && !has_status_[stock_locate]) {
                 has_status_[stock_locate] = true;
-                event = MarketEvent{.timestamp = halt_sweep_time_, .symbol = symbols_[stock_locate],
-                                    .type = MarketEventType::Status, .trading_state = TradingState::Halted};
+                event = MarketEvent{.timestamp = halt_sweep_time_,
+                                    .symbol = symbols_[stock_locate],
+                                    .type = MarketEventType::Status,
+                                    .trading_state = TradingState::Halted};
                 ++statistics_.events;
                 return SourceResult::Event;
             }

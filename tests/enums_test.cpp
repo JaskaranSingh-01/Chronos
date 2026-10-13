@@ -1,5 +1,5 @@
-#include <gtest/gtest.h>
 #include <cstdint>
+#include <gtest/gtest.h>
 #include <type_traits>
 
 #include "simulator/types/enums.hpp"
@@ -14,10 +14,5 @@ TEST(SideTest, HasExpectedValues)
 
 TEST(SideTest, UsesUint8UnderlyingType)
 {
-    static_assert(
-        std::is_same_v<
-            std::underlying_type_t<Side>,
-            std::uint8_t
-        >
-    );
+    static_assert(std::is_same_v<std::underlying_type_t<Side>, std::uint8_t>);
 }

@@ -22,18 +22,22 @@ using itch_test::ItchBuilder;
 // 2019-12-30 00:00 at -05:00, as epoch ns.
 constexpr Timestamp midnight = 1'577'682'000'000'000'000;
 
-constexpr ItchSourceConfig aapl{
-    .ticker = "AAPL", .session_date = 2019y / 12 / 30, .utc_offset = -5h};
+constexpr ItchSourceConfig aapl{.ticker = "AAPL", .session_date = 2019y / 12 / 30, .utc_offset = -5h};
 
 constexpr Instrument xnas_aapl{
-    .venue = {"XNAS"}, .native_symbol = {"AAPL"}, .price_scale = 4, .quantity_scale = 0,
-    .tick_size = 0};
+    .venue = {"XNAS"}, .native_symbol = {"AAPL"}, .price_scale = 4, .quantity_scale = 0, .tick_size = 0};
 
 auto fields(const MarketEvent& e)
 {
-    return std::tuple{e.timestamp, e.order_id, e.new_order_id, e.price.ticks,
-                      e.quantity.value(), e.symbol, static_cast<int>(e.type),
-                      static_cast<int>(e.side), static_cast<int>(e.trading_state)};
+    return std::tuple{e.timestamp,
+                      e.order_id,
+                      e.new_order_id,
+                      e.price.ticks,
+                      e.quantity.value(),
+                      e.symbol,
+                      static_cast<int>(e.type),
+                      static_cast<int>(e.side),
+                      static_cast<int>(e.trading_state)};
 }
 
 // Reads events until the stream ends; the end result goes to `end`.
@@ -120,19 +124,38 @@ TEST(ItchSourceTest, MapsEachMessageType)
 
     using T = MarketEventType;
     const MarketEvent expected[] = {
-        {.timestamp = midnight + 10, .order_id = 1, .price = Price{2'900'000},
-         .quantity = Quantity{300}, .type = T::Add, .side = Side::Buy},
-        {.timestamp = midnight + 11, .order_id = 2, .price = Price{2'910'000},
-         .quantity = Quantity{200}, .type = T::Add, .side = Side::Sell},
+        {.timestamp = midnight + 10,
+         .order_id = 1,
+         .price = Price{2'900'000},
+         .quantity = Quantity{300},
+         .type = T::Add,
+         .side = Side::Buy},
+        {.timestamp = midnight + 11,
+         .order_id = 2,
+         .price = Price{2'910'000},
+         .quantity = Quantity{200},
+         .type = T::Add,
+         .side = Side::Sell},
         {.timestamp = midnight + 12, .order_id = 1, .quantity = Quantity{100}, .type = T::Execute},
-        {.timestamp = midnight + 13, .order_id = 1, .price = Price{2'899'900},
-         .quantity = Quantity{50}, .type = T::Execute},
+        {.timestamp = midnight + 13,
+         .order_id = 1,
+         .price = Price{2'899'900},
+         .quantity = Quantity{50},
+         .type = T::Execute},
         {.timestamp = midnight + 14, .order_id = 2, .quantity = Quantity{20}, .type = T::Cancel},
-        {.timestamp = midnight + 15, .order_id = 2, .new_order_id = 3, .price = Price{2'905'000},
-         .quantity = Quantity{150}, .type = T::Replace},
+        {.timestamp = midnight + 15,
+         .order_id = 2,
+         .new_order_id = 3,
+         .price = Price{2'905'000},
+         .quantity = Quantity{150},
+         .type = T::Replace},
         {.timestamp = midnight + 16, .order_id = 3, .type = T::Delete},
-        {.timestamp = midnight + 17, .order_id = 0, .price = Price{2'900'500},
-         .quantity = Quantity{40}, .type = T::Trade, .side = Side::Buy},
+        {.timestamp = midnight + 17,
+         .order_id = 0,
+         .price = Price{2'900'500},
+         .quantity = Quantity{40},
+         .type = T::Trade,
+         .side = Side::Buy},
         {.timestamp = midnight + 18, .type = T::Status, .trading_state = TradingState::Halted},
         {.timestamp = midnight + 19, .type = T::Status, .trading_state = TradingState::Paused},
         {.timestamp = midnight + 20, .type = T::Status, .trading_state = TradingState::QuotationOnly},
@@ -185,8 +208,10 @@ TEST(ItchSourceTest, DecodesARealTradingAction)
 
     EXPECT_EQ(end, SourceResult::EndOfStream);
     ASSERT_EQ(events.size(), 1u);
-    const MarketEvent expected{.timestamp = midnight + 11'354'328'694'637, .symbol = 0,
-                               .type = MarketEventType::Status, .trading_state = TradingState::Trading};
+    const MarketEvent expected{.timestamp = midnight + 11'354'328'694'637,
+                               .symbol = 0,
+                               .type = MarketEventType::Status,
+                               .trading_state = TradingState::Trading};
     EXPECT_EQ(fields(events[0]), fields(expected));
 }
 
@@ -218,8 +243,13 @@ TEST(ItchSourceTest, HaltsSymbolsLeftOutOfTheSpinAtTheStartOfSystemHours)
     const MarketEvent expected[] = {
         {.timestamp = midnight + 4, .symbol = 0, .type = T::Status, .trading_state = TradingState::Trading},
         {.timestamp = midnight + 6, .symbol = 1, .type = T::Status, .trading_state = TradingState::Halted},
-        {.timestamp = midnight + 7, .order_id = 1, .price = Price{1'500'000}, .quantity = Quantity{100},
-         .symbol = 1, .type = T::Add, .side = Side::Buy},
+        {.timestamp = midnight + 7,
+         .order_id = 1,
+         .price = Price{1'500'000},
+         .quantity = Quantity{100},
+         .symbol = 1,
+         .type = T::Add,
+         .side = Side::Buy},
     };
 
     EXPECT_EQ(end, SourceResult::EndOfStream);
@@ -584,9 +614,7 @@ TEST(ItchEndToEndTest, CrossingAddsRestUntilTheFeedExecutesThem)
 TEST(ItchEndToEndTest, PartialExecutionLeavesTheRemainderResting)
 {
     ItchBuilder itch;
-    itch.stock_directory(1, 1, "AAPL")
-        .add_order(1, 100, 1, 'S', 100, "AAPL", 10000)
-        .executed(1, 200, 1, 40, 2001);
+    itch.stock_directory(1, 1, "AAPL").add_order(1, 100, 1, 'S', 100, "AAPL", 10000).executed(1, 200, 1, 40, 2001);
 
     MarketBook book{0, 16};
     const ReplayReport report = replay_aapl(itch, book);

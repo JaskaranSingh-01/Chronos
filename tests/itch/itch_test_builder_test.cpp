@@ -19,16 +19,11 @@ constexpr std::size_t tracking_at = 5;
 constexpr std::size_t timestamp_at = 7;
 constexpr std::size_t body_at = 13;
 
-std::uint64_t read_be(
-    std::span<const std::byte> bytes,
-    std::size_t offset,
-    std::size_t width
-)
+std::uint64_t read_be(std::span<const std::byte> bytes, std::size_t offset, std::size_t width)
 {
     std::uint64_t value = 0;
 
-    for (std::size_t i = 0; i < width; ++i)
-    {
+    for (std::size_t i = 0; i < width; ++i) {
         value = (value << 8) | std::to_integer<std::uint64_t>(bytes[offset + i]);
     }
 
@@ -40,16 +35,11 @@ char read_char(std::span<const std::byte> bytes, std::size_t offset)
     return static_cast<char>(std::to_integer<unsigned char>(bytes[offset]));
 }
 
-std::string read_alpha(
-    std::span<const std::byte> bytes,
-    std::size_t offset,
-    std::size_t width
-)
+std::string read_alpha(std::span<const std::byte> bytes, std::size_t offset, std::size_t width)
 {
     std::string text;
 
-    for (std::size_t i = 0; i < width; ++i)
-    {
+    for (std::size_t i = 0; i < width; ++i) {
         text.push_back(read_char(bytes, offset + i));
     }
 
@@ -62,8 +52,7 @@ std::string to_hex(const Bytes& bytes)
     static constexpr char digits[] = "0123456789abcdef";
     std::string hex;
 
-    for (auto b : bytes)
-    {
+    for (auto b : bytes) {
         const auto v = static_cast<unsigned>(b);
         hex.push_back(digits[v >> 4]);
         hex.push_back(digits[v & 0xf]);
@@ -74,23 +63,15 @@ std::string to_hex(const Bytes& bytes)
 
 // Asserts that `framed` is exactly one frame whose message equals the first
 // `compare` bytes of `real` (the whole message unless `compare` is given).
-void expect_matches_real(
-    std::span<const std::byte> framed,
-    std::span<const std::uint8_t> real,
-    std::size_t compare = 0
-)
+void expect_matches_real(std::span<const std::byte> framed, std::span<const std::uint8_t> real, std::size_t compare = 0)
 {
-    if (compare == 0)
-    {
+    if (compare == 0) {
         compare = real.size();
     }
 
     ASSERT_EQ(framed.size(), real.size() + 2);
     EXPECT_EQ(read_be(framed, 0, 2), real.size());
-    EXPECT_EQ(
-        to_hex(framed.subspan(2, compare)),
-        to_hex(real.first(compare))
-    );
+    EXPECT_EQ(to_hex(framed.subspan(2, compare)), to_hex(real.first(compare)));
 }
 
 } // namespace
@@ -115,8 +96,7 @@ TEST(ItchBuilderTest, EachMessageHasSpecLength)
     cases.push_back({ItchBuilder{}.system_event(1, 2, 'O'), 12});
     cases.push_back({ItchBuilder{}.trading_action(1, 2, "AAPL", 'H'), 25});
 
-    for (const auto& c : cases)
-    {
+    for (const auto& c : cases) {
         const auto bytes = c.builder.bytes();
         SCOPED_TRACE(read_char(bytes, type_at));
 
@@ -128,9 +108,7 @@ TEST(ItchBuilderTest, EachMessageHasSpecLength)
 TEST(ItchBuilderTest, AddOrderPlacesEveryField)
 {
     ItchBuilder builder;
-    builder
-        .tracking(0x0a0b)
-        .add_order(0x0102, 0x112233445566, 0x0102030405060708, 'S', 0xa1b2c3d4, "AAPL", 0x01020304);
+    builder.tracking(0x0a0b).add_order(0x0102, 0x112233445566, 0x0102030405060708, 'S', 0xa1b2c3d4, "AAPL", 0x01020304);
 
     const auto bytes = builder.bytes();
 
@@ -148,9 +126,7 @@ TEST(ItchBuilderTest, AddOrderPlacesEveryField)
 TEST(ItchBuilderTest, ReplacePlacesEveryField)
 {
     ItchBuilder builder;
-    builder
-        .tracking(7)
-        .replace(13, 0x0000aabbccddeeff, 0x1111111111111111, 0x2222222222222222, 300, 1500000);
+    builder.tracking(7).replace(13, 0x0000aabbccddeeff, 0x1111111111111111, 0x2222222222222222, 300, 1500000);
 
     const auto bytes = builder.bytes();
 
@@ -189,8 +165,7 @@ TEST(ItchBuilderTest, ExecutedWithPricePlacesEveryField)
 TEST(ItchBuilderTest, MessagesAreChainedBackToBack)
 {
     ItchBuilder builder;
-    builder
-        .stock_directory(13, 1, "AAPL")
+    builder.stock_directory(13, 1, "AAPL")
         .add_order(13, 2, 1, 'B', 100, "AAPL", 1000000)
         .add_order_mpid(13, 3, 2, 'S', 100, "AAPL", 1010000, "GSCO")
         .executed(13, 4, 1, 50, 1)
@@ -205,8 +180,7 @@ TEST(ItchBuilderTest, MessagesAreChainedBackToBack)
     std::size_t offset = 0;
     std::string types;
 
-    while (offset < bytes.size())
-    {
+    while (offset < bytes.size()) {
         ASSERT_LE(offset + 2, bytes.size());
         types.push_back(read_char(bytes, offset + type_at));
         EXPECT_EQ(read_be(bytes, offset + locate_at, 2), 13u);

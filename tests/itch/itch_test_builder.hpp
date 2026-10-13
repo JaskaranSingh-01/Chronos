@@ -22,9 +22,8 @@ public:
     }
 
     // 'A' Add Order (36 bytes).
-    ItchBuilder& add_order(
-        std::uint16_t locate, std::uint64_t ts, std::uint64_t order_id,
-        char side, std::uint32_t shares, std::string_view stock, std::uint32_t price)
+    ItchBuilder& add_order(std::uint16_t locate, std::uint64_t ts, std::uint64_t order_id, char side,
+                           std::uint32_t shares, std::string_view stock, std::uint32_t price)
     {
         const auto start = begin('A', locate, ts);
         put(order_id, 8);
@@ -36,10 +35,9 @@ public:
     }
 
     // 'F' Add Order with MPID attribution (40 bytes).
-    ItchBuilder& add_order_mpid(
-        std::uint16_t locate, std::uint64_t ts, std::uint64_t order_id,
-        char side, std::uint32_t shares, std::string_view stock, std::uint32_t price,
-        std::string_view mpid)
+    ItchBuilder& add_order_mpid(std::uint16_t locate, std::uint64_t ts, std::uint64_t order_id, char side,
+                                std::uint32_t shares, std::string_view stock, std::uint32_t price,
+                                std::string_view mpid)
     {
         const auto start = begin('F', locate, ts);
         put(order_id, 8);
@@ -52,9 +50,8 @@ public:
     }
 
     // 'E' Order Executed (31 bytes).
-    ItchBuilder& executed(
-        std::uint16_t locate, std::uint64_t ts, std::uint64_t order_id,
-        std::uint32_t shares, std::uint64_t match)
+    ItchBuilder& executed(std::uint16_t locate, std::uint64_t ts, std::uint64_t order_id, std::uint32_t shares,
+                          std::uint64_t match)
     {
         const auto start = begin('E', locate, ts);
         put(order_id, 8);
@@ -64,9 +61,8 @@ public:
     }
 
     // 'C' Order Executed With Price (36 bytes).
-    ItchBuilder& executed_with_price(
-        std::uint16_t locate, std::uint64_t ts, std::uint64_t order_id,
-        std::uint32_t shares, std::uint64_t match, bool printable, std::uint32_t price)
+    ItchBuilder& executed_with_price(std::uint16_t locate, std::uint64_t ts, std::uint64_t order_id,
+                                     std::uint32_t shares, std::uint64_t match, bool printable, std::uint32_t price)
     {
         const auto start = begin('C', locate, ts);
         put(order_id, 8);
@@ -78,9 +74,7 @@ public:
     }
 
     // 'X' Order Cancel (23 bytes).
-    ItchBuilder& cancel(
-        std::uint16_t locate, std::uint64_t ts, std::uint64_t order_id,
-        std::uint32_t shares)
+    ItchBuilder& cancel(std::uint16_t locate, std::uint64_t ts, std::uint64_t order_id, std::uint32_t shares)
     {
         const auto start = begin('X', locate, ts);
         put(order_id, 8);
@@ -97,9 +91,8 @@ public:
     }
 
     // 'U' Order Replace (35 bytes).
-    ItchBuilder& replace(
-        std::uint16_t locate, std::uint64_t ts, std::uint64_t old_id,
-        std::uint64_t new_id, std::uint32_t shares, std::uint32_t price)
+    ItchBuilder& replace(std::uint16_t locate, std::uint64_t ts, std::uint64_t old_id, std::uint64_t new_id,
+                         std::uint32_t shares, std::uint32_t price)
     {
         const auto start = begin('U', locate, ts);
         put(old_id, 8);
@@ -110,10 +103,8 @@ public:
     }
 
     // 'P' Trade, non-cross (44 bytes).
-    ItchBuilder& trade(
-        std::uint16_t locate, std::uint64_t ts, std::uint64_t order_id,
-        char side, std::uint32_t shares, std::string_view stock, std::uint32_t price,
-        std::uint64_t match)
+    ItchBuilder& trade(std::uint16_t locate, std::uint64_t ts, std::uint64_t order_id, char side, std::uint32_t shares,
+                       std::string_view stock, std::uint32_t price, std::uint64_t match)
     {
         const auto start = begin('P', locate, ts);
         put(order_id, 8);
@@ -127,9 +118,8 @@ public:
 
     // 'H' Stock Trading Action (25 bytes). state: 'H' halted, 'P' paused,
     // 'Q' quotation only, 'T' trading. The reserved byte is ' ', as in real files.
-    ItchBuilder& trading_action(
-        std::uint16_t locate, std::uint64_t ts, std::string_view stock, char state,
-        std::string_view reason = "")
+    ItchBuilder& trading_action(std::uint16_t locate, std::uint64_t ts, std::string_view stock, char state,
+                                std::string_view reason = "")
     {
         const auto start = begin('H', locate, ts);
         put_alpha(stock, 8);
@@ -200,8 +190,7 @@ private:
     // Appends the low `width` bytes of `value`, big-endian.
     void put(std::uint64_t value, int width)
     {
-        for (int shift = 8 * (width - 1); shift >= 0; shift -= 8)
-        {
+        for (int shift = 8 * (width - 1); shift >= 0; shift -= 8) {
             bytes_.push_back(static_cast<std::byte>((value >> shift) & 0xff));
         }
     }
@@ -214,8 +203,7 @@ private:
     // Left-justified, space-padded alpha field (truncated to `width`).
     void put_alpha(std::string_view text, std::size_t width)
     {
-        for (std::size_t i = 0; i < width; ++i)
-        {
+        for (std::size_t i = 0; i < width; ++i) {
             put_char(i < text.size() ? text[i] : ' ');
         }
     }

@@ -1,11 +1,10 @@
 #pragma once
 
-#include <cstdint> 
+#include <cstdint>
 
-namespace simulator
-{
-    enum class Side : std::uint8_t{
-        Buy,
-        Sell
-    };
+namespace simulator {
+enum class Side : std::uint8_t {
+    Buy,
+    Sell
+};
 } // namespace simulator

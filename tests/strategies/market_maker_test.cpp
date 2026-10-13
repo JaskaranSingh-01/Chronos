@@ -25,8 +25,7 @@ struct Fixture
     MarketMaker mm;
     OrderId next_id{1};
 
-    explicit Fixture(MarketMakerParams params = {.quote_size = 100, .max_position = 200,
-                                                 .requote_cooldown_ns = 1'000})
+    explicit Fixture(MarketMakerParams params = {.quote_size = 100, .max_position = 200, .requote_cooldown_ns = 1'000})
         : portfolio(kEquity,
                     RiskLimits{.max_position = 1'000, .max_order_quantity = Quantity{100}, .max_open_orders = 2},
                     FeeSchedule{}),
@@ -38,8 +37,8 @@ struct Fixture
 
     void add(Side side, std::int64_t price)
     {
-        const MarketEvent event{.order_id = next_id++, .price = Price{price}, .quantity = Quantity{100},
-                                .symbol = kSymbol, .side = side};
+        const MarketEvent event{
+            .order_id = next_id++, .price = Price{price}, .quantity = Quantity{100}, .symbol = kSymbol, .side = side};
         ASSERT_EQ(book.apply(event), ApplyResult::Applied);
     }
 
@@ -79,7 +78,7 @@ struct Fixture
 bool is_quote(const SimEvent& e, Side side, std::int64_t price)
 {
     return e.type == SimEventType::OrderArrive && e.order.side == side && e.order.price == Price{price} &&
-           e.order.quantity == Quantity{100} && e.order.time_in_force == TimeInForce::Day;
+        e.order.quantity == Quantity{100} && e.order.time_in_force == TimeInForce::Day;
 }
 
 bool is_cancel(const SimEvent& e, OrderId id)
@@ -89,8 +88,12 @@ bool is_cancel(const SimEvent& e, OrderId id)
 
 ExecutionReport fill(OrderId id, Side side, std::int64_t price, std::uint64_t quantity, std::uint64_t leaves)
 {
-    return ExecutionReport{.order_id = id, .price = Price{price}, .quantity = Quantity{quantity},
-                           .leaves = Quantity{leaves}, .type = ReportType::Fill, .liquidity = Liquidity::Maker,
+    return ExecutionReport{.order_id = id,
+                           .price = Price{price},
+                           .quantity = Quantity{quantity},
+                           .leaves = Quantity{leaves},
+                           .type = ReportType::Fill,
+                           .liquidity = Liquidity::Maker,
                            .side = side};
 }
 
@@ -132,9 +135,10 @@ TEST(MarketMakerTest, StaysOutOfAOneSidedOrCrossedBook)
 
     Fixture g;
     MarketBook bids_only{kSymbol, 4};
-    ASSERT_EQ(bids_only.apply(MarketEvent{.order_id = 1, .price = Price{kBid}, .quantity = Quantity{100},
-                                          .symbol = kSymbol, .side = Side::Buy}),
-              ApplyResult::Applied);
+    ASSERT_EQ(
+        bids_only.apply(MarketEvent{
+            .order_id = 1, .price = Price{kBid}, .quantity = Quantity{100}, .symbol = kSymbol, .side = Side::Buy}),
+        ApplyResult::Applied);
     StrategyContext ctx{bids_only, g.portfolio, g.gateway};
     g.mm.on_market(ctx, MarketEvent{});
     EXPECT_TRUE(g.pushed().empty());
@@ -150,9 +154,11 @@ TEST(MarketMakerTest, DropsTheSideThatWouldBreachMaxPosition)
     const std::vector<SimEvent> after = f.deliver(5'100, fill(1, Side::Buy, kBid, 60, 40));
     ASSERT_EQ(after.size(), 1u);
     EXPECT_TRUE(is_cancel(after[0], 1));
-    EXPECT_TRUE(f.deliver(5'200, ExecutionReport{.order_id = 1, .quantity = Quantity{40},
-                                                 .type = ReportType::Cancelled, .side = Side::Buy})
-                    .empty());  // no new bid
+    EXPECT_TRUE(
+        f.deliver(
+             5'200,
+             ExecutionReport{.order_id = 1, .quantity = Quantity{40}, .type = ReportType::Cancelled, .side = Side::Buy})
+            .empty());  // no new bid
     EXPECT_TRUE(f.tick(9'000).empty());
 
     // Short side: from -100 only the bid is quoted.
@@ -178,8 +184,9 @@ TEST(MarketMakerTest, RequotesAfterTheBestMovesRespectingTheCooldown)
     EXPECT_TRUE(is_cancel(sent[0], 1));
     EXPECT_TRUE(f.tick(6'001).empty());  // waiting for the cancel
 
-    sent = f.deliver(6'100, ExecutionReport{.order_id = 1, .quantity = Quantity{100},
-                                            .type = ReportType::Cancelled, .side = Side::Buy});
+    sent = f.deliver(
+        6'100,
+        ExecutionReport{.order_id = 1, .quantity = Quantity{100}, .type = ReportType::Cancelled, .side = Side::Buy});
     ASSERT_EQ(sent.size(), 1u);
     EXPECT_TRUE(is_quote(sent[0], Side::Buy, kBid + 50));
     EXPECT_EQ(sent[0].order.id, 3u);
@@ -197,9 +204,12 @@ TEST(MarketMakerTest, CountsFillsAndBacksOffAfterAWouldCrossReject)
     Fixture f;
     ASSERT_EQ(f.tick(5'000).size(), 2u);
 
-    EXPECT_TRUE(f.deliver(5'100, ExecutionReport{.order_id = 2, .quantity = Quantity{100},
-                                                 .type = ReportType::Rejected, .reason = RejectReason::WouldCross,
-                                                 .side = Side::Sell})
+    EXPECT_TRUE(f.deliver(5'100,
+                          ExecutionReport{.order_id = 2,
+                                          .quantity = Quantity{100},
+                                          .type = ReportType::Rejected,
+                                          .reason = RejectReason::WouldCross,
+                                          .side = Side::Sell})
                     .empty());
     EXPECT_TRUE(f.tick(6'099).empty());  // backing off until 5,100 + 1,000
     std::vector<SimEvent> sent = f.tick(6'100);
@@ -232,12 +242,16 @@ TEST(MarketMakerTest, PullsItsQuotesAndStaysOutWhileNotTrading)
     EXPECT_TRUE(is_cancel(pulled[0], 1));
     EXPECT_TRUE(is_cancel(pulled[1], 2));
 
-    EXPECT_TRUE(f.deliver(5'200, ExecutionReport{.order_id = 1, .quantity = Quantity{100},
-                                                 .type = ReportType::Cancelled, .side = Side::Buy})
-                    .empty());
-    EXPECT_TRUE(f.deliver(5'200, ExecutionReport{.order_id = 2, .quantity = Quantity{100},
-                                                 .type = ReportType::Cancelled, .side = Side::Sell})
-                    .empty());
+    EXPECT_TRUE(
+        f.deliver(5'200,
+                  ExecutionReport{
+                      .order_id = 1, .quantity = Quantity{100}, .type = ReportType::Cancelled, .side = Side::Buy})
+            .empty());
+    EXPECT_TRUE(
+        f.deliver(5'200,
+                  ExecutionReport{
+                      .order_id = 2, .quantity = Quantity{100}, .type = ReportType::Cancelled, .side = Side::Sell})
+            .empty());
     EXPECT_TRUE(f.tick(9'000).empty());
 
     f.status(TradingState::Trading);

@@ -105,12 +105,10 @@ struct BooksReplayReport
 // Rejected events are counted, not fatal.
 struct MarketReplay
 {
-    static ReplayReport run(MarketEventSource& source, MarketBook& book,
-                            const ReplayOptions& options) noexcept;
+    static ReplayReport run(MarketEventSource& source, MarketBook& book, const ReplayOptions& options) noexcept;
 
     // Routes each event to its symbol's book; allocates only when a new symbol gets a book.
-    static BooksReplayReport run(MarketEventSource& source, MarketBooks& books,
-                                 const ReplayOptions& options) noexcept;
+    static BooksReplayReport run(MarketEventSource& source, MarketBooks& books, const ReplayOptions& options) noexcept;
 };
 
 // Enumerator names, e.g. "UnknownOrder", for reports.

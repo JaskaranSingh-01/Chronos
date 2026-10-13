@@ -35,18 +35,24 @@ enum class FillCause : std::uint8_t {
 inline constexpr std::size_t fill_cause_count = 6;
 
 // Exchange-local session phase; each cross is the first second after 09:30 or 16:00.
-enum class SessionPhase : std::uint8_t { PreOpen, OpeningCross, Regular, ClosingCross, PostClose };
+enum class SessionPhase : std::uint8_t {
+    PreOpen,
+    OpeningCross,
+    Regular,
+    ClosingCross,
+    PostClose
+};
 inline constexpr std::size_t session_phase_count = 5;
 
 constexpr SessionPhase session_phase(Timestamp now, Timestamp session_midnight) noexcept
 {
     constexpr Timestamp second = 1'000'000'000;
     const Timestamp t = now - session_midnight;
-    return t < RTH_OPEN_NS            ? SessionPhase::PreOpen
-         : t < RTH_OPEN_NS + second  ? SessionPhase::OpeningCross
-         : t < RTH_CLOSE_NS          ? SessionPhase::Regular
-         : t < RTH_CLOSE_NS + second ? SessionPhase::ClosingCross
-                                     : SessionPhase::PostClose;
+    return t < RTH_OPEN_NS          ? SessionPhase::PreOpen
+        : t < RTH_OPEN_NS + second  ? SessionPhase::OpeningCross
+        : t < RTH_CLOSE_NS          ? SessionPhase::Regular
+        : t < RTH_CLOSE_NS + second ? SessionPhase::ClosingCross
+                                    : SessionPhase::PostClose;
 }
 
 // Counts indexed [FillCause][SessionPhase].
@@ -130,9 +136,18 @@ public:
 
     // nullptr if not resting. Invalidated by the next call that changes orders.
     const ShadowOrder* find(OrderId id) const noexcept;
-    std::size_t open_orders() const noexcept { return orders_.size(); }
-    const ExecutionStatistics& statistics() const noexcept { return statistics_; }
-    const std::vector<FifoAnomaly>& fifo_anomaly_samples() const noexcept { return anomalies_; }
+    std::size_t open_orders() const noexcept
+    {
+        return orders_.size();
+    }
+    const ExecutionStatistics& statistics() const noexcept
+    {
+        return statistics_;
+    }
+    const std::vector<FifoAnomaly>& fifo_anomaly_samples() const noexcept
+    {
+        return anomalies_;
+    }
 };
 
 } // namespace simulator

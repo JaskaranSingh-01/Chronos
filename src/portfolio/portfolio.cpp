@@ -13,8 +13,7 @@ __extension__ using Int128 = __int128;
 // Narrows money computed in __int128 to int64; a value that does not fit is a logic bug.
 std::int64_t to_money(Int128 value) noexcept
 {
-    assert(value >= std::numeric_limits<std::int64_t>::min() &&
-           value <= std::numeric_limits<std::int64_t>::max());
+    assert(value >= std::numeric_limits<std::int64_t>::min() && value <= std::numeric_limits<std::int64_t>::max());
     return static_cast<std::int64_t>(value);
 }
 
@@ -39,9 +38,8 @@ RiskCheck Portfolio::reserve(Side side, Quantity quantity) noexcept
     }
 
     // Worst case: every open order on this side fills, this one included.
-    const Int128 worst = side == Side::Buy
-        ? Int128{position_} + open_buy_ + quantity.value()
-        : -(Int128{position_} - open_sell_ - quantity.value());
+    const Int128 worst = side == Side::Buy ? Int128{position_} + open_buy_ + quantity.value()
+                                           : -(Int128{position_} - open_sell_ - quantity.value());
     if (worst > limits_.max_position) {
         return RiskCheck::PositionLimit;
     }
@@ -83,8 +81,8 @@ void Portfolio::apply_fill(const ExecutionReport& report) noexcept
     const auto quantity = static_cast<std::int64_t>(report.quantity.value());
     const std::int64_t fill = report.side == Side::Buy ? quantity : -quantity;
     const std::int64_t fee = report.liquidity == Liquidity::Maker ? fee_schedule_.maker_fee_per_share
-                           : report.liquidity == Liquidity::Taker ? fee_schedule_.taker_fee_per_share
-                           : 0;
+        : report.liquidity == Liquidity::Taker                    ? fee_schedule_.taker_fee_per_share
+                                                                  : 0;
 
     cash_ = to_money(Int128{cash_} - Int128{fill} * report.price.ticks);
     fees_ = to_money(Int128{fees_} + Int128{fee} * quantity);

@@ -64,20 +64,38 @@ public:
     // while position() != 0, after market events.
     void mark(const MarketBook& book) noexcept;
 
-    std::int64_t position() const noexcept { return position_; }  // quantity units
-    std::int64_t cash() const noexcept { return cash_; }          // notional units
-    std::int64_t fees() const noexcept { return fees_; }          // notional units
+    std::int64_t position() const noexcept
+    {
+        return position_;
+    }  // quantity units
+    std::int64_t cash() const noexcept
+    {
+        return cash_;
+    }          // notional units
+    std::int64_t fees() const noexcept
+    {
+        return fees_;
+    }          // notional units
     std::int64_t realised_pnl() const noexcept;    // cash + cost
     std::int64_t unrealised_pnl() const noexcept;  // position x mark - cost; longs mark at the bid, shorts at the ask
-    std::int64_t pnl() const noexcept;             // realised + unrealised - fees
-    std::int64_t max_drawdown() const noexcept { return max_drawdown_; }  // max(peak pnl - pnl) over marks
-    std::int64_t max_abs_position() const noexcept { return max_abs_position_; }
+    std::int64_t pnl() const noexcept;  // realised + unrealised - fees
+    std::int64_t max_drawdown() const noexcept
+    {
+        return max_drawdown_;
+    }  // max(peak pnl - pnl) over marks
+    std::int64_t max_abs_position() const noexcept
+    {
+        return max_abs_position_;
+    }
 
-    std::size_t open_orders() const noexcept { return open_orders_; }
+    std::size_t open_orders() const noexcept
+    {
+        return open_orders_;
+    }
     std::uint64_t open_quantity(Side side) const noexcept
     {
         return side == Side::Buy ? open_buy_ : open_sell_;
     }
 };
 
-} // namespace simulator
+}  // namespace simulator

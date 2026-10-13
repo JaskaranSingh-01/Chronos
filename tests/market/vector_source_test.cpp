@@ -9,8 +9,7 @@ namespace {
 
 const MarketEvent events[] = {
     MarketEvent{.timestamp = 100, .order_id = 1, .price = Price{100}, .quantity = Quantity{10}},
-    MarketEvent{.timestamp = 200, .order_id = 1, .quantity = Quantity{4},
-                .type = MarketEventType::Cancel},
+    MarketEvent{.timestamp = 200, .order_id = 1, .quantity = Quantity{4}, .type = MarketEventType::Cancel},
 };
 
 TEST(VectorSourceTest, EmitsEventsInOrderWithOneBasedPosition)

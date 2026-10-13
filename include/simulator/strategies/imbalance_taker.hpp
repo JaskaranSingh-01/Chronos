@@ -48,7 +48,8 @@ private:
 
 public:
     explicit ImbalanceTaker(ImbalanceTakerParams params) noexcept
-        : params_(params) {}
+        : params_(params)
+    {}
 
     void on_market(StrategyContext& ctx, const MarketEvent&) noexcept
     {
@@ -83,7 +84,10 @@ public:
 
     void on_timer(StrategyContext&, std::uint64_t) noexcept {}
 
-    const ImbalanceTakerStats& stats() const noexcept { return stats_; }
+    const ImbalanceTakerStats& stats() const noexcept
+    {
+        return stats_;
+    }
 };
 
 } // namespace simulator

@@ -8,8 +8,7 @@ namespace {
 const Instrument aapl{.venue = {"XNAS"}, .native_symbol = {"AAPL"}, .price_scale = 4};
 const Instrument msft{.venue = {"XNAS"}, .native_symbol = {"MSFT"}, .price_scale = 4};
 const Instrument btc{
-    .venue = {"CBSE"}, .native_symbol = {"BTC-USD"},
-    .price_scale = 2, .quantity_scale = 8, .tick_size = 1};
+    .venue = {"CBSE"}, .native_symbol = {"BTC-USD"}, .price_scale = 2, .quantity_scale = 8, .tick_size = 1};
 
 TEST(InstrumentRegistryTest, AssignsDenseIdsFromZero)
 {

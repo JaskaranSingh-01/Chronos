@@ -30,19 +30,24 @@ private:
     ItchReadError error_{ItchReadError::None};
 
 public:
-    explicit ItchMessageReader(std::span<const std::byte> data) noexcept : reader_(data){}
+    explicit ItchMessageReader(std::span<const std::byte> data) noexcept
+        : reader_(data)
+    {}
 
     ItchReadResult next(ItchMessage& message) noexcept;
 
-    constexpr ItchReadError error() const noexcept{
+    constexpr ItchReadError error() const noexcept
+    {
         return error_;
     }
 
-    constexpr std::size_t position() const noexcept{
+    constexpr std::size_t position() const noexcept
+    {
         return reader_.position();
     }
 
-    constexpr std::size_t remaining() const noexcept{
+    constexpr std::size_t remaining() const noexcept
+    {
         return reader_.remaining();
     }
 };

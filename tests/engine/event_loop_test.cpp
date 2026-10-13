@@ -16,8 +16,7 @@ namespace {
 
 constexpr SymbolId kSymbol = 3;
 constexpr Instrument kEquity{.price_scale = 4, .quantity_scale = 0};
-constexpr RiskLimits kWide{.max_position = 1'000'000, .max_order_quantity = Quantity{1'000'000},
-                           .max_open_orders = 16};
+constexpr RiskLimits kWide{.max_position = 1'000'000, .max_order_quantity = Quantity{1'000'000}, .max_open_orders = 16};
 
 // The strategy can only read the historical book.
 static_assert(std::is_same_v<decltype(StrategyContext::book), const MarketBook&>);
@@ -25,13 +24,21 @@ static_assert(std::is_same_v<decltype(StrategyContext::portfolio), const Portfol
 
 MarketEvent add(Timestamp ts, OrderId id, Side side, std::int64_t price, std::uint64_t quantity)
 {
-    return MarketEvent{.timestamp = ts, .order_id = id, .price = Price{price}, .quantity = Quantity{quantity},
-                       .symbol = kSymbol, .type = MarketEventType::Add, .side = side};
+    return MarketEvent{.timestamp = ts,
+                       .order_id = id,
+                       .price = Price{price},
+                       .quantity = Quantity{quantity},
+                       .symbol = kSymbol,
+                       .type = MarketEventType::Add,
+                       .side = side};
 }
 
 MarketEvent execute(Timestamp ts, OrderId id, std::uint64_t quantity)
 {
-    return MarketEvent{.timestamp = ts, .order_id = id, .quantity = Quantity{quantity}, .symbol = kSymbol,
+    return MarketEvent{.timestamp = ts,
+                       .order_id = id,
+                       .quantity = Quantity{quantity},
+                       .symbol = kSymbol,
                        .type = MarketEventType::Execute};
 }
 
@@ -56,7 +63,9 @@ struct Recorder
 
     static Seen snapshot(const StrategyContext& ctx, char kind)
     {
-        Seen s{.kind = kind, .now = ctx.now(), .position = ctx.portfolio.position(),
+        Seen s{.kind = kind,
+               .now = ctx.now(),
+               .position = ctx.portfolio.position(),
                .unrealised = ctx.portfolio.unrealised_pnl()};
         ctx.book.best(Side::Buy, s.bid);
         ctx.book.best(Side::Sell, s.ask);
@@ -106,7 +115,8 @@ struct Harness
     Recorder strategy;
 
     explicit Harness(std::span<const MarketEvent> events, RiskLimits limits = kWide, FeeSchedule fees = {})
-        : source(events), portfolio(kEquity, limits, fees) {}
+        : source(events), portfolio(kEquity, limits, fees)
+    {}
 
     LoopReport run(LatencyConfig latency)
     {
@@ -188,12 +198,9 @@ TEST(EventLoopTest, StrategySeesPostApplyBookAndMarkedPortfolio)
 // arrives at 21,000.
 TEST(EventLoopTest, TieGoesToMarketInTheSpecWalkthrough)
 {
-    const std::vector<MarketEvent> events{
-        add(0, 1, Side::Buy, 1'000'000, 100),
-        add(0, 7, Side::Sell, 1'000'100, 500),
-        execute(1'000, 7, 400),
-        add(21'000, 9, Side::Sell, 1'000'100, 100),
-        add(50'000, 10, Side::Buy, 999'900, 100)};
+    const std::vector<MarketEvent> events{add(0, 1, Side::Buy, 1'000'000, 100), add(0, 7, Side::Sell, 1'000'100, 500),
+                                          execute(1'000, 7, 400), add(21'000, 9, Side::Sell, 1'000'100, 100),
+                                          add(50'000, 10, Side::Buy, 999'900, 100)};
     Harness h{events, kWide, FeeSchedule{.taker_fee_per_share = 30}};
     h.strategy.act = [](StrategyContext& ctx, const MarketEvent& event) {
         if (event.timestamp == 1'000) {
@@ -212,9 +219,14 @@ TEST(EventLoopTest, TieGoesToMarketInTheSpecWalkthrough)
     const Seen& delivered = h.strategy.seen[4];
     EXPECT_EQ(delivered.now, 36'000);
     EXPECT_EQ(delivered.report,
-              (ExecutionReport{.exchange_time = 21'000, .order_id = 1, .price = Price{1'000'100},
-                               .quantity = Quantity{200}, .leaves = Quantity{0}, .type = ReportType::Fill,
-                               .liquidity = Liquidity::Taker, .side = Side::Buy}));
+              (ExecutionReport{.exchange_time = 21'000,
+                               .order_id = 1,
+                               .price = Price{1'000'100},
+                               .quantity = Quantity{200},
+                               .leaves = Quantity{0},
+                               .type = ReportType::Fill,
+                               .liquidity = Liquidity::Taker,
+                               .side = Side::Buy}));
 
     EXPECT_EQ(h.portfolio.position(), 200);
     EXPECT_EQ(h.portfolio.cash(), -200'020'000);
@@ -277,9 +289,14 @@ TEST(EventLoopTest, InFlightOrderAndReportAreDrainedAtEndOfStream)
     EXPECT_EQ(delivered.now, 500);  // the clock moves on; the book stays frozen
     EXPECT_EQ(delivered.bid, (LevelInfo{Price{999'950}, 50, 1}));
     EXPECT_EQ(delivered.report,
-              (ExecutionReport{.exchange_time = 400, .order_id = 1, .price = Price{999'950},
-                               .quantity = Quantity{10}, .leaves = Quantity{0}, .type = ReportType::Fill,
-                               .liquidity = Liquidity::Taker, .side = Side::Sell}));
+              (ExecutionReport{.exchange_time = 400,
+                               .order_id = 1,
+                               .price = Price{999'950},
+                               .quantity = Quantity{10},
+                               .leaves = Quantity{0},
+                               .type = ReportType::Fill,
+                               .liquidity = Liquidity::Taker,
+                               .side = Side::Sell}));
     EXPECT_EQ(delivered.position, -10);
 
     EXPECT_EQ(h.portfolio.position(), -10);
@@ -313,13 +330,21 @@ TEST(EventLoopTest, RestingOrderFillsAsMakerAndCancelsEndToEnd)
     EXPECT_EQ(h.strategy.seen[2].report.type, ReportType::Accepted);
     EXPECT_EQ(h.strategy.seen[4].now, 600);
     EXPECT_EQ(h.strategy.seen[4].report,
-              (ExecutionReport{.exchange_time = 500, .order_id = 1, .price = Price{1'000'000},
-                               .quantity = Quantity{30}, .leaves = Quantity{20}, .type = ReportType::Fill,
-                               .liquidity = Liquidity::Maker, .side = Side::Buy}));
+              (ExecutionReport{.exchange_time = 500,
+                               .order_id = 1,
+                               .price = Price{1'000'000},
+                               .quantity = Quantity{30},
+                               .leaves = Quantity{20},
+                               .type = ReportType::Fill,
+                               .liquidity = Liquidity::Maker,
+                               .side = Side::Buy}));
     EXPECT_EQ(h.strategy.seen[6].now, 1'200);  // drained after the last market event
     EXPECT_EQ(h.strategy.seen[6].report,
-              (ExecutionReport{.exchange_time = 1'100, .order_id = 1, .quantity = Quantity{20},
-                               .type = ReportType::Cancelled, .side = Side::Buy}));
+              (ExecutionReport{.exchange_time = 1'100,
+                               .order_id = 1,
+                               .quantity = Quantity{20},
+                               .type = ReportType::Cancelled,
+                               .side = Side::Buy}));
 
     EXPECT_EQ(h.portfolio.position(), 30);
     EXPECT_EQ(h.portfolio.cash(), -30'000'000);
@@ -405,12 +430,15 @@ std::vector<MarketEvent> random_stream()
             events.push_back(execute(ts, id, 1 + rng() % 100));
             break;
         case 3:
-            events.push_back(MarketEvent{.timestamp = ts, .order_id = id, .symbol = kSymbol,
-                                         .type = MarketEventType::Delete});
+            events.push_back(
+                MarketEvent{.timestamp = ts, .order_id = id, .symbol = kSymbol, .type = MarketEventType::Delete});
             break;
         default:
-            events.push_back(MarketEvent{.timestamp = ts, .price = Price{95}, .quantity = Quantity{10},
-                                         .symbol = kSymbol, .type = MarketEventType::Trade});
+            events.push_back(MarketEvent{.timestamp = ts,
+                                         .price = Price{95},
+                                         .quantity = Quantity{10},
+                                         .symbol = kSymbol,
+                                         .type = MarketEventType::Trade});
         }
     }
     return events;
@@ -447,14 +475,22 @@ class FailingSource final : public MarketEventSource
     VectorSource events_;
 
 public:
-    explicit FailingSource(std::span<const MarketEvent> events) : events_(events) {}
+    explicit FailingSource(std::span<const MarketEvent> events)
+        : events_(events)
+    {}
 
     SourceResult next(MarketEvent& event) noexcept override
     {
         return events_.next(event) == SourceResult::Event ? SourceResult::Event : SourceResult::Error;
     }
-    std::uint64_t position() const noexcept override { return events_.position(); }
-    SourceError error() const noexcept override { return SourceError::TruncatedMessage; }
+    std::uint64_t position() const noexcept override
+    {
+        return events_.position();
+    }
+    SourceError error() const noexcept override
+    {
+        return SourceError::TruncatedMessage;
+    }
 };
 
 TEST(EventLoopTest, FatalFailuresMatchMarketReplay)
@@ -507,7 +543,8 @@ TEST(EventLoopTest, NoDrainAfterAFatalFailure)
             ctx.gateway.send(Side::Sell, Price{999'950}, Quantity{10}, TimeInForce::Ioc, id);
         }
     };
-    EventLoop<Recorder> loop{source, book, execution, portfolio, strategy, {.order_latency = 100, .report_latency = 100}};
+    EventLoop<Recorder> loop{source,    book,     execution,
+                             portfolio, strategy, {.order_latency = 100, .report_latency = 100}};
 
     const LoopReport report = loop.run();
 

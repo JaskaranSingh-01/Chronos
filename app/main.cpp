@@ -44,8 +44,8 @@ std::string dollars(std::int64_t ticks, unsigned scale)
     for (unsigned i = 0; i < scale; ++i) {
         unit *= 10;
     }
-    const std::uint64_t magnitude = ticks < 0 ? 0 - static_cast<std::uint64_t>(ticks)
-                                              : static_cast<std::uint64_t>(ticks);
+    const std::uint64_t magnitude =
+        ticks < 0 ? 0 - static_cast<std::uint64_t>(ticks) : static_cast<std::uint64_t>(ticks);
     char text[32];
     const int written = std::snprintf(text, sizeof text, "%s%" PRIu64, ticks < 0 ? "-" : "", magnitude / unit);
     if (scale != 0) {
@@ -68,18 +68,17 @@ std::string clock_time(Timestamp timestamp, Timestamp session_midnight)
     const Timestamp ns = timestamp - session_midnight;
     constexpr Timestamp second = 1'000'000'000;
     char text[32];
-    std::snprintf(text, sizeof text, "%02lld:%02lld:%02lld.%09lld",
-                  static_cast<long long>(ns / (3600 * second)),
-                  static_cast<long long>(ns / (60 * second) % 60),
-                  static_cast<long long>(ns / second % 60), static_cast<long long>(ns % second));
+    std::snprintf(text, sizeof text, "%02lld:%02lld:%02lld.%09lld", static_cast<long long>(ns / (3600 * second)),
+                  static_cast<long long>(ns / (60 * second) % 60), static_cast<long long>(ns / second % 60),
+                  static_cast<long long>(ns % second));
     return text;
 }
 
 void print_levels(const char* side, const std::vector<LevelInfo>& levels, unsigned scale)
 {
     for (const LevelInfo& level : levels) {
-        std::printf("  %s %14s %12" PRIu64 " %8u\n", side, dollars(level.price.ticks, scale).c_str(),
-                    level.quantity, level.order_count);
+        std::printf("  %s %14s %12" PRIu64 " %8u\n", side, dollars(level.price.ticks, scale).c_str(), level.quantity,
+                    level.order_count);
     }
 }
 
@@ -102,8 +101,8 @@ void print_book(const MarketBook& book, std::size_t depth, unsigned scale)
         ? dollars(ask.price.ticks - bid.price.ticks, scale)
         : std::string{"n/a (a side is empty)"};
     const std::string_view state = to_string(book.trading_state());
-    std::printf("  spread %s, orders %zu, peak orders %zu, crossed %s, locked %s, trading state %.*s\n",
-                spread.c_str(), book.order_count(), book.peak_order_count(), book.is_crossed() ? "yes" : "no",
+    std::printf("  spread %s, orders %zu, peak orders %zu, crossed %s, locked %s, trading state %.*s\n", spread.c_str(),
+                book.order_count(), book.peak_order_count(), book.is_crossed() ? "yes" : "no",
                 book.is_locked() ? "yes" : "no", static_cast<int>(state.size()), state.data());
 }
 
@@ -113,8 +112,8 @@ void print_config(const char* command, const ReplayArgs& args, const MappedFile&
     const auto offset = args.utc_offset.count();
 
     std::printf("Chronos %s\n", command);
-    std::printf("  file             %.*s (%zu bytes)\n", static_cast<int>(args.file.size()),
-                args.file.data(), file.bytes().size());
+    std::printf("  file             %.*s (%zu bytes)\n", static_cast<int>(args.file.size()), args.file.data(),
+                file.bytes().size());
     if (args.all_symbols) {
         std::printf("  symbols          all\n");
     } else if (!args.symbols.empty()) {
@@ -126,10 +125,10 @@ void print_config(const char* command, const ReplayArgs& args, const MappedFile&
     } else {
         std::printf("  symbol           %.*s\n", static_cast<int>(args.symbol.size()), args.symbol.data());
     }
-    std::printf("  session          %04d-%02u-%02u, UTC%c%02lld:%02lld\n",
-                static_cast<int>(args.date.year()), static_cast<unsigned>(args.date.month()),
-                static_cast<unsigned>(args.date.day()), offset < 0 ? '-' : '+',
-                static_cast<long long>(std::abs(offset) / 60), static_cast<long long>(std::abs(offset) % 60));
+    std::printf("  session          %04d-%02u-%02u, UTC%c%02lld:%02lld\n", static_cast<int>(args.date.year()),
+                static_cast<unsigned>(args.date.month()), static_cast<unsigned>(args.date.day()),
+                offset < 0 ? '-' : '+', static_cast<long long>(std::abs(offset) / 60),
+                static_cast<long long>(std::abs(offset) % 60));
     std::printf("  truncated tail   %s\n", args.allow_truncated_tail ? "allowed" : "fatal");
     if (args.check_invariants_every == 0) {
         std::printf("  invariant checks at the end only\n");
@@ -137,7 +136,8 @@ void print_config(const char* command, const ReplayArgs& args, const MappedFile&
         std::printf("  invariant checks every %" PRIu64 " applied events, and at the end\n",
                     args.check_invariants_every);
     }
-    std::printf("  capacity         %zu orders%s\n", args.capacity, args.symbol.empty() ? ", shared by every book" : "");
+    std::printf("  capacity         %zu orders%s\n", args.capacity,
+                args.symbol.empty() ? ", shared by every book" : "");
 }
 
 // "Applied N, rejected M" (after `indent`) and the rejections by reason.
@@ -181,9 +181,9 @@ bool print_final_book(const MarketBook& book, const ReplayReport& report, std::s
     InvariantError invariant_error{InvariantError::None};
     const bool invariants = book.check_invariants(invariant_error, in_rth(report.last_timestamp, midnight));
     const std::string_view invariant_name = to_string(invariant_error);
-    std::printf("\nInvariants at end: %s%.*s (%" PRIu64 " periodic checks passed)\n",
-                invariants ? "ok" : "FAILED ", invariants ? 0 : static_cast<int>(invariant_name.size()),
-                invariant_name.data(), report.invariant_checks);
+    std::printf("\nInvariants at end: %s%.*s (%" PRIu64 " periodic checks passed)\n", invariants ? "ok" : "FAILED ",
+                invariants ? 0 : static_cast<int>(invariant_name.size()), invariant_name.data(),
+                report.invariant_checks);
     std::printf("Digest            %016" PRIx64 "\n", book.digest());
     return invariants;
 }
@@ -202,7 +202,9 @@ Usage usage_now() noexcept
 {
     rusage usage{};
     ::getrusage(RUSAGE_SELF, &usage);
-    auto seconds = [](const timeval& t) { return static_cast<double>(t.tv_sec) + static_cast<double>(t.tv_usec) * 1e-6; };
+    auto seconds = [](const timeval& t) {
+        return static_cast<double>(t.tv_sec) + static_cast<double>(t.tv_usec) * 1e-6;
+    };
     return {std::chrono::steady_clock::now(), seconds(usage.ru_utime), seconds(usage.ru_stime), allocation_count(),
             static_cast<std::uint64_t>(usage.ru_majflt)};
 }
@@ -292,7 +294,8 @@ void print_metrics(const RunRecord& run, std::uint64_t file_bytes)
     std::printf("Elapsed           %.2f s wall, %.2f s CPU (user %.2f, sys %.2f); %.0f events/s, %.1f ns/event, "
                 "%.0f messages/s, %.1f MB/s\n",
                 m.wall_s, m.user_s + m.sys_s, m.user_s, m.sys_s, ratio(events, m.wall_s), ratio(m.wall_s * 1e9, events),
-                ratio(static_cast<double>(run.messages), m.wall_s), ratio(static_cast<double>(file_bytes) / 1e6, m.wall_s));
+                ratio(static_cast<double>(run.messages), m.wall_s),
+                ratio(static_cast<double>(file_bytes) / 1e6, m.wall_s));
     std::printf("Memory            %" PRIu64 " allocations (%.4f per event), peak RSS %.1f MB, peak footprint "
                 "%.1f MB, %" PRIu64 " major faults\n",
                 m.allocations, ratio(static_cast<double>(m.allocations), events), static_cast<double>(m.peak_rss) / 1e6,
@@ -408,19 +411,21 @@ bool write_json(const ReplayArgs& args, std::span<const std::byte> input, const 
     std::fprintf(out,
                  "  \"time\": {\"wall_s\": %.3f, \"user_s\": %.3f, \"sys_s\": %.3f, \"cpu_s\": %.3f, "
                  "\"events_per_s\": %.0f, \"ns_per_event\": %.2f},\n",
-                 m.wall_s, m.user_s, m.sys_s, m.user_s + m.sys_s, ratio(events, m.wall_s), ratio(m.wall_s * 1e9, events));
-    std::fprintf(out,
-                 "  \"memory\": {\"allocations\": %" PRIu64 ", \"allocations_per_event\": %.4f, "
-                 "\"peak_rss_bytes\": %" PRIu64 ", \"peak_footprint_bytes\": %" PRIu64 ", \"major_faults\": %" PRIu64 "},\n",
-                 m.allocations, ratio(static_cast<double>(m.allocations), events), m.peak_rss, m.peak_footprint,
-                 m.major_faults);
+                 m.wall_s, m.user_s, m.sys_s, m.user_s + m.sys_s, ratio(events, m.wall_s),
+                 ratio(m.wall_s * 1e9, events));
+    std::fprintf(
+        out,
+        "  \"memory\": {\"allocations\": %" PRIu64 ", \"allocations_per_event\": %.4f, "
+        "\"peak_rss_bytes\": %" PRIu64 ", \"peak_footprint_bytes\": %" PRIu64 ", \"major_faults\": %" PRIu64 "},\n",
+        m.allocations, ratio(static_cast<double>(m.allocations), events), m.peak_rss, m.peak_footprint, m.major_faults);
     std::fprintf(out, "%.*s", static_cast<int>(extra.size()), extra.data());
     if (m.latency == nullptr) {
         std::fprintf(out, "  \"latency\": null\n}\n");
     } else {
         const LatencyHistogram& h = *m.latency;
         std::fprintf(out,
-                     "  \"latency\": {\"batch_events\": %" PRIu64 ", \"batches\": %" PRIu64 ", \"timer_tick_ns\": %.2f, "
+                     "  \"latency\": {\"batch_events\": %" PRIu64 ", \"batches\": %" PRIu64
+                     ", \"timer_tick_ns\": %.2f, "
                      "\"ns_per_event\": {\"p50\": %" PRIu64 ", \"p90\": %" PRIu64 ", \"p99\": %" PRIu64
                      ", \"p99_9\": %" PRIu64 ", \"max\": %" PRIu64 "}}\n}\n",
                      m.latency_batch, h.count(), timer_tick_ns(), h.percentile(0.5), h.percentile(0.9),
@@ -453,7 +458,8 @@ std::string backtest_json(const BacktestArgs& b, const RiskLimits& limits, const
         text, sizeof text,
         "  \"backtest\": {\"strategy\": \"%s\", \"order_latency_ns\": %" PRIu64 ", \"report_latency_ns\": %" PRIu64
         ", \"max_position\": %" PRId64 ", \"max_order_quantity\": %" PRIu64 ", \"max_open_orders\": %zu"
-        ", \"maker_fee_ticks\": %" PRId64 ", \"taker_fee_ticks\": %" PRIu64 ", \"price_scale\": %u, \"money_scale\": %u,\n"
+        ", \"maker_fee_ticks\": %" PRId64 ", \"taker_fee_ticks\": %" PRIu64
+        ", \"price_scale\": %u, \"money_scale\": %u,\n"
         "    \"sim_events\": %" PRIu64 ", \"drained_sim_events\": %" PRIu64 ", \"discarded_sim_events\": %" PRIu64 ",\n"
         "    \"maker_fills\": %" PRIu64 ", \"maker_quantity\": %" PRIu64 ", \"taker_fills\": %" PRIu64
         ", \"taker_quantity\": %" PRIu64 ", \"accepted_quantity\": %" PRIu64 ", \"cancelled\": %" PRIu64
@@ -464,11 +470,12 @@ std::string backtest_json(const BacktestArgs& b, const RiskLimits& limits, const
         ", \"max_drawdown\": %" PRId64 "},\n",
         b.strategy == StrategyKind::MarketMaker ? "mm" : "imbalance", b.order_latency_ns, b.report_latency_ns,
         limits.max_position, limits.max_order_quantity.value(), limits.max_open_orders, b.maker_fee_ticks,
-        b.taker_fee_ticks, unsigned{instrument.price_scale}, unsigned{instrument.price_scale} + instrument.quantity_scale,
-        loop.sim_events, loop.drained_sim_events, loop.discarded_sim_events, e.maker_fills, e.maker_quantity,
-        e.taker_fills, e.taker_quantity, e.accepted_quantity, e.cancelled, e.cancel_rejects, e.would_cross_rejects,
-        e.not_trading_rejects, e.fifo_anomalies, p.position(), p.max_abs_position(), p.open_orders(), p.cash(),
-        p.realised_pnl(), p.unrealised_pnl(), p.fees(), p.pnl(), p.max_drawdown());
+        b.taker_fee_ticks, unsigned{instrument.price_scale},
+        unsigned{instrument.price_scale} + instrument.quantity_scale, loop.sim_events, loop.drained_sim_events,
+        loop.discarded_sim_events, e.maker_fills, e.maker_quantity, e.taker_fills, e.taker_quantity,
+        e.accepted_quantity, e.cancelled, e.cancel_rejects, e.would_cross_rejects, e.not_trading_rejects,
+        e.fifo_anomalies, p.position(), p.max_abs_position(), p.open_orders(), p.cash(), p.realised_pnl(),
+        p.unrealised_pnl(), p.fees(), p.pnl(), p.max_drawdown());
     return text;
 }
 
@@ -491,7 +498,8 @@ int replay(const ReplayArgs& args)
         return 2;
     }
 
-    const ItchSourceConfig config{.ticker = args.symbol, .session_date = args.date,
+    const ItchSourceConfig config{.ticker = args.symbol,
+                                  .session_date = args.date,
                                   .utc_offset = args.utc_offset,
                                   .allow_truncated_tail = args.allow_truncated_tail};
     const Timestamp midnight = session_midnight_ns(args.date, args.utc_offset);
@@ -505,8 +513,7 @@ int replay(const ReplayArgs& args)
     LatencyHistogram latency;
     const ReplayOptions options = replay_options(args, midnight, latency);
     RunRecord run;
-    const ReplayReport report =
-        measured([&] { return MarketReplay::run(source, book, options); }, run.metrics);
+    const ReplayReport report = measured([&] { return MarketReplay::run(source, book, options); }, run.metrics);
 
     const ItchSourceStatistics& stats = source.statistics();
     std::printf("\nSource\n");
@@ -530,8 +537,7 @@ int replay(const ReplayArgs& args)
     print_applied(report, "");
     print_failure(report, args, source.failed_message_type());
 
-    const bool invariants =
-        print_final_book(book, report, args.depth, source.instrument().price_scale, midnight);
+    const bool invariants = print_final_book(book, report, args.depth, source.instrument().price_scale, midnight);
 
     fill_record(run, report, book, stats.messages, invariants);
     run.metrics.latency = options.latency;
@@ -574,8 +580,10 @@ int replay_books(const ReplayArgs& args)
         return 2;
     }
 
-    const ItchSourceConfig config{.tickers = args.symbols, .all_tickers = args.all_symbols,
-                                  .session_date = args.date, .utc_offset = args.utc_offset,
+    const ItchSourceConfig config{.tickers = args.symbols,
+                                  .all_tickers = args.all_symbols,
+                                  .session_date = args.date,
+                                  .utc_offset = args.utc_offset,
                                   .allow_truncated_tail = args.allow_truncated_tail};
     const Timestamp midnight = session_midnight_ns(args.date, args.utc_offset);
 
@@ -590,8 +598,7 @@ int replay_books(const ReplayArgs& args)
     LatencyHistogram latency;
     const ReplayOptions options = replay_options(args, midnight, latency);
     RunRecord run;
-    const BooksReplayReport report =
-        measured([&] { return MarketReplay::run(source, books, options); }, run.metrics);
+    const BooksReplayReport report = measured([&] { return MarketReplay::run(source, books, options); }, run.metrics);
     const ReplayReport& total = report.total;
 
     const ItchSourceStatistics& stats = source.statistics();
@@ -643,9 +650,8 @@ int replay_books(const ReplayArgs& args)
     std::iota(rows.begin(), rows.end(), SymbolId{0});
     std::size_t hidden = 0;
     if (args.all_symbols) {
-        std::stable_sort(rows.begin(), rows.end(), [&](SymbolId a, SymbolId b) {
-            return report.symbols[a].events > report.symbols[b].events;
-        });
+        std::stable_sort(rows.begin(), rows.end(),
+                         [&](SymbolId a, SymbolId b) { return report.symbols[a].events > report.symbols[b].events; });
         const std::size_t top = std::min<std::size_t>(10, rows.size());
         std::vector<SymbolId> others(rows.begin() + static_cast<std::ptrdiff_t>(top), rows.end());
         std::sort(others.begin(), others.end());
@@ -690,16 +696,15 @@ int replay_books(const ReplayArgs& args)
         const std::string_view error_name = to_string(invariant_error);
         const std::string_view failed =
             invariant_symbol < books.size() ? name(*registry.find(invariant_symbol)) : "(the shared pool)";
-        std::printf("Invariants at end: FAILED %.*s in %.*s\n", static_cast<int>(error_name.size()),
-                    error_name.data(), static_cast<int>(failed.size()), failed.data());
+        std::printf("Invariants at end: FAILED %.*s in %.*s\n", static_cast<int>(error_name.size()), error_name.data(),
+                    static_cast<int>(failed.size()), failed.data());
     } else if (!crossed.empty()) {
         std::printf("Invariants at end: FAILED CrossedInRth in %zu books:", crossed.size());
         for (std::size_t i = 0; i < crossed.size() && i < 20; ++i) {
             const std::string_view symbol = name(*registry.find(crossed[i]));
             std::printf(" %.*s", static_cast<int>(symbol.size()), symbol.data());
         }
-        std::printf("%s; every other invariant ok in all %zu books\n", crossed.size() > 20 ? " ..." : "",
-                    books.size());
+        std::printf("%s; every other invariant ok in all %zu books\n", crossed.size() > 20 ? " ..." : "", books.size());
     } else {
         std::printf("Invariants at end: ok, all %zu books\n", books.size());
     }
@@ -709,8 +714,8 @@ int replay_books(const ReplayArgs& args)
         for (std::size_t i = 0; i < not_trading.size() && i < 20; ++i) {
             const std::string_view symbol = name(*registry.find(not_trading[i]));
             const std::string_view state = to_string(books[not_trading[i]].trading_state());
-            std::printf(" %.*s (%.*s)", static_cast<int>(symbol.size()), symbol.data(),
-                        static_cast<int>(state.size()), state.data());
+            std::printf(" %.*s (%.*s)", static_cast<int>(symbol.size()), symbol.data(), static_cast<int>(state.size()),
+                        state.data());
         }
         std::printf("%s\n", not_trading.size() > 20 ? " ..." : "");
     }
@@ -778,11 +783,11 @@ void print_execution(const ExecutionStatistics& stats)
 // Maker fills / FIFO anomalies by rule, historical message and session phase.
 void print_attribution(const ExecutionStatistics& stats)
 {
-    static constexpr const char* causes[fill_cause_count] = {"(a) E", "(a) C", "(d) E", "(d) C", "(c) Add",
-                                                             "(c) Replace"};
+    static constexpr const char* causes[fill_cause_count] = {"(a) E", "(a) C",   "(d) E",
+                                                             "(d) C", "(c) Add", "(c) Replace"};
     std::printf("\nFill attribution (maker fills/FIFO anomalies; crosses = first second of 09:30, 16:00)\n");
-    std::printf("  %-12s %13s %13s %13s %13s %13s\n", "rule, msg", "pre-open", "open cross", "regular",
-                "close cross", "post-close");
+    std::printf("  %-12s %13s %13s %13s %13s %13s\n", "rule, msg", "pre-open", "open cross", "regular", "close cross",
+                "post-close");
     for (std::size_t cause = 0; cause < fill_cause_count; ++cause) {
         std::printf("  %-12s", causes[cause]);
         for (std::size_t phase = 0; phase < session_phase_count; ++phase) {
@@ -824,21 +829,25 @@ int backtest(const ReplayArgs& args)
 
     const BacktestArgs& b = args.backtest;
     const bool mm = b.strategy == StrategyKind::MarketMaker;
-    const ItchSourceConfig config{.ticker = args.symbol, .session_date = args.date,
+    const ItchSourceConfig config{.ticker = args.symbol,
+                                  .session_date = args.date,
                                   .utc_offset = args.utc_offset,
                                   .allow_truncated_tail = args.allow_truncated_tail};
     const Timestamp midnight = session_midnight_ns(args.date, args.utc_offset);
     const LatencyConfig latency{.order_latency = static_cast<Timestamp>(b.order_latency_ns),
                                 .report_latency = static_cast<Timestamp>(b.report_latency_ns)};
-    const ImbalanceTakerParams imbalance_params{.threshold = b.threshold, .clip = b.clip,
+    const ImbalanceTakerParams imbalance_params{.threshold = b.threshold,
+                                                .clip = b.clip,
                                                 .max_position = b.max_position,
                                                 .cooldown_ns = static_cast<Timestamp>(b.cooldown_ms) * 1'000'000};
-    const MarketMakerParams mm_params{.quote_size = b.quote_size, .max_position = b.max_position,
+    const MarketMakerParams mm_params{.quote_size = b.quote_size,
+                                      .max_position = b.max_position,
                                       .requote_cooldown_ns = static_cast<Timestamp>(b.requote_ms) * 1'000'000};
     // The strategy's own position limit, enforced again pre-trade.
-    const RiskLimits limits{.max_position = b.max_position, .max_order_quantity = Quantity{mm ? b.quote_size : b.clip},
-                            .max_open_orders = b.max_open_orders != 0 ? b.max_open_orders
-                                                                      : default_max_open_orders(b.strategy)};
+    const RiskLimits limits{.max_position = b.max_position,
+                            .max_order_quantity = Quantity{mm ? b.quote_size : b.clip},
+                            .max_open_orders =
+                                b.max_open_orders != 0 ? b.max_open_orders : default_max_open_orders(b.strategy)};
     const FeeSchedule fees{.maker_fee_per_share = b.maker_fee_ticks,
                            .taker_fee_per_share = static_cast<std::int64_t>(b.taker_fee_ticks)};
 
@@ -857,14 +866,14 @@ int backtest(const ReplayArgs& args)
                     ", requote cooldown %" PRIu64 " ms, joins the best bid and ask\n",
                     b.quote_size, b.max_position, b.requote_ms);
     } else {
-        std::printf("  strategy         ImbalanceTaker (a toy): threshold %g, clip %" PRIu64
-                    ", max position %" PRId64 ", cooldown %" PRIu64 " ms\n",
+        std::printf("  strategy         ImbalanceTaker (a toy): threshold %g, clip %" PRIu64 ", max position %" PRId64
+                    ", cooldown %" PRIu64 " ms\n",
                     b.threshold, b.clip, b.max_position, b.cooldown_ms);
     }
     std::printf("  risk             max position %" PRId64 ", max order %" PRIu64 ", max open orders %zu\n",
                 limits.max_position, limits.max_order_quantity.value(), limits.max_open_orders);
-    std::printf("  fees             maker %s, taker %s per share\n",
-                usd(fees.maker_fee_per_share, price_scale).c_str(), usd(fees.taker_fee_per_share, price_scale).c_str());
+    std::printf("  fees             maker %s, taker %s per share\n", usd(fees.maker_fee_per_share, price_scale).c_str(),
+                usd(fees.taker_fee_per_share, price_scale).c_str());
 
     ExecutionSimulator execution{midnight};
     Portfolio portfolio{instrument, limits, fees};

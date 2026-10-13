@@ -28,11 +28,8 @@ MappedFile::~MappedFile()
 }
 
 MappedFile::MappedFile(MappedFile&& other) noexcept
-    : data_(std::exchange(other.data_, nullptr)),
-      size_(std::exchange(other.size_, 0)),
-      error_(other.error_)
-{
-}
+    : data_(std::exchange(other.data_, nullptr)), size_(std::exchange(other.size_, 0)), error_(other.error_)
+{}
 
 MappedFile& MappedFile::operator=(MappedFile&& other) noexcept
 {

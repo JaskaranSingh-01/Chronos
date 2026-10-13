@@ -21,7 +21,8 @@ private:
 
 public:
     MarketBooks(const InstrumentRegistry& registry, OrderPool& pool) noexcept
-        : registry_(registry), pool_(pool) {}
+        : registry_(registry), pool_(pool)
+    {}
 
     // Adds the books of instruments registered since the last call.
     void sync()
@@ -40,9 +41,18 @@ public:
         return id < books_.size() ? &books_[id] : nullptr;
     }
 
-    std::size_t size() const noexcept { return books_.size(); }
-    const MarketBook& operator[](SymbolId id) const noexcept { return books_[id]; }
-    const OrderPool& pool() const noexcept { return pool_; }
+    std::size_t size() const noexcept
+    {
+        return books_.size();
+    }
+    const MarketBook& operator[](SymbolId id) const noexcept
+    {
+        return books_[id];
+    }
+    const OrderPool& pool() const noexcept
+    {
+        return pool_;
+    }
 
     // Checks every book, then the shared pool against all of them. On failure `symbol`
     // is the failing book, or size() for PoolCountMismatch.

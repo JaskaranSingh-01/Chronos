@@ -72,8 +72,14 @@ public:
         return max_;
     }
 
-    std::uint64_t count() const noexcept { return count_; }
-    std::uint64_t max() const noexcept { return max_; }
+    std::uint64_t count() const noexcept
+    {
+        return count_;
+    }
+    std::uint64_t max() const noexcept
+    {
+        return max_;
+    }
 };
 
 } // namespace simulator

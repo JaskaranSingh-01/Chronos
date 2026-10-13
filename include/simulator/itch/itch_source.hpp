@@ -76,10 +76,7 @@ private:
 
 public:
     // Allocates the 65,536-entry locate tables.
-    ItchSource(
-        std::span<const std::byte> data,
-        const ItchSourceConfig& config,
-        InstrumentRegistry& registry);
+    ItchSource(std::span<const std::byte> data, const ItchSourceConfig& config, InstrumentRegistry& registry);
 
     // Error/SymbolNotFound if the stream ends before the R of config.ticker.
     SourceResult next(MarketEvent& event) noexcept override;

@@ -12,10 +12,7 @@ namespace {
 
 TEST(ByteReaderTest, ReadsU8)
 {
-    const std::array<std::byte, 2> data{
-        std::byte{0x12},
-        std::byte{0x34}
-    };
+    const std::array<std::byte, 2> data{std::byte{0x12}, std::byte{0x34}};
 
     ByteReader reader{data};
 
@@ -30,10 +27,7 @@ TEST(ByteReaderTest, ReadsU8)
 
 TEST(ByteReaderTest, ReadsU16BigEndian)
 {
-    const std::array<std::byte, 2> data{
-        std::byte{0x12},
-        std::byte{0x34}
-    };
+    const std::array<std::byte, 2> data{std::byte{0x12}, std::byte{0x34}};
 
     ByteReader reader{data};
 
@@ -48,12 +42,7 @@ TEST(ByteReaderTest, ReadsU16BigEndian)
 
 TEST(ByteReaderTest, ReadsU32BigEndian)
 {
-    const std::array<std::byte, 4> data{
-        std::byte{0x12},
-        std::byte{0x34},
-        std::byte{0x56},
-        std::byte{0x78}
-    };
+    const std::array<std::byte, 4> data{std::byte{0x12}, std::byte{0x34}, std::byte{0x56}, std::byte{0x78}};
 
     ByteReader reader{data};
 
@@ -68,16 +57,8 @@ TEST(ByteReaderTest, ReadsU32BigEndian)
 
 TEST(ByteReaderTest, ReadsU64BigEndian)
 {
-    const std::array<std::byte, 8> data{
-        std::byte{0x01},
-        std::byte{0x23},
-        std::byte{0x45},
-        std::byte{0x67},
-        std::byte{0x89},
-        std::byte{0xAB},
-        std::byte{0xCD},
-        std::byte{0xEF}
-    };
+    const std::array<std::byte, 8> data{std::byte{0x01}, std::byte{0x23}, std::byte{0x45}, std::byte{0x67},
+                                        std::byte{0x89}, std::byte{0xAB}, std::byte{0xCD}, std::byte{0xEF}};
 
     ByteReader reader{data};
 
@@ -85,10 +66,7 @@ TEST(ByteReaderTest, ReadsU64BigEndian)
 
     ASSERT_TRUE(reader.read_u64_be(value));
 
-    EXPECT_EQ(
-        value,
-        0x0123456789ABCDEFULL
-    );
+    EXPECT_EQ(value, 0x0123456789ABCDEFULL);
 
     EXPECT_EQ(reader.position(), 8);
     EXPECT_EQ(reader.remaining(), 0);
@@ -96,20 +74,13 @@ TEST(ByteReaderTest, ReadsU64BigEndian)
 
 TEST(ByteReaderTest, ReadsRawBytes)
 {
-    const std::array<std::byte, 4> data{
-        std::byte{0x10},
-        std::byte{0x20},
-        std::byte{0x30},
-        std::byte{0x40}
-    };
+    const std::array<std::byte, 4> data{std::byte{0x10}, std::byte{0x20}, std::byte{0x30}, std::byte{0x40}};
 
     ByteReader reader{data};
 
     std::span<const std::byte> bytes;
 
-    ASSERT_TRUE(
-        reader.read_bytes(2, bytes)
-    );
+    ASSERT_TRUE(reader.read_bytes(2, bytes));
 
     ASSERT_EQ(bytes.size(), 2);
 
@@ -122,17 +93,11 @@ TEST(ByteReaderTest, ReadsRawBytes)
 
 TEST(ByteReaderTest, CanReadMultipleValuesSequentially)
 {
-    const std::array<std::byte, 7> data{
-        std::byte{0xAA},
+    const std::array<std::byte, 7> data{std::byte{0xAA},
 
-        std::byte{0x01},
-        std::byte{0x02},
+                                        std::byte{0x01}, std::byte{0x02},
 
-        std::byte{0x03},
-        std::byte{0x04},
-        std::byte{0x05},
-        std::byte{0x06}
-    };
+                                        std::byte{0x03}, std::byte{0x04}, std::byte{0x05}, std::byte{0x06}};
 
     ByteReader reader{data};
 
@@ -154,17 +119,13 @@ TEST(ByteReaderTest, CanReadMultipleValuesSequentially)
 
 TEST(ByteReaderTest, RejectsTruncatedU16)
 {
-    const std::array<std::byte, 1> data{
-        std::byte{0x12}
-    };
+    const std::array<std::byte, 1> data{std::byte{0x12}};
 
     ByteReader reader{data};
 
     std::uint16_t value{0};
 
-    EXPECT_FALSE(
-        reader.read_u16_be(value)
-    );
+    EXPECT_FALSE(reader.read_u16_be(value));
 
     EXPECT_EQ(reader.position(), 0);
     EXPECT_EQ(reader.remaining(), 1);
@@ -172,19 +133,13 @@ TEST(ByteReaderTest, RejectsTruncatedU16)
 
 TEST(ByteReaderTest, RejectsTruncatedU32)
 {
-    const std::array<std::byte, 3> data{
-        std::byte{0x12},
-        std::byte{0x34},
-        std::byte{0x56}
-    };
+    const std::array<std::byte, 3> data{std::byte{0x12}, std::byte{0x34}, std::byte{0x56}};
 
     ByteReader reader{data};
 
     std::uint32_t value{0};
 
-    EXPECT_FALSE(
-        reader.read_u32_be(value)
-    );
+    EXPECT_FALSE(reader.read_u32_be(value));
 
     EXPECT_EQ(reader.position(), 0);
     EXPECT_EQ(reader.remaining(), 3);
@@ -192,23 +147,14 @@ TEST(ByteReaderTest, RejectsTruncatedU32)
 
 TEST(ByteReaderTest, RejectsTruncatedU64)
 {
-    const std::array<std::byte, 7> data{
-        std::byte{0x01},
-        std::byte{0x02},
-        std::byte{0x03},
-        std::byte{0x04},
-        std::byte{0x05},
-        std::byte{0x06},
-        std::byte{0x07}
-    };
+    const std::array<std::byte, 7> data{std::byte{0x01}, std::byte{0x02}, std::byte{0x03}, std::byte{0x04},
+                                        std::byte{0x05}, std::byte{0x06}, std::byte{0x07}};
 
     ByteReader reader{data};
 
     std::uint64_t value{0};
 
-    EXPECT_FALSE(
-        reader.read_u64_be(value)
-    );
+    EXPECT_FALSE(reader.read_u64_be(value));
 
     EXPECT_EQ(reader.position(), 0);
     EXPECT_EQ(reader.remaining(), 7);
@@ -216,18 +162,13 @@ TEST(ByteReaderTest, RejectsTruncatedU64)
 
 TEST(ByteReaderTest, RejectsTooManyBytes)
 {
-    const std::array<std::byte, 2> data{
-        std::byte{0x10},
-        std::byte{0x20}
-    };
+    const std::array<std::byte, 2> data{std::byte{0x10}, std::byte{0x20}};
 
     ByteReader reader{data};
 
     std::span<const std::byte> bytes;
 
-    EXPECT_FALSE(
-        reader.read_bytes(3, bytes)
-    );
+    EXPECT_FALSE(reader.read_bytes(3, bytes));
 
     EXPECT_EQ(reader.position(), 0);
     EXPECT_EQ(reader.remaining(), 2);
@@ -235,18 +176,13 @@ TEST(ByteReaderTest, RejectsTooManyBytes)
 
 TEST(ByteReaderTest, AllowsZeroByteRead)
 {
-    const std::array<std::byte, 2> data{
-        std::byte{0x10},
-        std::byte{0x20}
-    };
+    const std::array<std::byte, 2> data{std::byte{0x10}, std::byte{0x20}};
 
     ByteReader reader{data};
 
     std::span<const std::byte> bytes;
 
-    ASSERT_TRUE(
-        reader.read_bytes(0, bytes)
-    );
+    ASSERT_TRUE(reader.read_bytes(0, bytes));
 
     EXPECT_TRUE(bytes.empty());
     EXPECT_EQ(reader.position(), 0);
@@ -255,27 +191,16 @@ TEST(ByteReaderTest, AllowsZeroByteRead)
 
 TEST(ByteReaderTest, ReadsU48BigEndian)
 {
-    const std::array<std::byte, 6> data{
-        std::byte{0x01},
-        std::byte{0x23},
-        std::byte{0x45},
-        std::byte{0x67},
-        std::byte{0x89},
-        std::byte{0xAB}
-    };
+    const std::array<std::byte, 6> data{std::byte{0x01}, std::byte{0x23}, std::byte{0x45},
+                                        std::byte{0x67}, std::byte{0x89}, std::byte{0xAB}};
 
     ByteReader reader{data};
 
     std::uint64_t value{0};
 
-    ASSERT_TRUE(
-        reader.read_u48_be(value)
-    );
+    ASSERT_TRUE(reader.read_u48_be(value));
 
-    EXPECT_EQ(
-        value,
-        0x0123456789ABULL
-    );
+    EXPECT_EQ(value, 0x0123456789ABULL);
 
     EXPECT_EQ(reader.position(), 6);
     EXPECT_EQ(reader.remaining(), 0);
@@ -283,21 +208,14 @@ TEST(ByteReaderTest, ReadsU48BigEndian)
 
 TEST(ByteReaderTest, RejectsTruncatedU48)
 {
-    const std::array<std::byte, 5> data{
-        std::byte{0x01},
-        std::byte{0x23},
-        std::byte{0x45},
-        std::byte{0x67},
-        std::byte{0x89}
-    };
+    const std::array<std::byte, 5> data{std::byte{0x01}, std::byte{0x23}, std::byte{0x45}, std::byte{0x67},
+                                        std::byte{0x89}};
 
     ByteReader reader{data};
 
     std::uint64_t value{0};
 
-    EXPECT_FALSE(
-        reader.read_u48_be(value)
-    );
+    EXPECT_FALSE(reader.read_u48_be(value));
 
     EXPECT_EQ(reader.position(), 0);
     EXPECT_EQ(reader.remaining(), 5);
@@ -305,22 +223,15 @@ TEST(ByteReaderTest, RejectsTruncatedU48)
 
 TEST(ByteReaderTest, ReadsU48BetweenOtherFields)
 {
-    const std::array<std::byte, 9> data{
-        // u8
-        std::byte{0xAA},
+    const std::array<std::byte, 9> data{        // u8
+                                        std::byte{0xAA},
 
         // u48
-        std::byte{0x01},
-        std::byte{0x02},
-        std::byte{0x03},
-        std::byte{0x04},
-        std::byte{0x05},
-        std::byte{0x06},
+                                        std::byte{0x01}, std::byte{0x02}, std::byte{0x03}, std::byte{0x04},
+                                        std::byte{0x05}, std::byte{0x06},
 
         // u16
-        std::byte{0x12},
-        std::byte{0x34}
-    };
+                                        std::byte{0x12}, std::byte{0x34}};
 
     ByteReader reader{data};
 

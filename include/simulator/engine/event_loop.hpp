@@ -47,8 +47,8 @@ private:
     void schedule_reports(Timestamp now) noexcept
     {
         for (const ExecutionReport& report : reports_) {
-            queue_.push(SimEvent{.timestamp = now + latency_.report_latency, .type = SimEventType::ReportDeliver,
-                                 .report = report});
+            queue_.push(SimEvent{
+                .timestamp = now + latency_.report_latency, .type = SimEventType::ReportDeliver, .report = report});
         }
         reports_.clear();
     }
@@ -95,8 +95,15 @@ private:
 public:
     EventLoop(MarketEventSource& source, MarketBook& book, ExecutionSimulator& execution, Portfolio& portfolio,
               S& strategy, LatencyConfig latency, ReplayOptions options = {}, std::size_t queue_capacity = 1'024)
-        : source_(source), book_(book), execution_(execution), portfolio_(portfolio), strategy_(strategy),
-          latency_(latency), options_(options), queue_(queue_capacity), gateway_(queue_, portfolio, latency),
+        : source_(source),
+          book_(book),
+          execution_(execution),
+          portfolio_(portfolio),
+          strategy_(strategy),
+          latency_(latency),
+          options_(options),
+          queue_(queue_capacity),
+          gateway_(queue_, portfolio, latency),
           context_{book, portfolio, gateway_}
     {
         reports_.reserve(64);
@@ -162,8 +169,7 @@ public:
             until_check = options_.check_invariants_every;
             ++replay.invariant_checks;
 
-            if (!book_.check_invariants(replay.invariant_error,
-                                        in_rth(event.timestamp, options_.session_midnight))) {
+            if (!book_.check_invariants(replay.invariant_error, in_rth(event.timestamp, options_.session_midnight))) {
                 fail(ReplayFailure::InvariantViolation, to_string(replay.invariant_error));
                 break;
             }

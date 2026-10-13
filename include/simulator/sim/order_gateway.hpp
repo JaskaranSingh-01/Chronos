@@ -21,7 +21,8 @@ private:
 
 public:
     OrderGateway(SimQueue& queue, Portfolio& portfolio, LatencyConfig latency) noexcept
-        : queue_(queue), portfolio_(portfolio), latency_(latency) {}
+        : queue_(queue), portfolio_(portfolio), latency_(latency)
+    {}
 
     // Runs Portfolio::reserve; if Accepted, sets `id` and queues OrderArrive at now + order_latency.
     // Otherwise nothing is reserved or queued and `id` is untouched.
@@ -32,17 +33,18 @@ public:
             return check;
         }
         id = next_id_++;
-        queue_.push(SimEvent{.timestamp = now_ + latency_.order_latency, .type = SimEventType::OrderArrive,
-                             .order = OrderRequest{.id = id, .side = side, .price = price, .quantity = quantity,
-                                                   .time_in_force = tif}});
+        queue_.push(SimEvent{
+            .timestamp = now_ + latency_.order_latency,
+            .type = SimEventType::OrderArrive,
+            .order = OrderRequest{.id = id, .side = side, .price = price, .quantity = quantity, .time_in_force = tif}});
         return check;
     }
 
     // Queues CancelArrive at now + order_latency, behind any order sent before it.
     void cancel(OrderId id) noexcept
     {
-        queue_.push(SimEvent{.timestamp = now_ + latency_.order_latency, .type = SimEventType::CancelArrive,
-                             .order_id = id});
+        queue_.push(
+            SimEvent{.timestamp = now_ + latency_.order_latency, .type = SimEventType::CancelArrive, .order_id = id});
     }
 
     // Schedules Strategy::on_timer(timer_id) at `at`.
@@ -56,11 +58,20 @@ public:
         return true;
     }
 
-    Timestamp now() const noexcept { return now_; }
-    void set_now(Timestamp now) noexcept { now_ = now; }
+    Timestamp now() const noexcept
+    {
+        return now_;
+    }
+    void set_now(Timestamp now) noexcept
+    {
+        now_ = now;
+    }
 
     // Makes every later set_timer fail; called at the end of the market stream.
-    void stop_timers() noexcept { timers_open_ = false; }
+    void stop_timers() noexcept
+    {
+        timers_open_ = false;
+    }
 };
 
 } // namespace simulator

@@ -33,8 +33,8 @@ namespace simulator::conformance {
 
 using Violation = std::optional<std::string>;
 
-using SourceFactory = std::unique_ptr<MarketEventSource> (*)(
-    std::span<const std::byte> data, InstrumentRegistry& registry);
+using SourceFactory = std::unique_ptr<MarketEventSource> (*)(std::span<const std::byte> data,
+                                                             InstrumentRegistry& registry);
 
 struct SourceCase
 {
@@ -91,8 +91,7 @@ Violation for_each_event(MarketEventSource& source, OnEvent&& on_event)
             }
             return std::nullopt;
         case SourceResult::Error:
-            return at(source) + "Error " +
-                std::to_string(static_cast<int>(source.error())) + " on good input";
+            return at(source) + "Error " + std::to_string(static_cast<int>(source.error())) + " on good input";
         }
     }
 }
@@ -104,8 +103,7 @@ inline Violation check_time(MarketEventSource& source)
 
     return for_each_event(source, [&](const MarketEvent& event) -> Violation {
         if (event.timestamp < last) {
-            return at(source) + "timestamp " + std::to_string(event.timestamp) +
-                " is before " + std::to_string(last);
+            return at(source) + "timestamp " + std::to_string(event.timestamp) + " is before " + std::to_string(last);
         }
         last = event.timestamp;
         return std::nullopt;
@@ -126,8 +124,8 @@ inline Violation check_references(MarketEventSource& source)
         const std::uint64_t size = event.quantity.value();
 
         const auto fail = [&](std::string_view what, OrderId id) -> Violation {
-            return at(source) + std::string{type_name(event.type)} + " " + std::string{what} +
-                " id " + std::to_string(id) + " of symbol " + std::to_string(event.symbol);
+            return at(source) + std::string{type_name(event.type)} + " " + std::string{what} + " id " +
+                std::to_string(id) + " of symbol " + std::to_string(event.symbol);
         };
 
         switch (event.type) {
@@ -163,8 +161,9 @@ inline Violation check_references(MarketEventSource& source)
                 return fail("of unknown", event.order_id);
             }
             if (size > order->second) {
-                return fail("of " + std::to_string(size) + " exceeds the " +
-                    std::to_string(order->second) + " remaining of", event.order_id);
+                return fail("of " + std::to_string(size) + " exceeds the " + std::to_string(order->second) +
+                                " remaining of",
+                            event.order_id);
             }
             order->second -= size;
             if (order->second == 0) {
@@ -180,17 +179,14 @@ inline Violation check_references(MarketEventSource& source)
             return std::nullopt;
 
         case MarketEventType::Clear:
-            std::erase_if(live, [&](const auto& entry) {
-                return entry.first.first == event.symbol;
-            });
+            std::erase_if(live, [&](const auto& entry) { return entry.first.first == event.symbol; });
             return std::nullopt;
 
         case MarketEventType::Trade:
         case MarketEventType::Status:
             return std::nullopt;
         }
-        return at(source) + "unknown event type " +
-            std::to_string(static_cast<int>(event.type));
+        return at(source) + "unknown event type " + std::to_string(static_cast<int>(event.type));
     });
 }
 
@@ -209,30 +205,28 @@ inline Violation check_scales(MarketEventSource& source, const InstrumentRegistr
         }
 
         const MarketEventType type = event.type;
-        const bool limit_price = type == MarketEventType::Add ||
-            type == MarketEventType::Modify || type == MarketEventType::Replace;
+        const bool limit_price =
+            type == MarketEventType::Add || type == MarketEventType::Modify || type == MarketEventType::Replace;
         const bool needs_price = limit_price || type == MarketEventType::Trade;
-        const bool needs_size = needs_price ||
-            type == MarketEventType::Cancel || type == MarketEventType::Execute;
+        const bool needs_size = needs_price || type == MarketEventType::Cancel || type == MarketEventType::Execute;
 
         if (type == MarketEventType::Status
                 ? event.order_id != 0 || event.new_order_id != 0 || event.price.ticks != 0 ||
-                      !event.quantity.is_zero() || event.trading_state > TradingState::QuotationOnly
+                    !event.quantity.is_zero() || event.trading_state > TradingState::QuotationOnly
                 : event.trading_state != TradingState::Trading) {
             return at(source) + std::string{type_name(type)} + " with trading state " +
                 std::to_string(static_cast<int>(event.trading_state)) + " or order fields";
         }
         if (needs_price && event.price.ticks <= 0) {
-            return at(source) + std::string{type_name(type)} + " price " +
-                std::to_string(event.price.ticks) + " is not > 0";
+            return at(source) + std::string{type_name(type)} + " price " + std::to_string(event.price.ticks) +
+                " is not > 0";
         }
         if (needs_size && event.quantity.is_zero()) {
             return at(source) + std::string{type_name(type)} + " size is 0";
         }
-        if (limit_price && instrument->tick_size > 0 &&
-            event.price.ticks % instrument->tick_size != 0) {
-            return at(source) + "price " + std::to_string(event.price.ticks) +
-                " is not a multiple of tick_size " + std::to_string(instrument->tick_size);
+        if (limit_price && instrument->tick_size > 0 && event.price.ticks % instrument->tick_size != 0) {
+            return at(source) + "price " + std::to_string(event.price.ticks) + " is not a multiple of tick_size " +
+                std::to_string(instrument->tick_size);
         }
         return std::nullopt;
     });
@@ -240,10 +234,9 @@ inline Violation check_scales(MarketEventSource& source, const InstrumentRegistr
 
 inline bool same_event(const MarketEvent& a, const MarketEvent& b) noexcept
 {
-    return a.timestamp == b.timestamp && a.order_id == b.order_id &&
-        a.new_order_id == b.new_order_id && a.price == b.price &&
-        a.quantity == b.quantity && a.symbol == b.symbol &&
-        a.type == b.type && a.side == b.side && a.trading_state == b.trading_state;
+    return a.timestamp == b.timestamp && a.order_id == b.order_id && a.new_order_id == b.new_order_id &&
+        a.price == b.price && a.quantity == b.quantity && a.symbol == b.symbol && a.type == b.type &&
+        a.side == b.side && a.trading_state == b.trading_state;
 }
 
 // Two fresh sources over the same bytes and registry give identical events.
@@ -266,8 +259,7 @@ inline Violation check_determinism(MarketEventSource& first, MarketEventSource& 
 
     if (Violation violation = for_each_event(second, [&](const MarketEvent& event) -> Violation {
             if (count == events.size() || !same_event(events[count], event)) {
-                return at(second) + "event " + std::to_string(count + 1) +
-                    " differs from the first read";
+                return at(second) + "event " + std::to_string(count + 1) + " differs from the first read";
             }
             ++count;
             return std::nullopt;
@@ -275,16 +267,14 @@ inline Violation check_determinism(MarketEventSource& first, MarketEventSource& 
         return violation;
     }
     if (count != events.size()) {
-        return "the second read gave " + std::to_string(count) +
-            " events, the first " + std::to_string(events.size());
+        return "the second read gave " + std::to_string(count) + " events, the first " + std::to_string(events.size());
     }
     return std::nullopt;
 }
 
 // Bad input ends in a sticky Error with the expected error() and a non-zero,
 // expected position().
-inline Violation check_error(
-    MarketEventSource& source, SourceError expected_error, std::uint64_t expected_position)
+inline Violation check_error(MarketEventSource& source, SourceError expected_error, std::uint64_t expected_position)
 {
     MarketEvent event;
     SourceResult result;
@@ -300,15 +290,13 @@ inline Violation check_error(
     const std::uint64_t position = source.position();
 
     if (error != expected_error) {
-        return at(source) + "error " + std::to_string(static_cast<int>(error)) +
-            ", expected " + std::to_string(static_cast<int>(expected_error));
+        return at(source) + "error " + std::to_string(static_cast<int>(error)) + ", expected " +
+            std::to_string(static_cast<int>(expected_error));
     }
     if (position == 0 || position != expected_position) {
-        return at(source) + "expected position " + std::to_string(expected_position) +
-            " (non-zero)";
+        return at(source) + "expected position " + std::to_string(expected_position) + " (non-zero)";
     }
-    if (source.next(event) != SourceResult::Error ||
-        source.error() != error || source.position() != position) {
+    if (source.next(event) != SourceResult::Error || source.error() != error || source.position() != position) {
         return at(source) + "Error is not sticky";
     }
     return std::nullopt;
@@ -327,8 +315,7 @@ protected:
             return;
         }
 
-        const std::string path =
-            std::string{CHRONOS_TEST_DATA_DIR} + "/conformance/" + std::string{file};
+        const std::string path = std::string{CHRONOS_TEST_DATA_DIR} + "/conformance/" + std::string{file};
         std::ifstream in{path, std::ios::binary};
 
         ASSERT_TRUE(in) << "cannot open " << path;

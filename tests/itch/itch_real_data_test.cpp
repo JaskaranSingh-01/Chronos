@@ -62,8 +62,7 @@ TEST(ItchRealDataTest, ReplaysOneSymbolWithoutRejections)
         Outcome run;
         run.report = MarketReplay::run(source, book, options);
         run.digest = book.digest();
-        run.final_invariants = book.check_invariants(
-            run.final_error, in_rth(run.report.last_timestamp, midnight));
+        run.final_invariants = book.check_invariants(run.final_error, in_rth(run.report.last_timestamp, midnight));
         return run;
     };
 
@@ -72,11 +71,9 @@ TEST(ItchRealDataTest, ReplaysOneSymbolWithoutRejections)
 
     std::printf("[ RealData ] %.*s: %llu events, %llu applied, %llu rejected, %llu checks, digest %016llx\n",
                 static_cast<int>(config.ticker.size()), config.ticker.data(),
-                static_cast<unsigned long long>(report.events),
-                static_cast<unsigned long long>(report.applied()),
+                static_cast<unsigned long long>(report.events), static_cast<unsigned long long>(report.applied()),
                 static_cast<unsigned long long>(report.rejected()),
-                static_cast<unsigned long long>(report.invariant_checks),
-                static_cast<unsigned long long>(run.digest));
+                static_cast<unsigned long long>(report.invariant_checks), static_cast<unsigned long long>(run.digest));
     for (std::size_t type = 0; type < market_event_type_count; ++type) {
         std::printf("[ RealData ]   %-8.*s %llu\n",
                     static_cast<int>(to_string(static_cast<MarketEventType>(type)).size()),
@@ -84,21 +81,18 @@ TEST(ItchRealDataTest, ReplaysOneSymbolWithoutRejections)
                     static_cast<unsigned long long>(report.by_type[type]));
     }
 
-    ASSERT_TRUE(report.succeeded())
-        << report.message << " at position " << report.failed_position;
+    ASSERT_TRUE(report.succeeded()) << report.message << " at position " << report.failed_position;
     EXPECT_EQ(report.rejected(), 0u);
     for (std::size_t result = 1; result < apply_result_count; ++result) {
-        EXPECT_EQ(report.by_result[result], 0u)
-            << to_string(static_cast<ApplyResult>(result));
+        EXPECT_EQ(report.by_result[result], 0u) << to_string(static_cast<ApplyResult>(result));
     }
     EXPECT_GT(report.events, 0u);
     EXPECT_EQ(report.invariant_checks, report.applied() / options.check_invariants_every);
     EXPECT_TRUE(run.final_invariants) << to_string(run.final_error);
 
     // Every order-path type shows up in a liquid name, even pre-market.
-    for (const MarketEventType type : {MarketEventType::Add, MarketEventType::Execute,
-                                       MarketEventType::Cancel, MarketEventType::Delete,
-                                       MarketEventType::Replace}) {
+    for (const MarketEventType type : {MarketEventType::Add, MarketEventType::Execute, MarketEventType::Cancel,
+                                       MarketEventType::Delete, MarketEventType::Replace}) {
         EXPECT_GT(report.by_type[static_cast<std::size_t>(type)], 0u) << to_string(type);
     }
 
@@ -172,8 +166,8 @@ TEST(ItchRealDataTest, ReplaysEverySymbolWithoutRejections)
                 static_cast<unsigned long long>(total.rejected()), run.report.peak_live_orders,
                 static_cast<unsigned long long>(run.digest));
 
-    ASSERT_TRUE(total.succeeded()) << total.message << " at position " << total.failed_position
-                                   << ", symbol " << run.report.failed_symbol;
+    ASSERT_TRUE(total.succeeded()) << total.message << " at position " << total.failed_position << ", symbol "
+                                   << run.report.failed_symbol;
     EXPECT_GT(run.report.symbols.size(), 1u);
     EXPECT_GT(total.events, 0u);
     for (std::size_t result = 1; result < apply_result_count; ++result) {

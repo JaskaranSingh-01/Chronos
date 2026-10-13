@@ -2,46 +2,36 @@
 
 namespace simulator {
 
-void Order::initialize(
-        OrderId id,
-        Side side,
-        Price price,
-        Quantity quantity,
-        Timestamp timestamp
-    ) noexcept
-    {
-        id_ = id;
-        side_ = side;
-        price_ = price;
+void Order::initialize(OrderId id, Side side, Price price, Quantity quantity, Timestamp timestamp) noexcept
+{
+    id_ = id;
+    side_ = side;
+    price_ = price;
 
-        quantity_ = quantity;
-        remaining_quantity_ = quantity;
+    quantity_ = quantity;
+    remaining_quantity_ = quantity;
 
-        state_ = OrderState::New;
-        timestamp_ = timestamp;
-        sequence_ = 0;
+    state_ = OrderState::New;
+    timestamp_ = timestamp;
+    sequence_ = 0;
 
-        prev_ = nullptr;
-        next_ = nullptr;
-        level_ = nullptr;
-    }
+    prev_ = nullptr;
+    next_ = nullptr;
+    level_ = nullptr;
+}
 
-Order::Order(
-    OrderId id,
-    Side side,
-    Price price,
-    Quantity quantity,
-    Timestamp timestamp
-) noexcept
+Order::Order(OrderId id, Side side, Price price, Quantity quantity, Timestamp timestamp) noexcept
     : id_(id),
       price_(price),
       quantity_(quantity),
       remaining_quantity_(quantity),
       timestamp_(timestamp),
       side_(side),
-      state_(OrderState::New) {}
+      state_(OrderState::New)
+{}
 
-bool Order::activate() noexcept {
+bool Order::activate() noexcept
+{
     if (state_ != OrderState::New) {
         return false;
     }
@@ -50,13 +40,13 @@ bool Order::activate() noexcept {
     return true;
 }
 
-bool Order::execute(Quantity executed) noexcept {
+bool Order::execute(Quantity executed) noexcept
+{
     if (executed.is_zero()) {
         return false;
     }
 
-    if (state_ != OrderState::Active &&
-        state_ != OrderState::PartiallyFilled) {
+    if (state_ != OrderState::Active && state_ != OrderState::PartiallyFilled) {
         return false;
     }
 
@@ -81,8 +71,7 @@ bool Order::cancel(Quantity cancelled) noexcept
         return false;
     }
 
-    if (state_ != OrderState::Active &&
-        state_ != OrderState::PartiallyFilled) {
+    if (state_ != OrderState::Active && state_ != OrderState::PartiallyFilled) {
         return false;
     }
 
@@ -90,8 +79,7 @@ bool Order::cancel(Quantity cancelled) noexcept
         return false;
     }
 
-    remaining_quantity_ =
-        remaining_quantity_ - cancelled;
+    remaining_quantity_ = remaining_quantity_ - cancelled;
 
     if (remaining_quantity_.is_zero()) {
         state_ = OrderState::Cancelled;
@@ -102,8 +90,7 @@ bool Order::cancel(Quantity cancelled) noexcept
 
 bool Order::delete_order() noexcept
 {
-    if (state_ != OrderState::Active &&
-        state_ != OrderState::PartiallyFilled) {
+    if (state_ != OrderState::Active && state_ != OrderState::PartiallyFilled) {
         return false;
     }
 
@@ -113,41 +100,48 @@ bool Order::delete_order() noexcept
     return true;
 }
 
-bool Order::cancel() noexcept {
-    if (state_ != OrderState::Active &&
-        state_ != OrderState::PartiallyFilled) {
+bool Order::cancel() noexcept
+{
+    if (state_ != OrderState::Active && state_ != OrderState::PartiallyFilled) {
         return false;
     }
-    
+
     state_ = OrderState::Cancelled;
     return true;
 }
 
-OrderId Order::id() const noexcept {
+OrderId Order::id() const noexcept
+{
     return id_;
 }
 
-Side Order::side() const noexcept {
+Side Order::side() const noexcept
+{
     return side_;
 }
 
-Price Order::price() const noexcept {
+Price Order::price() const noexcept
+{
     return price_;
 }
 
-Quantity Order::quantity() const noexcept {
+Quantity Order::quantity() const noexcept
+{
     return quantity_;
 }
 
-Quantity Order::remaining_quantity() const noexcept {
+Quantity Order::remaining_quantity() const noexcept
+{
     return remaining_quantity_;
 }
 
-OrderState Order::state() const noexcept {
+OrderState Order::state() const noexcept
+{
     return state_;
 }
 
-Timestamp Order::timestamp() const noexcept {
+Timestamp Order::timestamp() const noexcept
+{
     return timestamp_;
 }
 

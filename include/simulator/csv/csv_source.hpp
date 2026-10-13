@@ -28,7 +28,8 @@ private:
 
 public:
     CsvSource(std::span<const std::byte> data, SymbolId symbol) noexcept
-        : text_(reinterpret_cast<const char*>(data.data()), data.size()), symbol_(symbol) {}
+        : text_(reinterpret_cast<const char*>(data.data()), data.size()), symbol_(symbol)
+    {}
 
     SourceResult next(MarketEvent& event) noexcept override;
 

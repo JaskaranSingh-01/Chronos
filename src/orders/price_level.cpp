@@ -2,7 +2,8 @@
 
 namespace simulator {
 
-bool PriceLevel::add(Order& order) noexcept {
+bool PriceLevel::add(Order& order) noexcept
+{
     if (order.price() != price_) {
         return false;
     }
@@ -29,7 +30,8 @@ bool PriceLevel::add(Order& order) noexcept {
     return true;
 }
 
-bool PriceLevel::remove(Order& order) noexcept {
+bool PriceLevel::remove(Order& order) noexcept
+{
     if (order.level_ != this) {
         return false;
     }

@@ -16,11 +16,15 @@ namespace {
 
 constexpr SymbolId kSymbol = 3;
 
-MarketEvent event(Timestamp ts, MarketEventType type, OrderId id, std::uint64_t quantity = 0,
-                  std::int64_t price = 0, Side side = Side::Buy)
+MarketEvent event(Timestamp ts, MarketEventType type, OrderId id, std::uint64_t quantity = 0, std::int64_t price = 0,
+                  Side side = Side::Buy)
 {
-    return MarketEvent{.timestamp = ts, .order_id = id, .price = Price{price},
-                       .quantity = Quantity{quantity}, .symbol = kSymbol, .type = type,
+    return MarketEvent{.timestamp = ts,
+                       .order_id = id,
+                       .price = Price{price},
+                       .quantity = Quantity{quantity},
+                       .symbol = kSymbol,
+                       .type = type,
                        .side = side};
 }
 
@@ -55,7 +59,8 @@ class FailingSource final : public MarketEventSource
 
 public:
     FailingSource(std::span<const MarketEvent> events, SourceError error, std::uint64_t position)
-        : events_(events), error_(error), position_(position) {}
+        : events_(events), error_(error), position_(position)
+    {}
 
     SourceResult next(MarketEvent& e) noexcept override
     {
@@ -65,21 +70,24 @@ public:
         failed_ = true;
         return SourceResult::Error;
     }
-    std::uint64_t position() const noexcept override { return failed_ ? position_ : events_.position(); }
-    SourceError error() const noexcept override { return failed_ ? error_ : SourceError::None; }
+    std::uint64_t position() const noexcept override
+    {
+        return failed_ ? position_ : events_.position();
+    }
+    SourceError error() const noexcept override
+    {
+        return failed_ ? error_ : SourceError::None;
+    }
 };
 
 TEST(MarketReplayTest, CountsEveryEventByTypeAndResult)
 {
     using T = MarketEventType;
     std::vector<MarketEvent> input{
-        add(10, 1, Side::Buy, 100, 500),
-        add(10, 2, Side::Sell, 101, 300),  // equal timestamps are in order
-        event(20, T::Execute, 1, 100),
-        event(30, T::Cancel, 2, 100),
+        add(10, 1, Side::Buy, 100, 500), add(10, 2, Side::Sell, 101, 300),  // equal timestamps are in order
+        event(20, T::Execute, 1, 100),   event(30, T::Cancel, 2, 100),
         event(40, T::Replace, 2, 200),     // new_order_id set below
-        event(50, T::Trade, 0, 50, 100),
-        event(60, T::Delete, 1)};
+        event(50, T::Trade, 0, 50, 100), event(60, T::Delete, 1)};
     input[4].new_order_id = 3;
     input[4].price = Price{102};
 
@@ -126,15 +134,14 @@ TEST(MarketReplayTest, CountsRejectionsByReasonAndKeepsGoing)
     MarketEvent wrong_symbol = add(7, 9, Side::Buy, 100, 10);
     wrong_symbol.symbol = kSymbol + 1;
 
-    const std::vector<MarketEvent> input{
-        add(1, 1, Side::Buy, 100, 10),
-        add(2, 1, Side::Buy, 100, 10),   // DuplicateOrder
-        event(3, T::Delete, 42),         // UnknownOrder
-        event(4, T::Execute, 1, 11),     // ExceedsRemaining
-        add(5, 2, Side::Buy, 100, 0),    // ZeroQuantity
-        event(6, T::Modify, 1, 5, 100),  // Unsupported
-        wrong_symbol,                    // WrongSymbol
-        event(8, T::Execute, 1, 10)};    // still applied after all of that
+    const std::vector<MarketEvent> input{add(1, 1, Side::Buy, 100, 10),
+                                         add(2, 1, Side::Buy, 100, 10),   // DuplicateOrder
+                                         event(3, T::Delete, 42),         // UnknownOrder
+                                         event(4, T::Execute, 1, 11),     // ExceedsRemaining
+                                         add(5, 2, Side::Buy, 100, 0),    // ZeroQuantity
+                                         event(6, T::Modify, 1, 5, 100),  // Unsupported
+                                         wrong_symbol,                    // WrongSymbol
+                                         event(8, T::Execute, 1, 10)};    // still applied after all of that
 
     VectorSource source{input};
     MarketBook book{kSymbol, 4};
@@ -157,11 +164,9 @@ TEST(MarketReplayTest, CountsRejectionsByReasonAndKeepsGoing)
 
 TEST(MarketReplayTest, OutOfOrderTimestampIsFatalAndNotApplied)
 {
-    const std::vector<MarketEvent> input{
-        add(10, 1, Side::Buy, 100, 10),
-        add(20, 2, Side::Buy, 100, 10),
-        add(19, 3, Side::Buy, 100, 10),  // earlier than the event before it
-        add(30, 4, Side::Buy, 100, 10)};
+    const std::vector<MarketEvent> input{add(10, 1, Side::Buy, 100, 10), add(20, 2, Side::Buy, 100, 10),
+                                         add(19, 3, Side::Buy, 100, 10),  // earlier than the event before it
+                                         add(30, 4, Side::Buy, 100, 10)};
 
     VectorSource source{input};
     MarketBook book{kSymbol, 8};
@@ -218,11 +223,10 @@ TEST(MarketReplayTest, CrossedBookFailsTheInvariantCheckOnlyInRth)
     constexpr Timestamp open = midnight + RTH_OPEN_NS;
 
     // A bid above the ask: legitimate pre-market, a violation in RTH.
-    const std::vector<MarketEvent> before_open{
-        add(pre_market, 1, Side::Buy, 101, 10), add(pre_market, 2, Side::Sell, 100, 10)};
-    const std::vector<MarketEvent> after_open{
-        add(open, 1, Side::Buy, 101, 10), add(open, 2, Side::Sell, 100, 10),
-        add(open, 3, Side::Sell, 102, 10)};
+    const std::vector<MarketEvent> before_open{add(pre_market, 1, Side::Buy, 101, 10),
+                                               add(pre_market, 2, Side::Sell, 100, 10)};
+    const std::vector<MarketEvent> after_open{add(open, 1, Side::Buy, 101, 10), add(open, 2, Side::Sell, 100, 10),
+                                              add(open, 3, Side::Sell, 102, 10)};
     const ReplayOptions options{.check_invariants_every = 1, .session_midnight = midnight};
 
     VectorSource quiet{before_open};
@@ -248,9 +252,8 @@ TEST(MarketReplayTest, HaltedBookMayCrossInRthUntilTradingResumes)
     constexpr Timestamp midnight = 1'577'682'000'000'000'000;
     constexpr Timestamp open = midnight + RTH_OPEN_NS;
 
-    const std::vector<MarketEvent> events{
-        status(open, TradingState::Halted), add(open, 1, Side::Buy, 101, 10), add(open, 2, Side::Sell, 100, 10),
-        status(open, TradingState::Trading)};
+    const std::vector<MarketEvent> events{status(open, TradingState::Halted), add(open, 1, Side::Buy, 101, 10),
+                                          add(open, 2, Side::Sell, 100, 10), status(open, TradingState::Trading)};
     const ReplayOptions options{.check_invariants_every = 1, .session_midnight = midnight};
 
     VectorSource source{events};
@@ -323,8 +326,7 @@ TEST(MarketReplayTest, LatencyRecordsOneSamplePerFullBatchAndChangesNothingElse)
     LatencyHistogram latency;
 
     const ReplayReport plain = MarketReplay::run(plain_source, plain_book, {});
-    const ReplayReport timed =
-        MarketReplay::run(timed_source, timed_book, {.latency = &latency, .latency_batch = 4});
+    const ReplayReport timed = MarketReplay::run(timed_source, timed_book, {.latency = &latency, .latency_batch = 4});
 
     EXPECT_EQ(latency.count(), 2u);  // events 1-4 and 5-8; 9-11 are a partial batch
     EXPECT_EQ(timed, plain);
@@ -360,12 +362,9 @@ TEST(MarketReplayBooksTest, RoutesEachEventToTheBookOfItsSymbol)
     using T = MarketEventType;
     const InstrumentRegistry registry = registry_of(3);
     const std::vector<MarketEvent> input{
-        on(0, add(1, 1, Side::Buy, 100, 10)),
-        on(2, add(2, 1, Side::Sell, 200, 5)),  // the same id in another book
-        on(2, add(3, 2, Side::Sell, 201, 5)),
-        on(0, event(4, T::Execute, 1, 4)),
-        on(2, event(5, T::Delete, 1)),
-        on(2, event(6, T::Delete, 7)),           // UnknownOrder
+        on(0, add(1, 1, Side::Buy, 100, 10)), on(2, add(2, 1, Side::Sell, 200, 5)),  // the same id in another book
+        on(2, add(3, 2, Side::Sell, 201, 5)), on(0, event(4, T::Execute, 1, 4)),
+        on(2, event(5, T::Delete, 1)),        on(2, event(6, T::Delete, 7)),           // UnknownOrder
         on(9, add(7, 3, Side::Buy, 100, 10))};  // not registered: WrongSymbol
 
     OrderPool pool{8};
@@ -413,12 +412,10 @@ TEST(MarketReplayBooksTest, RoutesEachEventToTheBookOfItsSymbol)
 TEST(MarketReplayBooksTest, AFullSharedPoolRejectsAddsAsPoolExhausted)
 {
     const InstrumentRegistry registry = registry_of(2);
-    const std::vector<MarketEvent> input{
-        on(0, add(1, 1, Side::Buy, 100, 10)),
-        on(1, add(2, 1, Side::Buy, 100, 10)),
-        on(1, add(3, 2, Side::Buy, 100, 10)),  // no free slot
-        on(0, event(4, MarketEventType::Delete, 1)),
-        on(1, add(5, 2, Side::Buy, 100, 10))};
+    const std::vector<MarketEvent> input{on(0, add(1, 1, Side::Buy, 100, 10)), on(1, add(2, 1, Side::Buy, 100, 10)),
+                                         on(1, add(3, 2, Side::Buy, 100, 10)),  // no free slot
+                                         on(0, event(4, MarketEventType::Delete, 1)),
+                                         on(1, add(5, 2, Side::Buy, 100, 10))};
 
     OrderPool pool{2};
     MarketBooks books{registry, pool};
@@ -439,10 +436,8 @@ TEST(MarketReplayBooksTest, ChecksTheTouchedBookEveryNAppliedEventsAndNamesTheFa
     constexpr Timestamp open = midnight + RTH_OPEN_NS;
     const InstrumentRegistry registry = registry_of(2);
     const std::vector<MarketEvent> input{
-        on(0, add(open, 1, Side::Buy, 101, 10)),
-        on(0, add(open, 2, Side::Sell, 102, 10)),
-        on(1, add(open, 1, Side::Buy, 101, 10)),
-        on(1, add(open, 2, Side::Sell, 100, 10)),  // crosses book 1 in RTH
+        on(0, add(open, 1, Side::Buy, 101, 10)), on(0, add(open, 2, Side::Sell, 102, 10)),
+        on(1, add(open, 1, Side::Buy, 101, 10)), on(1, add(open, 2, Side::Sell, 100, 10)),  // crosses book 1 in RTH
         on(0, add(open, 3, Side::Sell, 103, 10))};
 
     OrderPool pool{8};
@@ -508,8 +503,8 @@ TEST(MarketReplayBooksTest, CombinedDigestIsStableAndChangesWithAnyBook)
         const OrderId id = 1 + rng() % next_id;
         if (rng() % 2 == 0) {
             const Side side = rng() % 2 ? Side::Buy : Side::Sell;
-            input.push_back(on(symbol, add(ts, next_id++, side, 90 + static_cast<std::int64_t>(rng() % 20),
-                                           1 + rng() % 500)));
+            input.push_back(
+                on(symbol, add(ts, next_id++, side, 90 + static_cast<std::int64_t>(rng() % 20), 1 + rng() % 500)));
         } else {
             input.push_back(on(symbol, event(ts, rng() % 2 ? T::Execute : T::Delete, id, 1 + rng() % 100)));
         }

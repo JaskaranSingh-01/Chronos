@@ -25,12 +25,17 @@ void ExecutionSimulator::fill(ShadowOrder& order, std::uint64_t quantity, Timest
 {
     order.remaining -= quantity;
     ++statistics_.maker_fills;
-    ++statistics_.fills_by[static_cast<std::size_t>(cause)]
-                          [static_cast<std::size_t>(session_phase(now, session_midnight_))];
+    ++statistics_
+          .fills_by[static_cast<std::size_t>(cause)][static_cast<std::size_t>(session_phase(now, session_midnight_))];
     statistics_.maker_quantity += quantity;
-    out.push_back(ExecutionReport{.exchange_time = now, .order_id = order.id, .price = order.price,
-                                  .quantity = Quantity{quantity}, .leaves = Quantity{order.remaining},
-                                  .type = ReportType::Fill, .liquidity = Liquidity::Maker, .side = order.side});
+    out.push_back(ExecutionReport{.exchange_time = now,
+                                  .order_id = order.id,
+                                  .price = order.price,
+                                  .quantity = Quantity{quantity},
+                                  .leaves = Quantity{order.remaining},
+                                  .type = ReportType::Fill,
+                                  .liquidity = Liquidity::Maker,
+                                  .side = order.side});
 }
 
 void ExecutionSimulator::cross(Side side, Price price, std::uint64_t quantity, Timestamp now, FillCause cause,
@@ -74,8 +79,9 @@ void ExecutionSimulator::on_market(const MarketEvent& event, const MarketBook& b
         const bool reduce = event.type == MarketEventType::Execute || event.type == MarketEventType::Cancel;
         const bool replace = event.type == MarketEventType::Replace;
         if ((reduce && (event.quantity.is_zero() || event.quantity > h->remaining_quantity())) ||
-            (replace && (event.new_order_id == event.order_id || book.find(event.new_order_id) != nullptr ||
-                         event.quantity.is_zero()))) {
+            (replace &&
+             (event.new_order_id == event.order_id || book.find(event.new_order_id) != nullptr ||
+              event.quantity.is_zero()))) {
             return;
         }
 
@@ -102,11 +108,12 @@ void ExecutionSimulator::on_market(const MarketEvent& event, const MarketBook& b
                     : (with_price ? FillCause::RuleDExecuteWithPrice : FillCause::RuleDExecute);
                 if (o.ahead_quantity != 0) {
                     ++statistics_.fifo_anomalies;
-                    ++statistics_.anomalies_by[static_cast<std::size_t>(cause)]
-                                              [static_cast<std::size_t>(session_phase(event.timestamp,
-                                                                                      session_midnight_))];
+                    ++statistics_.anomalies_by[static_cast<std::size_t>(cause)][static_cast<std::size_t>(
+                        session_phase(event.timestamp, session_midnight_))];
                     if (anomalies_.size() < max_fifo_anomaly_samples) {
-                        anomalies_.push_back(FifoAnomaly{.event = event, .h_price = h->price(), .h_side = side,
+                        anomalies_.push_back(FifoAnomaly{.event = event,
+                                                         .h_price = h->price(),
+                                                         .h_side = side,
                                                          .h_sequence = h->sequence(),
                                                          .h_remaining = h->remaining_quantity().value(),
                                                          .order = o,
@@ -147,14 +154,21 @@ void ExecutionSimulator::on_order_arrive(const OrderRequest& request, Timestamp 
         ++statistics_.would_cross_rejects;
     }
     if (reason != RejectReason::None) {
-        out.push_back(ExecutionReport{.exchange_time = now, .order_id = request.id, .quantity = request.quantity,
-                                      .type = ReportType::Rejected, .reason = reason, .side = request.side});
+        out.push_back(ExecutionReport{.exchange_time = now,
+                                      .order_id = request.id,
+                                      .quantity = request.quantity,
+                                      .type = ReportType::Rejected,
+                                      .reason = reason,
+                                      .side = request.side});
         return;
     }
 
     if (request.time_in_force == TimeInForce::Day) {
-        const ShadowOrder order{.id = request.id, .side = request.side, .price = request.price,
-                                .remaining = request.quantity.value(), .anchor_sequence = book.last_sequence(),
+        const ShadowOrder order{.id = request.id,
+                                .side = request.side,
+                                .price = request.price,
+                                .remaining = request.quantity.value(),
+                                .anchor_sequence = book.last_sequence(),
                                 .ahead_quantity = book.quantity_at(request.side, request.price)};
         // Behind every order of ours on this side at a price at least as good.
         orders_.insert(std::find_if(orders_.begin(), orders_.end(),
@@ -163,8 +177,11 @@ void ExecutionSimulator::on_order_arrive(const OrderRequest& request, Timestamp 
                                     }),
                        order);
         statistics_.accepted_quantity += order.remaining;
-        out.push_back(ExecutionReport{.exchange_time = now, .order_id = request.id, .quantity = request.quantity,
-                                      .leaves = request.quantity, .type = ReportType::Accepted,
+        out.push_back(ExecutionReport{.exchange_time = now,
+                                      .order_id = request.id,
+                                      .quantity = request.quantity,
+                                      .leaves = request.quantity,
+                                      .type = ReportType::Accepted,
                                       .side = request.side});
         return;
     }
@@ -179,16 +196,22 @@ void ExecutionSimulator::on_order_arrive(const OrderRequest& request, Timestamp 
         remaining -= filled;
         ++statistics_.taker_fills;
         statistics_.taker_quantity += filled;
-        out.push_back(ExecutionReport{.exchange_time = now, .order_id = request.id, .price = level.price,
-                                      .quantity = Quantity{filled}, .leaves = Quantity{remaining},
-                                      .type = ReportType::Fill, .liquidity = Liquidity::Taker,
+        out.push_back(ExecutionReport{.exchange_time = now,
+                                      .order_id = request.id,
+                                      .price = level.price,
+                                      .quantity = Quantity{filled},
+                                      .leaves = Quantity{remaining},
+                                      .type = ReportType::Fill,
+                                      .liquidity = Liquidity::Taker,
                                       .side = request.side});
         return remaining > 0;
     });
 
     if (remaining > 0) {
-        out.push_back(ExecutionReport{.exchange_time = now, .order_id = request.id,
-                                      .quantity = Quantity{remaining}, .type = ReportType::Expired,
+        out.push_back(ExecutionReport{.exchange_time = now,
+                                      .order_id = request.id,
+                                      .quantity = Quantity{remaining},
+                                      .type = ReportType::Expired,
                                       .side = request.side});
     }
 }
@@ -202,8 +225,11 @@ void ExecutionSimulator::on_cancel_arrive(OrderId id, Timestamp now, std::vector
         return;
     }
     ++statistics_.cancelled;
-    out.push_back(ExecutionReport{.exchange_time = now, .order_id = id, .quantity = Quantity{it->remaining},
-                                  .type = ReportType::Cancelled, .side = it->side});
+    out.push_back(ExecutionReport{.exchange_time = now,
+                                  .order_id = id,
+                                  .quantity = Quantity{it->remaining},
+                                  .type = ReportType::Cancelled,
+                                  .side = it->side});
     orders_.erase(it);
 }
 

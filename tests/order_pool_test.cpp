@@ -18,13 +18,7 @@ TEST(OrderPoolTest, AcquireReturnsOrder)
 {
     OrderPool pool{10};
 
-    Order* order = pool.acquire(
-        1,
-        Side::Buy,
-        Price{100},
-        Quantity{50},
-        Timestamp{10}
-    );
+    Order* order = pool.acquire(1, Side::Buy, Price{100}, Quantity{50}, Timestamp{10});
 
     ASSERT_NE(order, nullptr);
 
@@ -44,21 +38,9 @@ TEST(OrderPoolTest, AcquireReturnsDistinctOrders)
 {
     OrderPool pool{10};
 
-    Order* order1 = pool.acquire(
-        1,
-        Side::Buy,
-        Price{100},
-        Quantity{50},
-        Timestamp{10}
-    );
+    Order* order1 = pool.acquire(1, Side::Buy, Price{100}, Quantity{50}, Timestamp{10});
 
-    Order* order2 = pool.acquire(
-        2,
-        Side::Sell,
-        Price{101},
-        Quantity{75},
-        Timestamp{20}
-    );
+    Order* order2 = pool.acquire(2, Side::Sell, Price{101}, Quantity{75}, Timestamp{20});
 
     ASSERT_NE(order1, nullptr);
     ASSERT_NE(order2, nullptr);
@@ -76,21 +58,9 @@ TEST(OrderPoolTest, ReturnsNullWhenPoolIsExhausted)
 {
     OrderPool pool{2};
 
-    Order* order1 = pool.acquire(
-        1,
-        Side::Buy,
-        Price{100},
-        Quantity{50},
-        Timestamp{10}
-    );
+    Order* order1 = pool.acquire(1, Side::Buy, Price{100}, Quantity{50}, Timestamp{10});
 
-    Order* order2 = pool.acquire(
-        2,
-        Side::Sell,
-        Price{101},
-        Quantity{50},
-        Timestamp{20}
-    );
+    Order* order2 = pool.acquire(2, Side::Sell, Price{101}, Quantity{50}, Timestamp{20});
 
     ASSERT_NE(order1, nullptr);
     ASSERT_NE(order2, nullptr);
@@ -98,13 +68,7 @@ TEST(OrderPoolTest, ReturnsNullWhenPoolIsExhausted)
     EXPECT_EQ(pool.available(), 0);
     EXPECT_EQ(pool.in_use(), 2);
 
-    Order* order3 = pool.acquire(
-        3,
-        Side::Buy,
-        Price{102},
-        Quantity{50},
-        Timestamp{30}
-    );
+    Order* order3 = pool.acquire(3, Side::Buy, Price{102}, Quantity{50}, Timestamp{30});
 
     EXPECT_EQ(order3, nullptr);
 
@@ -116,13 +80,7 @@ TEST(OrderPoolTest, ReleaseMakesSlotAvailable)
 {
     OrderPool pool{2};
 
-    Order* order = pool.acquire(
-        1,
-        Side::Buy,
-        Price{100},
-        Quantity{50},
-        Timestamp{10}
-    );
+    Order* order = pool.acquire(1, Side::Buy, Price{100}, Quantity{50}, Timestamp{10});
 
     ASSERT_NE(order, nullptr);
 
@@ -139,13 +97,7 @@ TEST(OrderPoolTest, RejectsDuplicateRelease)
 {
     OrderPool pool{1};
 
-    Order* order = pool.acquire(
-        1,
-        Side::Buy,
-        Price{100},
-        Quantity{50},
-        Timestamp{10}
-    );
+    Order* order = pool.acquire(1, Side::Buy, Price{100}, Quantity{50}, Timestamp{10});
 
     ASSERT_NE(order, nullptr);
     ASSERT_TRUE(pool.release(*order));
@@ -159,25 +111,13 @@ TEST(OrderPoolTest, ReleasedOrderSlotCanBeReused)
 {
     OrderPool pool{1};
 
-    Order* first = pool.acquire(
-        1,
-        Side::Buy,
-        Price{100},
-        Quantity{50},
-        Timestamp{10}
-    );
+    Order* first = pool.acquire(1, Side::Buy, Price{100}, Quantity{50}, Timestamp{10});
 
     ASSERT_NE(first, nullptr);
 
     EXPECT_TRUE(pool.release(*first));
 
-    Order* second = pool.acquire(
-        2,
-        Side::Sell,
-        Price{101},
-        Quantity{75},
-        Timestamp{20}
-    );
+    Order* second = pool.acquire(2, Side::Sell, Price{101}, Quantity{75}, Timestamp{20});
 
     ASSERT_NE(second, nullptr);
 
@@ -196,41 +136,21 @@ TEST(OrderPoolTest, ReusedOrderIsFullyReset)
 {
     OrderPool pool{1};
 
-    Order* order = pool.acquire(
-        1,
-        Side::Buy,
-        Price{100},
-        Quantity{100},
-        Timestamp{10}
-    );
+    Order* order = pool.acquire(1, Side::Buy, Price{100}, Quantity{100}, Timestamp{10});
 
     ASSERT_NE(order, nullptr);
 
     ASSERT_TRUE(order->activate());
 
-    ASSERT_TRUE(
-        order->execute(Quantity{40})
-    );
+    ASSERT_TRUE(order->execute(Quantity{40}));
 
-    EXPECT_EQ(
-        order->state(),
-        OrderState::PartiallyFilled
-    );
+    EXPECT_EQ(order->state(), OrderState::PartiallyFilled);
 
-    EXPECT_EQ(
-        order->remaining_quantity(),
-        Quantity{60}
-    );
+    EXPECT_EQ(order->remaining_quantity(), Quantity{60});
 
     ASSERT_TRUE(pool.release(*order));
 
-    Order* reused = pool.acquire(
-        2,
-        Side::Sell,
-        Price{200},
-        Quantity{300},
-        Timestamp{20}
-    );
+    Order* reused = pool.acquire(2, Side::Sell, Price{200}, Quantity{300}, Timestamp{20});
 
     ASSERT_NE(reused, nullptr);
 
@@ -238,25 +158,13 @@ TEST(OrderPoolTest, ReusedOrderIsFullyReset)
     EXPECT_EQ(reused->side(), Side::Sell);
     EXPECT_EQ(reused->price(), Price{200});
 
-    EXPECT_EQ(
-        reused->quantity(),
-        Quantity{300}
-    );
+    EXPECT_EQ(reused->quantity(), Quantity{300});
 
-    EXPECT_EQ(
-        reused->remaining_quantity(),
-        Quantity{300}
-    );
+    EXPECT_EQ(reused->remaining_quantity(), Quantity{300});
 
-    EXPECT_EQ(
-        reused->state(),
-        OrderState::New
-    );
+    EXPECT_EQ(reused->state(), OrderState::New);
 
-    EXPECT_EQ(
-        reused->timestamp(),
-        Timestamp{20}
-    );
+    EXPECT_EQ(reused->timestamp(), Timestamp{20});
 }
 
 TEST(OrderPoolTest, RejectsOrderFromAnotherPool)
@@ -264,13 +172,7 @@ TEST(OrderPoolTest, RejectsOrderFromAnotherPool)
     OrderPool pool1{1};
     OrderPool pool2{1};
 
-    Order* order = pool1.acquire(
-        1,
-        Side::Buy,
-        Price{100},
-        Quantity{50},
-        Timestamp{10}
-    );
+    Order* order = pool1.acquire(1, Side::Buy, Price{100}, Quantity{50}, Timestamp{10});
 
     ASSERT_NE(order, nullptr);
 
@@ -287,13 +189,7 @@ TEST(OrderPoolTest, RejectsOrderNotOwnedByPool)
 {
     OrderPool pool{1};
 
-    Order external_order{
-        100,
-        Side::Buy,
-        Price{100},
-        Quantity{50},
-        Timestamp{10}
-    };
+    Order external_order{100, Side::Buy, Price{100}, Quantity{50}, Timestamp{10}};
 
     EXPECT_FALSE(pool.release(external_order));
 
@@ -305,29 +201,11 @@ TEST(OrderPoolTest, HandlesMultipleAcquireReleaseOperations)
 {
     OrderPool pool{3};
 
-    Order* order1 = pool.acquire(
-        1,
-        Side::Buy,
-        Price{100},
-        Quantity{10},
-        Timestamp{1}
-    );
+    Order* order1 = pool.acquire(1, Side::Buy, Price{100}, Quantity{10}, Timestamp{1});
 
-    Order* order2 = pool.acquire(
-        2,
-        Side::Buy,
-        Price{101},
-        Quantity{20},
-        Timestamp{2}
-    );
+    Order* order2 = pool.acquire(2, Side::Buy, Price{101}, Quantity{20}, Timestamp{2});
 
-    Order* order3 = pool.acquire(
-        3,
-        Side::Sell,
-        Price{102},
-        Quantity{30},
-        Timestamp{3}
-    );
+    Order* order3 = pool.acquire(3, Side::Sell, Price{102}, Quantity{30}, Timestamp{3});
 
     ASSERT_NE(order1, nullptr);
     ASSERT_NE(order2, nullptr);
@@ -341,13 +219,7 @@ TEST(OrderPoolTest, HandlesMultipleAcquireReleaseOperations)
     EXPECT_EQ(pool.available(), 1);
     EXPECT_EQ(pool.in_use(), 2);
 
-    Order* order4 = pool.acquire(
-        4,
-        Side::Sell,
-        Price{103},
-        Quantity{40},
-        Timestamp{4}
-    );
+    Order* order4 = pool.acquire(4, Side::Sell, Price{103}, Quantity{40}, Timestamp{4});
 
     ASSERT_NE(order4, nullptr);
 

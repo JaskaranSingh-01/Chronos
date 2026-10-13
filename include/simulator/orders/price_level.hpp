@@ -9,7 +9,8 @@
 namespace simulator {
 
 // FIFO of the orders at one price, intrusively linked through Order::prev_/next_.
-class PriceLevel {
+class PriceLevel
+{
 private:
     Price price_{};
 
@@ -21,39 +22,47 @@ private:
 
 public:
     explicit PriceLevel(Price price) noexcept
-        : price_(price) {}
+        : price_(price)
+    {}
 
     bool add(Order& order) noexcept;
 
     bool remove(Order& order) noexcept;
 
     // Call after a partial execute or cancel drops an order's remaining by `quantity`.
-    void reduce(Quantity quantity) noexcept {
+    void reduce(Quantity quantity) noexcept
+    {
         assert(quantity.value() <= total_quantity_);
         total_quantity_ -= quantity.value();
     }
 
-    Order* front() noexcept {
+    Order* front() noexcept
+    {
         return head_;
     }
 
-    const Order* front() const noexcept {
+    const Order* front() const noexcept
+    {
         return head_;
     }
 
-    constexpr Price price() const noexcept {
+    constexpr Price price() const noexcept
+    {
         return price_;
     }
 
-    constexpr std::uint32_t order_count() const noexcept {
+    constexpr std::uint32_t order_count() const noexcept
+    {
         return order_count_;
     }
 
-    constexpr std::uint64_t total_quantity() const noexcept {
+    constexpr std::uint64_t total_quantity() const noexcept
+    {
         return total_quantity_;
     }
 
-    constexpr bool empty() const noexcept {
+    constexpr bool empty() const noexcept
+    {
         return head_ == nullptr;
     }
 };

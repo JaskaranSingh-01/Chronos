@@ -25,20 +25,24 @@ struct Fixture
     ImbalanceTaker taker;
     OrderId next_id{1};
 
-    explicit Fixture(ImbalanceTakerParams params = {.threshold = 3.0, .clip = 100, .max_position = 200,
-                                                    .cooldown_ns = 1'000},
-                     std::size_t max_open_orders = 8)
+    explicit Fixture(
+        ImbalanceTakerParams params = {.threshold = 3.0, .clip = 100, .max_position = 200, .cooldown_ns = 1'000},
+        std::size_t max_open_orders = 8)
         : portfolio(kEquity,
-                    RiskLimits{.max_position = 1'000, .max_order_quantity = Quantity{100},
-                               .max_open_orders = max_open_orders},
+                    RiskLimits{
+                        .max_position = 1'000, .max_order_quantity = Quantity{100}, .max_open_orders = max_open_orders},
                     FeeSchedule{}),
-          taker(params) {}
+          taker(params)
+    {}
 
     // Adds one order of `quantity` at our fixed bid or ask price.
     void add(Side side, std::uint64_t quantity)
     {
-        const MarketEvent event{.order_id = next_id++, .price = Price{side == Side::Buy ? kBid : kAsk},
-                                .quantity = Quantity{quantity}, .symbol = kSymbol, .side = side};
+        const MarketEvent event{.order_id = next_id++,
+                                .price = Price{side == Side::Buy ? kBid : kAsk},
+                                .quantity = Quantity{quantity},
+                                .symbol = kSymbol,
+                                .side = side};
         ASSERT_EQ(book.apply(event), ApplyResult::Applied);
     }
 
@@ -65,8 +69,10 @@ struct Fixture
     {
         ASSERT_EQ(portfolio.reserve(side, Quantity{quantity}), RiskCheck::Accepted);
         portfolio.on_report(ExecutionReport{.price = Price{side == Side::Buy ? kAsk : kBid},
-                                            .quantity = Quantity{quantity}, .type = ReportType::Fill,
-                                            .liquidity = Liquidity::Taker, .side = side});
+                                            .quantity = Quantity{quantity},
+                                            .type = ReportType::Fill,
+                                            .liquidity = Liquidity::Taker,
+                                            .side = side});
     }
 };
 
@@ -155,11 +161,14 @@ TEST(ImbalanceTakerTest, CountsRiskRejectsFillsAndExpiries)
     EXPECT_EQ(f.tick(5'000).size(), 1u);
     EXPECT_TRUE(f.tick(5'001).empty());  // one order already open: TooManyOpenOrders
 
-    f.taker.on_report(f.ctx, ExecutionReport{.price = Price{kAsk}, .quantity = Quantity{60},
-                                             .leaves = Quantity{40}, .type = ReportType::Fill,
-                                             .liquidity = Liquidity::Taker, .side = Side::Buy});
-    f.taker.on_report(f.ctx, ExecutionReport{.quantity = Quantity{40}, .type = ReportType::Expired,
-                                             .side = Side::Buy});
+    f.taker.on_report(f.ctx,
+                      ExecutionReport{.price = Price{kAsk},
+                                      .quantity = Quantity{60},
+                                      .leaves = Quantity{40},
+                                      .type = ReportType::Fill,
+                                      .liquidity = Liquidity::Taker,
+                                      .side = Side::Buy});
+    f.taker.on_report(f.ctx, ExecutionReport{.quantity = Quantity{40}, .type = ReportType::Expired, .side = Side::Buy});
 
     const ImbalanceTakerStats& stats = f.taker.stats();
     EXPECT_EQ(stats.sent, 1u);

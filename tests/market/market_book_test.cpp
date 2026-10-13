@@ -13,8 +13,12 @@ constexpr SymbolId kSymbol = 7;
 
 MarketEvent add(OrderId id, Side side, std::int64_t price, std::uint64_t quantity)
 {
-    return MarketEvent{.order_id = id, .price = Price{price}, .quantity = Quantity{quantity},
-                       .symbol = kSymbol, .type = MarketEventType::Add, .side = side};
+    return MarketEvent{.order_id = id,
+                       .price = Price{price},
+                       .quantity = Quantity{quantity},
+                       .symbol = kSymbol,
+                       .type = MarketEventType::Add,
+                       .side = side};
 }
 
 MarketEvent reduce(MarketEventType type, OrderId id, std::uint64_t quantity)
@@ -22,14 +26,27 @@ MarketEvent reduce(MarketEventType type, OrderId id, std::uint64_t quantity)
     return MarketEvent{.order_id = id, .quantity = Quantity{quantity}, .symbol = kSymbol, .type = type};
 }
 
-MarketEvent execute(OrderId id, std::uint64_t quantity) { return reduce(MarketEventType::Execute, id, quantity); }
-MarketEvent cancel(OrderId id, std::uint64_t quantity) { return reduce(MarketEventType::Cancel, id, quantity); }
-MarketEvent erase(OrderId id) { return reduce(MarketEventType::Delete, id, 0); }
+MarketEvent execute(OrderId id, std::uint64_t quantity)
+{
+    return reduce(MarketEventType::Execute, id, quantity);
+}
+MarketEvent cancel(OrderId id, std::uint64_t quantity)
+{
+    return reduce(MarketEventType::Cancel, id, quantity);
+}
+MarketEvent erase(OrderId id)
+{
+    return reduce(MarketEventType::Delete, id, 0);
+}
 
 MarketEvent replace(OrderId id, OrderId new_id, std::int64_t price, std::uint64_t quantity)
 {
-    return MarketEvent{.order_id = id, .new_order_id = new_id, .price = Price{price},
-                       .quantity = Quantity{quantity}, .symbol = kSymbol, .type = MarketEventType::Replace};
+    return MarketEvent{.order_id = id,
+                       .new_order_id = new_id,
+                       .price = Price{price},
+                       .quantity = Quantity{quantity},
+                       .symbol = kSymbol,
+                       .type = MarketEventType::Replace};
 }
 
 MarketEvent status(TradingState state)
@@ -202,8 +219,11 @@ TEST(MarketBookTest, TradeIsAppliedWithoutTouchingTheBook)
     ASSERT_EQ(book.apply(add(1, Side::Buy, 100, 10)), ApplyResult::Applied);
     const std::uint64_t before = book.digest();
 
-    MarketEvent trade{.order_id = 1, .price = Price{100}, .quantity = Quantity{10},
-                      .symbol = kSymbol, .type = MarketEventType::Trade};
+    MarketEvent trade{.order_id = 1,
+                      .price = Price{100},
+                      .quantity = Quantity{10},
+                      .symbol = kSymbol,
+                      .type = MarketEventType::Trade};
     EXPECT_EQ(book.apply(trade), ApplyResult::Applied);
 
     EXPECT_EQ(book.digest(), before);
@@ -218,8 +238,8 @@ TEST(MarketBookTest, StatusSetsTheTradingStateWithoutTouchingOrders)
     ASSERT_EQ(book.apply(add(1, Side::Buy, 100, 10)), ApplyResult::Applied);
     const std::uint64_t before = book.digest();
 
-    for (const TradingState state : {TradingState::Halted, TradingState::Paused, TradingState::QuotationOnly,
-                                     TradingState::Trading}) {
+    for (const TradingState state :
+         {TradingState::Halted, TradingState::Paused, TradingState::QuotationOnly, TradingState::Trading}) {
         EXPECT_EQ(book.apply(status(state)), ApplyResult::Applied);
         EXPECT_EQ(book.trading_state(), state);
     }
@@ -436,8 +456,8 @@ TEST(MarketBookTest, InRthIsHalfOpenFromOpenToClose)
 TEST(MarketBookTest, DigestMatchesForSameEventsAndDiffersByOneShare)
 {
     const MarketEvent events[] = {
-        add(1, Side::Buy, 100, 10), add(2, Side::Sell, 101, 20),
-        add(3, Side::Buy, 100, 30), execute(1, 4), replace(2, 4, 102, 5),
+        add(1, Side::Buy, 100, 10), add(2, Side::Sell, 101, 20), add(3, Side::Buy, 100, 30), execute(1, 4),
+        replace(2, 4, 102, 5),
     };
 
     MarketBook a{kSymbol, 8};
@@ -463,12 +483,10 @@ std::uint64_t run_random_stream(std::uint64_t seed, std::array<std::size_t, appl
 
     for (int i = 0; i < 10'000; ++i) {
         static constexpr MarketEventType types[16] = {
-            MarketEventType::Add, MarketEventType::Add, MarketEventType::Add,
-            MarketEventType::Add, MarketEventType::Add, MarketEventType::Add,
-            MarketEventType::Execute, MarketEventType::Execute,
-            MarketEventType::Cancel, MarketEventType::Cancel,
-            MarketEventType::Delete, MarketEventType::Replace, MarketEventType::Replace,
-            MarketEventType::Trade, MarketEventType::Modify, MarketEventType::Clear,
+            MarketEventType::Add,     MarketEventType::Add,    MarketEventType::Add,     MarketEventType::Add,
+            MarketEventType::Add,     MarketEventType::Add,    MarketEventType::Execute, MarketEventType::Execute,
+            MarketEventType::Cancel,  MarketEventType::Cancel, MarketEventType::Delete,  MarketEventType::Replace,
+            MarketEventType::Replace, MarketEventType::Trade,  MarketEventType::Modify,  MarketEventType::Clear,
         };
 
         MarketEvent event{};
@@ -490,8 +508,7 @@ std::uint64_t run_random_stream(std::uint64_t seed, std::array<std::size_t, appl
         }
 
         InvariantError error{InvariantError::None};
-        EXPECT_TRUE(book.check_invariants(error))
-            << "event " << i << " error " << static_cast<int>(error);
+        EXPECT_TRUE(book.check_invariants(error)) << "event " << i << " error " << static_cast<int>(error);
     }
 
     return book.digest();

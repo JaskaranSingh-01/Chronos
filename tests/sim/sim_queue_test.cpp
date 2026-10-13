@@ -64,9 +64,10 @@ TEST(SimQueueTest, AssignsMonotonicSequenceOnPushIgnoringTheCallersValue)
 TEST(SimQueueTest, CarriesThePayloadOfEachEventType)
 {
     SimQueue queue{4};
-    queue.push(SimEvent{.timestamp = 10, .type = SimEventType::OrderArrive,
-                        .order = OrderRequest{.id = 7, .side = Side::Sell, .price = Price{1'000'000},
-                                              .quantity = Quantity{300}}});
+    queue.push(SimEvent{
+        .timestamp = 10,
+        .type = SimEventType::OrderArrive,
+        .order = OrderRequest{.id = 7, .side = Side::Sell, .price = Price{1'000'000}, .quantity = Quantity{300}}});
     queue.push(SimEvent{.timestamp = 20, .type = SimEventType::CancelArrive, .order_id = 7});
 
     ASSERT_FALSE(queue.empty());

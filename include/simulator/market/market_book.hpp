@@ -99,11 +99,20 @@ public:
 
     ApplyResult apply(const MarketEvent& event) noexcept;
 
-    SymbolId symbol() const noexcept { return symbol_; }
+    SymbolId symbol() const noexcept
+    {
+        return symbol_;
+    }
 
     // Trading until a Status event says otherwise.
-    TradingState trading_state() const noexcept { return trading_state_; }
-    const Order* find(OrderId id) const noexcept { return book_.find(id); }
+    TradingState trading_state() const noexcept
+    {
+        return trading_state_;
+    }
+    const Order* find(OrderId id) const noexcept
+    {
+        return book_.find(id);
+    }
 
     // False if the side is empty.
     bool best(Side side, LevelInfo& level) const noexcept;
@@ -129,9 +138,18 @@ public:
     }
 
     // Sequence of the most recent Add or Replace; 0 before the first.
-    std::uint64_t last_sequence() const noexcept { return next_sequence_ - 1; }
-    std::size_t order_count() const noexcept { return book_.size(); }
-    std::size_t peak_order_count() const noexcept { return peak_order_count_; }
+    std::uint64_t last_sequence() const noexcept
+    {
+        return next_sequence_ - 1;
+    }
+    std::size_t order_count() const noexcept
+    {
+        return book_.size();
+    }
+    std::size_t peak_order_count() const noexcept
+    {
+        return peak_order_count_;
+    }
 
     bool is_crossed() const noexcept;  // best bid >  best ask
     bool is_locked() const noexcept;   // best bid == best ask

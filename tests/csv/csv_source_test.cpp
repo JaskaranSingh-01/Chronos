@@ -20,8 +20,7 @@ namespace {
 constexpr Timestamp midnight = 1'577'682'000'000'000'000;
 
 constexpr std::string_view header6 = "timestamp,event_type,order_id,side,price,quantity";
-constexpr std::string_view header7 =
-    "timestamp,event_type,order_id,side,price,quantity,new_order_id";
+constexpr std::string_view header7 = "timestamp,event_type,order_id,side,price,quantity,new_order_id";
 
 std::span<const std::byte> bytes(std::string_view text)
 {
@@ -35,9 +34,8 @@ std::string data_path(std::string_view file)
 
 auto fields(const MarketEvent& e)
 {
-    return std::tuple{e.timestamp, e.order_id, e.new_order_id, e.price.ticks,
-                      e.quantity.value(), e.symbol, static_cast<int>(e.type),
-                      static_cast<int>(e.side)};
+    return std::tuple{e.timestamp,        e.order_id, e.new_order_id,           e.price.ticks,
+                      e.quantity.value(), e.symbol,   static_cast<int>(e.type), static_cast<int>(e.side)};
 }
 
 // Reads events until the stream ends; the end result goes to `end`.
@@ -73,9 +71,14 @@ TEST(CsvSourceTest, ReadsAddEvent)
     MarketEvent event;
 
     ASSERT_EQ(source.next(event), SourceResult::Event);
-    EXPECT_EQ(fields(event), fields(MarketEvent{
-        .timestamp = 100, .order_id = 1, .price = Price{100}, .quantity = Quantity{100},
-        .symbol = 3, .type = MarketEventType::Add, .side = Side::Sell}));
+    EXPECT_EQ(fields(event),
+              fields(MarketEvent{.timestamp = 100,
+                                 .order_id = 1,
+                                 .price = Price{100},
+                                 .quantity = Quantity{100},
+                                 .symbol = 3,
+                                 .type = MarketEventType::Add,
+                                 .side = Side::Sell}));
     EXPECT_EQ(source.position(), 2u);
 }
 
@@ -95,9 +98,10 @@ TEST(CsvSourceTest, ReadsMultipleEvents)
     }
 
     // The row says BUY and 99; a Cancel names neither.
-    EXPECT_EQ(fields(events[3]), fields(MarketEvent{
-        .timestamp = 400, .order_id = 3, .quantity = Quantity{50}, .symbol = 3,
-        .type = MarketEventType::Cancel}));
+    EXPECT_EQ(
+        fields(events[3]),
+        fields(MarketEvent{
+            .timestamp = 400, .order_id = 3, .quantity = Quantity{50}, .symbol = 3, .type = MarketEventType::Cancel}));
 
     // The file has no final newline: its last line is 5.
     MarketEvent event;
@@ -136,8 +140,7 @@ TEST(CsvSourceTest, RejectsQuantityOutOfRange)
 {
     for (const std::string_view quantity : {"-1", "18446744073709551616"}) {
         SCOPED_TRACE(quantity);
-        const std::string text =
-            std::string{header6} + "\n100,ADD,1,BUY,1000000," + std::string{quantity} + "\n";
+        const std::string text = std::string{header6} + "\n100,ADD,1,BUY,1000000," + std::string{quantity} + "\n";
 
         CsvSource source{bytes(text), 0};
         expect_sticky_error(source, SourceError::NumberOutOfRange, 2);
@@ -146,8 +149,7 @@ TEST(CsvSourceTest, RejectsQuantityOutOfRange)
     // UINT64_MAX fits. The span ends at its last digit, but the memory after
     // it holds another '9', as an mmap need not end in NUL: a parser reading
     // past the span would see 2^64 * 10 - 1 and report it out of range.
-    const std::string text =
-        std::string{header6} + "\n100,ADD,1,BUY,1000000,18446744073709551615" + "9";
+    const std::string text = std::string{header6} + "\n100,ADD,1,BUY,1000000,18446744073709551615" + "9";
     CsvSource source{bytes(std::string_view{text}.substr(0, text.size() - 1)), 0};
     MarketEvent event;
 
@@ -155,8 +157,7 @@ TEST(CsvSourceTest, RejectsQuantityOutOfRange)
     EXPECT_EQ(event.quantity, Quantity{std::numeric_limits<std::uint64_t>::max()});
 
     // The int64 columns stop at INT64_MAX instead.
-    const std::string int64_max =
-        std::string{header6} + "\n9223372036854775807,ADD,1,BUY,9223372036854775807,1\n";
+    const std::string int64_max = std::string{header6} + "\n9223372036854775807,ADD,1,BUY,9223372036854775807,1\n";
     CsvSource at_max{bytes(int64_max), 0};
 
     ASSERT_EQ(at_max.next(event), SourceResult::Event);
@@ -167,7 +168,8 @@ TEST(CsvSourceTest, RejectsQuantityOutOfRange)
 // Columns an action ignores come out as 0 (or Buy).
 TEST(CsvSourceTest, ReadsEveryEventType)
 {
-    const std::string text = std::string{header7} + "\n"
+    const std::string text = std::string{header7} +
+        "\n"
         "100,ADD,1,BUY,1000000,500,\n"
         "200,EXECUTE,1,,,100,\n"
         "300,EXECUTE,1,SELL,1000100,50,\n"
@@ -183,20 +185,42 @@ TEST(CsvSourceTest, ReadsEveryEventType)
 
     using T = MarketEventType;
     const MarketEvent expected[] = {
-        {.timestamp = 100, .order_id = 1, .price = Price{1'000'000}, .quantity = Quantity{500},
-         .symbol = 5, .type = T::Add, .side = Side::Buy},
-        {.timestamp = 200, .order_id = 1, .quantity = Quantity{100}, .symbol = 5,
+        {.timestamp = 100,
+         .order_id = 1,
+         .price = Price{1'000'000},
+         .quantity = Quantity{500},
+         .symbol = 5,
+         .type = T::Add,
+         .side = Side::Buy},
+        {.timestamp = 200, .order_id = 1, .quantity = Quantity{100}, .symbol = 5, .type = T::Execute},
+        {.timestamp = 300,
+         .order_id = 1,
+         .price = Price{1'000'100},
+         .quantity = Quantity{50},
+         .symbol = 5,
          .type = T::Execute},
-        {.timestamp = 300, .order_id = 1, .price = Price{1'000'100}, .quantity = Quantity{50},
-         .symbol = 5, .type = T::Execute},
-        {.timestamp = 400, .order_id = 1, .quantity = Quantity{50}, .symbol = 5,
-         .type = T::Cancel},
-        {.timestamp = 500, .order_id = 1, .new_order_id = 2, .price = Price{1'000'200},
-         .quantity = Quantity{300}, .symbol = 5, .type = T::Replace},
-        {.timestamp = 600, .order_id = 7, .price = Price{1'000'300}, .quantity = Quantity{25},
-         .symbol = 5, .type = T::Trade, .side = Side::Sell},
-        {.timestamp = 700, .order_id = 0, .price = Price{1'000'400}, .quantity = Quantity{10},
-         .symbol = 5, .type = T::Trade, .side = Side::Buy},
+        {.timestamp = 400, .order_id = 1, .quantity = Quantity{50}, .symbol = 5, .type = T::Cancel},
+        {.timestamp = 500,
+         .order_id = 1,
+         .new_order_id = 2,
+         .price = Price{1'000'200},
+         .quantity = Quantity{300},
+         .symbol = 5,
+         .type = T::Replace},
+        {.timestamp = 600,
+         .order_id = 7,
+         .price = Price{1'000'300},
+         .quantity = Quantity{25},
+         .symbol = 5,
+         .type = T::Trade,
+         .side = Side::Sell},
+        {.timestamp = 700,
+         .order_id = 0,
+         .price = Price{1'000'400},
+         .quantity = Quantity{10},
+         .symbol = 5,
+         .type = T::Trade,
+         .side = Side::Buy},
         {.timestamp = 800, .order_id = 2, .symbol = 5, .type = T::Delete},
     };
 
@@ -210,7 +234,8 @@ TEST(CsvSourceTest, ReadsEveryEventType)
 
 TEST(CsvSourceTest, AcceptsCrlfAndBlankLines)
 {
-    const std::string text = "\r\n" + std::string{header7} + "\r\n"
+    const std::string text = "\r\n" + std::string{header7} +
+        "\r\n"
         "\r\n"
         "100,ADD,1,BUY,100,10,\r\n"
         "\n"
@@ -221,13 +246,12 @@ TEST(CsvSourceTest, AcceptsCrlfAndBlankLines)
 
     ASSERT_EQ(source.next(event), SourceResult::Event);
     EXPECT_EQ(source.position(), 4u);
-    EXPECT_EQ(fields(event), fields(MarketEvent{
-        .timestamp = 100, .order_id = 1, .price = Price{100}, .quantity = Quantity{10}}));
+    EXPECT_EQ(fields(event),
+              fields(MarketEvent{.timestamp = 100, .order_id = 1, .price = Price{100}, .quantity = Quantity{10}}));
 
     ASSERT_EQ(source.next(event), SourceResult::Event);
     EXPECT_EQ(source.position(), 6u);
-    EXPECT_EQ(fields(event), fields(MarketEvent{
-        .timestamp = 200, .order_id = 1, .type = MarketEventType::Delete}));
+    EXPECT_EQ(fields(event), fields(MarketEvent{.timestamp = 200, .order_id = 1, .type = MarketEventType::Delete}));
 
     EXPECT_EQ(source.next(event), SourceResult::EndOfStream);
     EXPECT_EQ(source.position(), 6u);
@@ -370,8 +394,8 @@ TEST(CsvSourceTest, ReplaysEveryEventTypeWithZeroRejections)
 
     CsvSource source{file.bytes(), 0};
     MarketBook book{0, 16};
-    const ReplayReport report = MarketReplay::run(
-        source, book, {.check_invariants_every = 1, .session_midnight = midnight});
+    const ReplayReport report =
+        MarketReplay::run(source, book, {.check_invariants_every = 1, .session_midnight = midnight});
 
     ASSERT_TRUE(report.succeeded()) << report.message << " at line " << report.failed_position;
     EXPECT_EQ(report.events, 10u);

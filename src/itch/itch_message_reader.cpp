@@ -2,9 +2,7 @@
 
 namespace simulator {
 
-ItchReadResult ItchMessageReader::next(
-    ItchMessage& message
-) noexcept
+ItchReadResult ItchMessageReader::next(ItchMessage& message) noexcept
 {
     message = ItchMessage{};
     error_ = ItchReadError::None;
@@ -35,12 +33,12 @@ ItchReadResult ItchMessageReader::next(
 
     std::span<const std::byte> message_bytes;
 
-    if (!candidate.read_bytes(message_length,message_bytes)){
+    if (!candidate.read_bytes(message_length, message_bytes)) {
         error_ = ItchReadError::TruncatedMessage;
         return ItchReadResult::Error;
     }
 
-    message.type =std::to_integer<std::uint8_t>(message_bytes[0]);
+    message.type = std::to_integer<std::uint8_t>(message_bytes[0]);
 
     message.payload = message_bytes.subspan(1);
 

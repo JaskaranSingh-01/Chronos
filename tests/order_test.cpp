@@ -4,17 +4,13 @@
 
 namespace simulator {
 
-Order make_test_order() {
-    return Order{
-        1,
-        Side::Buy,
-        Price{10000},
-        Quantity{100},
-        1000
-    };
+Order make_test_order()
+{
+    return Order{1, Side::Buy, Price{10000}, Quantity{100}, 1000};
 }
 
-TEST(OrderTest, StartsAsNew) {
+TEST(OrderTest, StartsAsNew)
+{
     auto order = make_test_order();
 
     EXPECT_EQ(order.state(), OrderState::New);
@@ -22,14 +18,16 @@ TEST(OrderTest, StartsAsNew) {
     EXPECT_EQ(order.remaining_quantity().value(), 100);
 }
 
-TEST(OrderTest, CanBeActivated) {
+TEST(OrderTest, CanBeActivated)
+{
     auto order = make_test_order();
 
     EXPECT_TRUE(order.activate());
     EXPECT_EQ(order.state(), OrderState::Active);
 }
 
-TEST(OrderTest, CannotActivateActiveOrder) {
+TEST(OrderTest, CannotActivateActiveOrder)
+{
     auto order = make_test_order();
 
     ASSERT_TRUE(order.activate());
@@ -38,7 +36,8 @@ TEST(OrderTest, CannotActivateActiveOrder) {
     EXPECT_EQ(order.state(), OrderState::Active);
 }
 
-TEST(OrderTest, SupportsPartialExecution) {
+TEST(OrderTest, SupportsPartialExecution)
+{
     auto order = make_test_order();
 
     ASSERT_TRUE(order.activate());
@@ -50,7 +49,8 @@ TEST(OrderTest, SupportsPartialExecution) {
     EXPECT_EQ(order.state(), OrderState::PartiallyFilled);
 }
 
-TEST(OrderTest, BecomesFilledAfterFullExecution) {
+TEST(OrderTest, BecomesFilledAfterFullExecution)
+{
     auto order = make_test_order();
 
     ASSERT_TRUE(order.activate());
@@ -62,7 +62,8 @@ TEST(OrderTest, BecomesFilledAfterFullExecution) {
     EXPECT_EQ(order.state(), OrderState::Filled);
 }
 
-TEST(OrderTest, SupportsMultipleExecutions) {
+TEST(OrderTest, SupportsMultipleExecutions)
+{
     auto order = make_test_order();
 
     ASSERT_TRUE(order.activate());
@@ -78,7 +79,8 @@ TEST(OrderTest, SupportsMultipleExecutions) {
     EXPECT_EQ(order.state(), OrderState::Filled);
 }
 
-TEST(OrderTest, RejectsExecutionGreaterThanRemaining) {
+TEST(OrderTest, RejectsExecutionGreaterThanRemaining)
+{
     auto order = make_test_order();
 
     ASSERT_TRUE(order.activate());
@@ -91,7 +93,8 @@ TEST(OrderTest, RejectsExecutionGreaterThanRemaining) {
     EXPECT_EQ(order.state(), OrderState::PartiallyFilled);
 }
 
-TEST(OrderTest, RejectsZeroExecution) {
+TEST(OrderTest, RejectsZeroExecution)
+{
     auto order = make_test_order();
 
     ASSERT_TRUE(order.activate());
@@ -102,7 +105,8 @@ TEST(OrderTest, RejectsZeroExecution) {
     EXPECT_EQ(order.state(), OrderState::Active);
 }
 
-TEST(OrderTest, CannotExecuteNewOrder) {
+TEST(OrderTest, CannotExecuteNewOrder)
+{
     auto order = make_test_order();
 
     EXPECT_FALSE(order.execute(Quantity{50}));
@@ -111,7 +115,8 @@ TEST(OrderTest, CannotExecuteNewOrder) {
     EXPECT_EQ(order.state(), OrderState::New);
 }
 
-TEST(OrderTest, CanCancelActiveOrder) {
+TEST(OrderTest, CanCancelActiveOrder)
+{
     auto order = make_test_order();
 
     ASSERT_TRUE(order.activate());
@@ -122,7 +127,8 @@ TEST(OrderTest, CanCancelActiveOrder) {
     EXPECT_EQ(order.remaining_quantity().value(), 100);
 }
 
-TEST(OrderTest, CanCancelPartiallyFilledOrder) {
+TEST(OrderTest, CanCancelPartiallyFilledOrder)
+{
     auto order = make_test_order();
 
     ASSERT_TRUE(order.activate());
@@ -134,7 +140,8 @@ TEST(OrderTest, CanCancelPartiallyFilledOrder) {
     EXPECT_EQ(order.remaining_quantity().value(), 60);
 }
 
-TEST(OrderTest, PartialCancelKeepsActiveState) {
+TEST(OrderTest, PartialCancelKeepsActiveState)
+{
     auto order = make_test_order();
 
     ASSERT_TRUE(order.activate());
@@ -145,7 +152,8 @@ TEST(OrderTest, PartialCancelKeepsActiveState) {
     EXPECT_EQ(order.remaining_quantity().value(), 70);
 }
 
-TEST(OrderTest, PartialCancelKeepsPartiallyFilledState) {
+TEST(OrderTest, PartialCancelKeepsPartiallyFilledState)
+{
     auto order = make_test_order();
 
     ASSERT_TRUE(order.activate());
@@ -157,7 +165,8 @@ TEST(OrderTest, PartialCancelKeepsPartiallyFilledState) {
     EXPECT_EQ(order.remaining_quantity().value(), 40);
 }
 
-TEST(OrderTest, CancellingEveryRemainingShareCancelsTheOrder) {
+TEST(OrderTest, CancellingEveryRemainingShareCancelsTheOrder)
+{
     auto order = make_test_order();
 
     ASSERT_TRUE(order.activate());
@@ -169,14 +178,16 @@ TEST(OrderTest, CancellingEveryRemainingShareCancelsTheOrder) {
     EXPECT_EQ(order.remaining_quantity().value(), 0);
 }
 
-TEST(OrderTest, CannotCancelNewOrder) {
+TEST(OrderTest, CannotCancelNewOrder)
+{
     auto order = make_test_order();
 
     EXPECT_FALSE(order.cancel());
     EXPECT_EQ(order.state(), OrderState::New);
 }
 
-TEST(OrderTest, CannotCancelFilledOrder) {
+TEST(OrderTest, CannotCancelFilledOrder)
+{
     auto order = make_test_order();
 
     ASSERT_TRUE(order.activate());
@@ -186,7 +197,8 @@ TEST(OrderTest, CannotCancelFilledOrder) {
     EXPECT_EQ(order.state(), OrderState::Filled);
 }
 
-TEST(OrderTest, CannotExecuteCancelledOrder) {
+TEST(OrderTest, CannotExecuteCancelledOrder)
+{
     auto order = make_test_order();
 
     ASSERT_TRUE(order.activate());
@@ -198,7 +210,8 @@ TEST(OrderTest, CannotExecuteCancelledOrder) {
     EXPECT_EQ(order.remaining_quantity().value(), 100);
 }
 
-TEST(OrderTest, CannotExecuteFilledOrder) {
+TEST(OrderTest, CannotExecuteFilledOrder)
+{
     auto order = make_test_order();
 
     ASSERT_TRUE(order.activate());
@@ -210,7 +223,8 @@ TEST(OrderTest, CannotExecuteFilledOrder) {
     EXPECT_EQ(order.remaining_quantity().value(), 0);
 }
 
-TEST(OrderTest, SequenceDefaultsToZeroAndIsSettable) {
+TEST(OrderTest, SequenceDefaultsToZeroAndIsSettable)
+{
     auto order = make_test_order();
 
     EXPECT_EQ(order.sequence(), 0u);

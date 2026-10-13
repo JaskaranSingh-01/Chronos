@@ -84,14 +84,13 @@ bool parse_date(std::string_view text, std::chrono::year_month_day& date) noexce
     unsigned month{0};
     unsigned day{0};
 
-    if (text.size() != 10 || text[4] != '-' || text[7] != '-' ||
-        !parse_digits(text.substr(0, 4), year) || !parse_digits(text.substr(5, 2), month) ||
-        !parse_digits(text.substr(8, 2), day)) {
+    if (text.size() != 10 || text[4] != '-' || text[7] != '-' || !parse_digits(text.substr(0, 4), year) ||
+        !parse_digits(text.substr(5, 2), month) || !parse_digits(text.substr(8, 2), day)) {
         return false;
     }
 
-    const std::chrono::year_month_day parsed{
-        std::chrono::year{static_cast<int>(year)}, std::chrono::month{month}, std::chrono::day{day}};
+    const std::chrono::year_month_day parsed{std::chrono::year{static_cast<int>(year)}, std::chrono::month{month},
+                                             std::chrono::day{day}};
     if (!parsed.ok()) {
         return false;
     }
@@ -105,8 +104,8 @@ bool parse_utc_offset(std::string_view text, std::chrono::minutes& offset) noexc
     unsigned minutes{0};
 
     if (text.size() != 6 || (text[0] != '+' && text[0] != '-') || text[3] != ':' ||
-        !parse_digits(text.substr(1, 2), hours) || !parse_digits(text.substr(4, 2), minutes) ||
-        hours >= 24 || minutes >= 60) {
+        !parse_digits(text.substr(1, 2), hours) || !parse_digits(text.substr(4, 2), minutes) || hours >= 24 ||
+        minutes >= 60) {
         return false;
     }
 
@@ -204,7 +203,7 @@ bool parse_replay_args(std::span<const std::string_view> args, ReplayArgs& out, 
             ok = parse_number(value, b.clip) && b.clip > 0 && b.clip <= max_value;
         } else if (backtest && arg == "--max-position") {
             ok = parse_number(value, b.max_position) && b.max_position >= 0 &&
-                 static_cast<std::uint64_t>(b.max_position) <= max_value;
+                static_cast<std::uint64_t>(b.max_position) <= max_value;
         } else if (backtest && arg == "--cooldown-ms") {
             ok = parse_number(value, b.cooldown_ms) && b.cooldown_ms <= max_value;
         } else if (backtest && arg == "--taker-fee-ticks") {
@@ -220,7 +219,7 @@ bool parse_replay_args(std::span<const std::string_view> args, ReplayArgs& out, 
             ok = parse_number(value, b.requote_ms) && b.requote_ms <= max_value;
         } else if (backtest && arg == "--maker-fee-ticks") {
             ok = parse_number(value, b.maker_fee_ticks) && b.maker_fee_ticks >= -1'000'000 &&
-                 b.maker_fee_ticks <= 1'000'000;
+                b.maker_fee_ticks <= 1'000'000;
         } else {
             error = "unknown " + std::string{args[0]} + " option " + std::string{arg};
             return false;

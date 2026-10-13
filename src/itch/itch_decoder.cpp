@@ -21,10 +21,7 @@ constexpr std::size_t OrderDeletePayloadSize = 18;
 constexpr std::size_t OrderReplacePayloadSize = 34;
 constexpr std::size_t StockDirectoryPayloadSize = 38;
 
-bool parse_side(
-    std::uint8_t value,
-    Side& side
-) noexcept
+bool parse_side(std::uint8_t value, Side& side) noexcept
 {
     if (value == 'B') {
         side = Side::Buy;
@@ -39,10 +36,7 @@ bool parse_side(
     return false;
 }
 
-bool parse_printable(
-    std::uint8_t value,
-    bool& printable
-) noexcept
+bool parse_printable(std::uint8_t value, bool& printable) noexcept
 {
     if (value == 'Y' || value == 'N') {
         printable = value == 'Y';
@@ -54,17 +48,12 @@ bool parse_printable(
 
 } // namespace
 
-bool ItchDecoder::read_header(
-    ByteReader& reader,
-    std::uint16_t& stock_locate,
-    Timestamp& timestamp
-) noexcept
+bool ItchDecoder::read_header(ByteReader& reader, std::uint16_t& stock_locate, Timestamp& timestamp) noexcept
 {
     std::uint16_t tracking_number{0};
     std::uint64_t raw_timestamp{0};
 
-    if (!reader.read_u16_be(stock_locate) ||
-        !reader.read_u16_be(tracking_number) ||
+    if (!reader.read_u16_be(stock_locate) || !reader.read_u16_be(tracking_number) ||
         !reader.read_u48_be(raw_timestamp)) {
         error_ = ItchDecodeError::TruncatedPayload;
         return false;
@@ -75,10 +64,7 @@ bool ItchDecoder::read_header(
     return true;
 }
 
-ItchDecodeResult ItchDecoder::decode_add_order(
-    const ItchMessage& message,
-    ItchAddOrder& order
-) noexcept
+ItchDecodeResult ItchDecoder::decode_add_order(const ItchMessage& message, ItchAddOrder& order) noexcept
 {
     error_ = ItchDecodeError::None;
     order = ItchAddOrder{};
@@ -93,17 +79,12 @@ ItchDecodeResult ItchDecoder::decode_add_order(
         return ItchDecodeResult::InvalidMessage;
     }
 
-    ByteReader reader{
-        message.payload
-    };
+    ByteReader reader{message.payload};
 
     return read_add_order(reader, order);
 }
 
-ItchDecodeResult ItchDecoder::decode_add_order_mpid(
-    const ItchMessage& message,
-    ItchAddOrder& order
-) noexcept
+ItchDecodeResult ItchDecoder::decode_add_order_mpid(const ItchMessage& message, ItchAddOrder& order) noexcept
 {
     error_ = ItchDecodeError::None;
     order = ItchAddOrder{};
@@ -118,18 +99,13 @@ ItchDecodeResult ItchDecoder::decode_add_order_mpid(
         return ItchDecodeResult::InvalidMessage;
     }
 
-    ByteReader reader{
-        message.payload
-    };
+    ByteReader reader{message.payload};
 
     // 'F' is 'A' plus a trailing 4-byte MPID, which is not kept.
     return read_add_order(reader, order);
 }
 
-ItchDecodeResult ItchDecoder::read_add_order(
-    ByteReader& reader,
-    ItchAddOrder& order
-) noexcept
+ItchDecodeResult ItchDecoder::read_add_order(ByteReader& reader, ItchAddOrder& order) noexcept
 {
     std::uint16_t stock_locate{0};
     Timestamp timestamp{0};
@@ -183,14 +159,13 @@ ItchDecodeResult ItchDecoder::read_add_order(
     order.order_id = OrderId{order_id};
     order.side = side;
     order.quantity = Quantity{shares};
-    order.price = Price{
-        static_cast<std::int64_t>(price)
-    };
+    order.price = Price{static_cast<std::int64_t>(price)};
 
     return ItchDecodeResult::Success;
 }
 
-ItchDecodeResult ItchDecoder::decode_order_executed(const ItchMessage& message,ItchOrderExecuted& order) noexcept{
+ItchDecodeResult ItchDecoder::decode_order_executed(const ItchMessage& message, ItchOrderExecuted& order) noexcept
+{
     error_ = ItchDecodeError::None;
     order = ItchOrderExecuted{};
 
@@ -243,7 +218,9 @@ ItchDecodeResult ItchDecoder::decode_order_executed(const ItchMessage& message,I
     return ItchDecodeResult::Success;
 }
 
-ItchDecodeResult ItchDecoder::decode_order_executed_with_price(const ItchMessage& message,ItchOrderExecutedWithPrice& order) noexcept{
+ItchDecodeResult ItchDecoder::decode_order_executed_with_price(const ItchMessage& message,
+                                                               ItchOrderExecutedWithPrice& order) noexcept
+{
     error_ = ItchDecodeError::None;
     order = ItchOrderExecutedWithPrice{};
 
@@ -314,14 +291,13 @@ ItchDecodeResult ItchDecoder::decode_order_executed_with_price(const ItchMessage
     order.quantity = Quantity{executed_shares};
     order.match_number = match_number;
     order.printable = printable;
-    order.price = Price{
-        static_cast<std::int64_t>(execution_price)
-    };
+    order.price = Price{static_cast<std::int64_t>(execution_price)};
 
     return ItchDecodeResult::Success;
 }
 
-ItchDecodeResult ItchDecoder::decode_order_cancel(const ItchMessage& message,ItchOrderCancel& order) noexcept{
+ItchDecodeResult ItchDecoder::decode_order_cancel(const ItchMessage& message, ItchOrderCancel& order) noexcept
+{
     error_ = ItchDecodeError::None;
     order = ItchOrderCancel{};
 
@@ -366,7 +342,8 @@ ItchDecodeResult ItchDecoder::decode_order_cancel(const ItchMessage& message,Itc
     return ItchDecodeResult::Success;
 }
 
-ItchDecodeResult ItchDecoder::decode_order_delete(const ItchMessage& message,ItchOrderDelete& order) noexcept{
+ItchDecodeResult ItchDecoder::decode_order_delete(const ItchMessage& message, ItchOrderDelete& order) noexcept
+{
     error_ = ItchDecodeError::None;
     order = ItchOrderDelete{};
 
@@ -403,7 +380,8 @@ ItchDecodeResult ItchDecoder::decode_order_delete(const ItchMessage& message,Itc
     return ItchDecodeResult::Success;
 }
 
-ItchDecodeResult ItchDecoder::decode_order_replace(const ItchMessage& message,ItchOrderReplace& order) noexcept{
+ItchDecodeResult ItchDecoder::decode_order_replace(const ItchMessage& message, ItchOrderReplace& order) noexcept
+{
     error_ = ItchDecodeError::None;
     order = ItchOrderReplace{};
 
@@ -463,14 +441,13 @@ ItchDecodeResult ItchDecoder::decode_order_replace(const ItchMessage& message,It
 
     order.quantity = Quantity{shares};
 
-    order.price = Price{
-        static_cast<std::int64_t>(price)
-    };
+    order.price = Price{static_cast<std::int64_t>(price)};
 
     return ItchDecodeResult::Success;
 }
 
-ItchDecodeResult ItchDecoder::decode_stock_directory(const ItchMessage& message,ItchStockDirectory& directory) noexcept{
+ItchDecodeResult ItchDecoder::decode_stock_directory(const ItchMessage& message, ItchStockDirectory& directory) noexcept
+{
     error_ = ItchDecodeError::None;
     directory = ItchStockDirectory{};
 

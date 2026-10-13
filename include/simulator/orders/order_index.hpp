@@ -62,10 +62,16 @@ public:
     // False if `id` is absent.
     bool erase(OrderId id) noexcept;
 
-    std::size_t size() const noexcept { return size_; }
+    std::size_t size() const noexcept
+    {
+        return size_;
+    }
 
     // Orders it holds before it grows.
-    std::size_t capacity() const noexcept { return slots_ ? (mask_ + 1) / 2 : 0; }
+    std::size_t capacity() const noexcept
+    {
+        return slots_ ? (mask_ + 1) / 2 : 0;
+    }
 };
 
 } // namespace simulator

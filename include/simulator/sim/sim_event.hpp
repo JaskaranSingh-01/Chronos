@@ -10,7 +10,12 @@
 
 namespace simulator {
 
-enum class SimEventType : std::uint8_t { OrderArrive, CancelArrive, ReportDeliver, Timer };
+enum class SimEventType : std::uint8_t {
+    OrderArrive,
+    CancelArrive,
+    ReportDeliver,
+    Timer
+};
 
 // Our side of the event stream. Only the field that `type` names is meaningful.
 struct SimEvent
@@ -50,7 +55,8 @@ private:
 public:
     // push allocates only once more than `capacity` events are pending.
     explicit SimQueue(std::size_t capacity)
-        : queue_(Later{}, reserved(capacity)) {}
+        : queue_(Later{}, reserved(capacity))
+    {}
 
     void push(SimEvent event) noexcept
     {
@@ -58,11 +64,20 @@ public:
         queue_.push(std::move(event));
     }
 
-    bool empty() const noexcept { return queue_.empty(); }
+    bool empty() const noexcept
+    {
+        return queue_.empty();
+    }
 
     // Precondition: !empty().
-    const SimEvent& top() const noexcept { return queue_.top(); }
-    void pop() noexcept { queue_.pop(); }
+    const SimEvent& top() const noexcept
+    {
+        return queue_.top();
+    }
+    void pop() noexcept
+    {
+        queue_.pop();
+    }
 };
 
 } // namespace simulator

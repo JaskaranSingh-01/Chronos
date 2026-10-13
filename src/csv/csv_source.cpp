@@ -14,11 +14,9 @@ namespace simulator {
 namespace {
 
 constexpr std::string_view header = "timestamp,event_type,order_id,side,price,quantity";
-constexpr std::string_view header_with_new_order_id =
-    "timestamp,event_type,order_id,side,price,quantity,new_order_id";
+constexpr std::string_view header_with_new_order_id = "timestamp,event_type,order_id,side,price,quantity,new_order_id";
 
-constexpr std::uint64_t int64_max =
-    static_cast<std::uint64_t>(std::numeric_limits<std::int64_t>::max());
+constexpr std::uint64_t int64_max = static_cast<std::uint64_t>(std::numeric_limits<std::int64_t>::max());
 constexpr std::uint64_t uint64_max = std::numeric_limits<std::uint64_t>::max();
 
 using Fields = std::array<std::string_view, 7>;
@@ -42,8 +40,7 @@ SourceError parse_number(std::string_view text, std::uint64_t max, std::uint64_t
 }
 
 // An empty column is 0, or InvalidNumber when required.
-SourceError field(
-    std::string_view text, bool required, std::uint64_t max, std::uint64_t& value) noexcept
+SourceError field(std::string_view text, bool required, std::uint64_t max, std::uint64_t& value) noexcept
 {
     if (text.empty()) {
         value = 0;
@@ -69,9 +66,12 @@ SourceError side_field(std::string_view text, bool required, Side& side) noexcep
 bool parse_type(std::string_view text, MarketEventType& type) noexcept
 {
     using T = MarketEventType;
-    constexpr std::array<std::pair<std::string_view, T>, 6> keywords{{
-        {"ADD", T::Add}, {"CANCEL", T::Cancel}, {"DELETE", T::Delete},
-        {"EXECUTE", T::Execute}, {"REPLACE", T::Replace}, {"TRADE", T::Trade}}};
+    constexpr std::array<std::pair<std::string_view, T>, 6> keywords{{{"ADD", T::Add},
+                                                                      {"CANCEL", T::Cancel},
+                                                                      {"DELETE", T::Delete},
+                                                                      {"EXECUTE", T::Execute},
+                                                                      {"REPLACE", T::Replace},
+                                                                      {"TRADE", T::Trade}}};
 
     for (const auto& [keyword, value] : keywords) {
         if (text == keyword) {
@@ -99,8 +99,7 @@ bool split(std::string_view line, std::size_t count, Fields& fields) noexcept
 }
 
 // One data row, checked in column order. `event` is written only on success.
-SourceError parse_row(
-    std::string_view line, std::size_t columns, SymbolId symbol, MarketEvent& event) noexcept
+SourceError parse_row(std::string_view line, std::size_t columns, SymbolId symbol, MarketEvent& event) noexcept
 {
     using T = MarketEventType;
 
@@ -110,8 +109,7 @@ SourceError parse_row(
     }
 
     std::uint64_t timestamp{0};
-    if (const SourceError error = field(f[0], true, int64_max, timestamp);
-        error != SourceError::None) {
+    if (const SourceError error = field(f[0], true, int64_max, timestamp); error != SourceError::None) {
         return error;
     }
 
@@ -126,8 +124,7 @@ SourceError parse_row(
     std::uint64_t quantity{0};
     std::uint64_t new_order_id{0};
     const SourceError errors[] = {
-        field(f[2], type != T::Trade, uint64_max, order_id),
-        side_field(f[3], type == T::Add || type == T::Trade, side),
+        field(f[2], type != T::Trade, uint64_max, order_id), side_field(f[3], type == T::Add || type == T::Trade, side),
         field(f[4], type == T::Add || type == T::Replace || type == T::Trade, int64_max, price),
         field(f[5], type != T::Delete, uint64_max, quantity),
         field(f[6], type == T::Replace, uint64_max, new_order_id)};
@@ -142,9 +139,7 @@ SourceError parse_row(
         .timestamp = static_cast<Timestamp>(timestamp),
         .order_id = order_id,
         .new_order_id = type == T::Replace ? new_order_id : std::uint64_t{0},
-        .price = Price{type == T::Cancel || type == T::Delete
-                           ? std::int64_t{0}
-                           : static_cast<std::int64_t>(price)},
+        .price = Price{type == T::Cancel || type == T::Delete ? std::int64_t{0} : static_cast<std::int64_t>(price)},
         .quantity = Quantity{type == T::Delete ? std::uint64_t{0} : quantity},
         .symbol = symbol,
         .type = type,
@@ -188,8 +183,7 @@ SourceResult CsvSource::next(MarketEvent& event) noexcept
             continue;
         }
 
-        if (const SourceError error = parse_row(line, columns_, symbol_, event);
-            error != SourceError::None) {
+        if (const SourceError error = parse_row(line, columns_, symbol_, event); error != SourceError::None) {
             return finish(error);
         }
         return SourceResult::Event;

@@ -14,8 +14,12 @@ constexpr Timestamp kNow = 21'000;
 
 MarketEvent add(OrderId id, Side side, std::int64_t price, std::uint64_t quantity)
 {
-    return MarketEvent{.order_id = id, .price = Price{price}, .quantity = Quantity{quantity},
-                       .symbol = kSymbol, .type = MarketEventType::Add, .side = side};
+    return MarketEvent{.order_id = id,
+                       .price = Price{price},
+                       .quantity = Quantity{quantity},
+                       .symbol = kSymbol,
+                       .type = MarketEventType::Add,
+                       .side = side};
 }
 
 MarketEvent status(TradingState state)
@@ -28,9 +32,9 @@ MarketEvent status(TradingState state)
 //   asks 1,000,000 x 300 (h1 200, h2 100), 1,000,100 x 500 (h3)
 void build_example_book(MarketBook& book)
 {
-    for (const MarketEvent& event : {add(1, Side::Sell, 1'000'000, 200), add(2, Side::Sell, 1'000'000, 100),
-                                     add(3, Side::Sell, 1'000'100, 500), add(4, Side::Buy, 999'900, 300),
-                                     add(5, Side::Buy, 999'800, 400)}) {
+    for (const MarketEvent& event :
+         {add(1, Side::Sell, 1'000'000, 200), add(2, Side::Sell, 1'000'000, 100), add(3, Side::Sell, 1'000'100, 500),
+          add(4, Side::Buy, 999'900, 300), add(5, Side::Buy, 999'800, 400)}) {
         ASSERT_EQ(book.apply(event), ApplyResult::Applied);
     }
 }
@@ -38,27 +42,39 @@ void build_example_book(MarketBook& book)
 OrderRequest order(OrderId id, Side side, std::int64_t price, std::uint64_t quantity,
                    TimeInForce time_in_force = TimeInForce::Ioc)
 {
-    return OrderRequest{.id = id, .side = side, .price = Price{price}, .quantity = Quantity{quantity},
-                        .time_in_force = time_in_force};
+    return OrderRequest{
+        .id = id, .side = side, .price = Price{price}, .quantity = Quantity{quantity}, .time_in_force = time_in_force};
 }
 
 ExecutionReport fill(OrderId id, Side side, std::int64_t price, std::uint64_t quantity, std::uint64_t leaves)
 {
-    return ExecutionReport{.exchange_time = kNow, .order_id = id, .price = Price{price},
-                           .quantity = Quantity{quantity}, .leaves = Quantity{leaves},
-                           .type = ReportType::Fill, .liquidity = Liquidity::Taker, .side = side};
+    return ExecutionReport{.exchange_time = kNow,
+                           .order_id = id,
+                           .price = Price{price},
+                           .quantity = Quantity{quantity},
+                           .leaves = Quantity{leaves},
+                           .type = ReportType::Fill,
+                           .liquidity = Liquidity::Taker,
+                           .side = side};
 }
 
 ExecutionReport expired(OrderId id, Side side, std::uint64_t quantity)
 {
-    return ExecutionReport{.exchange_time = kNow, .order_id = id, .quantity = Quantity{quantity},
-                           .type = ReportType::Expired, .side = side};
+    return ExecutionReport{.exchange_time = kNow,
+                           .order_id = id,
+                           .quantity = Quantity{quantity},
+                           .type = ReportType::Expired,
+                           .side = side};
 }
 
 ExecutionReport rejected(OrderId id, Side side, std::uint64_t quantity, RejectReason reason)
 {
-    return ExecutionReport{.exchange_time = kNow, .order_id = id, .quantity = Quantity{quantity},
-                           .type = ReportType::Rejected, .reason = reason, .side = side};
+    return ExecutionReport{.exchange_time = kNow,
+                           .order_id = id,
+                           .quantity = Quantity{quantity},
+                           .type = ReportType::Rejected,
+                           .reason = reason,
+                           .side = side};
 }
 
 class ExecutionSimulatorTest : public ::testing::Test
@@ -68,7 +84,10 @@ protected:
     ExecutionSimulator execution_;
     std::vector<ExecutionReport> out_;
 
-    void SetUp() override { build_example_book(book_); }
+    void SetUp() override
+    {
+        build_example_book(book_);
+    }
 
     std::vector<ExecutionReport> arrive(const OrderRequest& request)
     {
@@ -80,8 +99,7 @@ protected:
 
 TEST_F(ExecutionSimulatorTest, FullFillAtOneLevel)
 {
-    EXPECT_EQ(arrive(order(1, Side::Buy, 1'000'000, 150)),
-              (std::vector{fill(1, Side::Buy, 1'000'000, 150, 0)}));
+    EXPECT_EQ(arrive(order(1, Side::Buy, 1'000'000, 150)), (std::vector{fill(1, Side::Buy, 1'000'000, 150, 0)}));
 }
 
 TEST_F(ExecutionSimulatorTest, WorkedExample1SweepsThenExpiresAndRepeatsIdentically)
@@ -144,8 +162,9 @@ TEST_F(ExecutionSimulatorTest, AppendsToOutAndCountsTakerFills)
     execution_.on_market(add(6, Side::Sell, 1'000'000, 100), book_, out_);  // nothing of ours rests
     execution_.on_order_arrive(order(1, Side::Buy, 1'000'100, 400), kNow, book_, out_);
 
-    EXPECT_EQ(out_, (std::vector{expired(9, Side::Sell, 1), fill(1, Side::Buy, 1'000'000, 300, 100),
-                                 fill(1, Side::Buy, 1'000'100, 100, 0)}));
+    EXPECT_EQ(out_,
+              (std::vector{expired(9, Side::Sell, 1), fill(1, Side::Buy, 1'000'000, 300, 100),
+                           fill(1, Side::Buy, 1'000'100, 100, 0)}));
     EXPECT_EQ(execution_.statistics().taker_fills, 2u);
     EXPECT_EQ(execution_.statistics().taker_quantity, 400u);
     EXPECT_EQ(execution_.open_orders(), 0u);  // an IOC never rests
@@ -166,8 +185,12 @@ MarketEvent reduce(MarketEventType type, OrderId id, std::uint64_t quantity = 0)
 
 MarketEvent replace(OrderId id, OrderId new_id, std::int64_t price, std::uint64_t quantity)
 {
-    return MarketEvent{.order_id = id, .new_order_id = new_id, .price = Price{price},
-                       .quantity = Quantity{quantity}, .symbol = kSymbol, .type = MarketEventType::Replace};
+    return MarketEvent{.order_id = id,
+                       .new_order_id = new_id,
+                       .price = Price{price},
+                       .quantity = Quantity{quantity},
+                       .symbol = kSymbol,
+                       .type = MarketEventType::Replace};
 }
 
 OrderRequest day(OrderId id, Side side, std::int64_t price, std::uint64_t quantity)
@@ -177,22 +200,34 @@ OrderRequest day(OrderId id, Side side, std::int64_t price, std::uint64_t quanti
 
 ExecutionReport accepted(OrderId id, Side side, std::uint64_t quantity)
 {
-    return ExecutionReport{.exchange_time = kNow, .order_id = id, .quantity = Quantity{quantity},
-                           .leaves = Quantity{quantity}, .type = ReportType::Accepted, .side = side};
+    return ExecutionReport{.exchange_time = kNow,
+                           .order_id = id,
+                           .quantity = Quantity{quantity},
+                           .leaves = Quantity{quantity},
+                           .type = ReportType::Accepted,
+                           .side = side};
 }
 
 ExecutionReport maker(OrderId id, Side side, std::int64_t price, std::uint64_t quantity, std::uint64_t leaves,
                       Timestamp ts = kNow)
 {
-    return ExecutionReport{.exchange_time = ts, .order_id = id, .price = Price{price},
-                           .quantity = Quantity{quantity}, .leaves = Quantity{leaves}, .type = ReportType::Fill,
-                           .liquidity = Liquidity::Maker, .side = side};
+    return ExecutionReport{.exchange_time = ts,
+                           .order_id = id,
+                           .price = Price{price},
+                           .quantity = Quantity{quantity},
+                           .leaves = Quantity{leaves},
+                           .type = ReportType::Fill,
+                           .liquidity = Liquidity::Maker,
+                           .side = side};
 }
 
 ExecutionReport cancelled(OrderId id, Side side, std::uint64_t quantity)
 {
-    return ExecutionReport{.exchange_time = kNow, .order_id = id, .quantity = Quantity{quantity},
-                           .type = ReportType::Cancelled, .side = side};
+    return ExecutionReport{.exchange_time = kNow,
+                           .order_id = id,
+                           .quantity = Quantity{quantity},
+                           .type = ReportType::Cancelled,
+                           .side = side};
 }
 
 ExecutionReport cancel_rejected(OrderId id)
@@ -357,8 +392,11 @@ TEST_F(RestingOrderTest, PostOnlyRejectsWhatWouldCrossAndRestsOtherwise)
     market(add(1, Side::Buy, kP, 100));
     market(add(2, Side::Sell, kP + 100, 100));
 
-    const ExecutionReport cross_buy{.exchange_time = kNow, .order_id = 1, .quantity = Quantity{10},
-                                    .type = ReportType::Rejected, .reason = RejectReason::WouldCross,
+    const ExecutionReport cross_buy{.exchange_time = kNow,
+                                    .order_id = 1,
+                                    .quantity = Quantity{10},
+                                    .type = ReportType::Rejected,
+                                    .reason = RejectReason::WouldCross,
                                     .side = Side::Buy};
     EXPECT_EQ(arrive(day(1, Side::Buy, kP + 100, 10)), Reports{cross_buy});  // equal counts
     ExecutionReport cross_sell = cross_buy;
@@ -442,13 +480,15 @@ TEST_F(RestingOrderTest, ExecutionWithPriceAtOrWorseThanOursFillsUs)
 
     EXPECT_EQ(market(executed_at(3, 10, kP + 100)), (Reports{maker(1, Side::Buy, kP + 100, 10, 90, 0)}));  // (a)
     EXPECT_EQ(market(executed_at(1, 20, kP + 100)), (Reports{maker(1, Side::Buy, kP + 100, 20, 70, 0)}));  // (d), equal
-    EXPECT_EQ(market(executed_at(2, 30, kP)), (Reports{maker(1, Side::Buy, kP + 100, 30, 40, 0)}));        // (d), worse
+    EXPECT_EQ(market(executed_at(2, 30, kP)), (Reports{maker(1, Side::Buy, kP + 100, 30, 40, 0)}));  // (d), worse
 
     const ExecutionStatistics& stats = execution_.statistics();
     EXPECT_EQ(stats.fills_by[static_cast<std::size_t>(FillCause::RuleAExecuteWithPrice)]
-                            [static_cast<std::size_t>(SessionPhase::PreOpen)], 1u);
+                            [static_cast<std::size_t>(SessionPhase::PreOpen)],
+              1u);
     EXPECT_EQ(stats.fills_by[static_cast<std::size_t>(FillCause::RuleDExecuteWithPrice)]
-                            [static_cast<std::size_t>(SessionPhase::PreOpen)], 2u);
+                            [static_cast<std::size_t>(SessionPhase::PreOpen)],
+              2u);
 }
 
 // Every maker fill and FIFO anomaly is attributed to its rule, message and
@@ -508,9 +548,9 @@ TEST_F(RestingOrderTest, IgnoresEventsTheBookRejects)
     other_symbol.symbol = kSymbol + 1;
     out_.clear();
     execution_.on_market(other_symbol, book_, out_);
-    execution_.on_market(add(1, Side::Buy, kP + 100, 100), book_, out_);       // duplicate id
+    execution_.on_market(add(1, Side::Buy, kP + 100, 100), book_, out_);  // duplicate id
     execution_.on_market(reduce(MarketEventType::Execute, 7, 10), book_, out_);  // unknown id
-    execution_.on_market(replace(1, 1, kP + 100, 10), book_, out_);            // invalid replace
+    execution_.on_market(replace(1, 1, kP + 100, 10), book_, out_);  // invalid replace
     EXPECT_EQ(out_, Reports{});
     EXPECT_EQ(execution_.find(1)->remaining, 50u);
 }
@@ -539,19 +579,19 @@ TEST_F(ExecutionSimulatorTest, RejectsArrivalsWhileNotTrading)
 // rule (a), (c) or (d) fill, while rule (b) keeps our queue position.
 TEST_F(RestingOrderTest, NoFillsWhileNotTradingButTheQueueStillMoves)
 {
-    market(add(1, Side::Buy, kP, 200));        // h1, ahead of us
+    market(add(1, Side::Buy, kP, 200));  // h1, ahead of us
     market(add(2, Side::Buy, kP - 100, 100));  // h2, a worse bid
     EXPECT_EQ(arrive(day(1, Side::Buy, kP, 100)), (Reports{accepted(1, Side::Buy, 100)}));
     EXPECT_EQ(ahead(1), 200u);
 
     EXPECT_EQ(market(status(TradingState::Halted)), Reports{});
-    EXPECT_EQ(market(add(3, Side::Sell, kP - 100, 50)), Reports{});         // crosses us: no (c)
-    EXPECT_EQ(market(add(4, Side::Buy, kP, 40)), Reports{});                // behind us
+    EXPECT_EQ(market(add(3, Side::Sell, kP - 100, 50)), Reports{});  // crosses us: no (c)
+    EXPECT_EQ(market(add(4, Side::Buy, kP, 40)), Reports{});  // behind us
     EXPECT_EQ(market(reduce(MarketEventType::Execute, 4, 40)), Reports{});  // no (a)
     EXPECT_EQ(market(reduce(MarketEventType::Execute, 2, 50)), Reports{});  // no (d)
-    EXPECT_EQ(market(replace(3, 5, kP - 200, 30)), Reports{});              // no (c) on a replacement
+    EXPECT_EQ(market(replace(3, 5, kP - 200, 30)), Reports{});  // no (c) on a replacement
     EXPECT_EQ(market(reduce(MarketEventType::Execute, 1, 150)), Reports{});
-    EXPECT_EQ(ahead(1), 50u);                                               // (b) still runs
+    EXPECT_EQ(ahead(1), 50u);  // (b) still runs
     EXPECT_EQ(execution_.find(1)->remaining, 100u);
 
     EXPECT_EQ(market(status(TradingState::Trading)), Reports{});
@@ -561,5 +601,5 @@ TEST_F(RestingOrderTest, NoFillsWhileNotTradingButTheQueueStillMoves)
     EXPECT_EQ(execution_.statistics().fifo_anomalies, 0u);
 }
 
-} // namespace
-} // namespace simulator
+}  // namespace
+}  // namespace simulator

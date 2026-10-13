@@ -40,17 +40,53 @@ std::uint64_t simulator::allocation_count() noexcept
 
 #ifndef CHRONOS_NO_ALLOC_COUNTER
 // Replacing global new/delete affects the whole program, so this lives in the executable, never in simulator_lib.
-void* operator new(std::size_t size) { return allocate(size); }
-void* operator new[](std::size_t size) { return allocate(size); }
-void* operator new(std::size_t size, std::align_val_t align) { return allocate(size, align); }
-void* operator new[](std::size_t size, std::align_val_t align) { return allocate(size, align); }
+void* operator new(std::size_t size)
+{
+    return allocate(size);
+}
+void* operator new[](std::size_t size)
+{
+    return allocate(size);
+}
+void* operator new(std::size_t size, std::align_val_t align)
+{
+    return allocate(size, align);
+}
+void* operator new[](std::size_t size, std::align_val_t align)
+{
+    return allocate(size, align);
+}
 
-void operator delete(void* p) noexcept { std::free(p); }
-void operator delete[](void* p) noexcept { std::free(p); }
-void operator delete(void* p, std::size_t) noexcept { std::free(p); }
-void operator delete[](void* p, std::size_t) noexcept { std::free(p); }
-void operator delete(void* p, std::align_val_t) noexcept { std::free(p); }
-void operator delete[](void* p, std::align_val_t) noexcept { std::free(p); }
-void operator delete(void* p, std::size_t, std::align_val_t) noexcept { std::free(p); }
-void operator delete[](void* p, std::size_t, std::align_val_t) noexcept { std::free(p); }
+void operator delete(void* p) noexcept
+{
+    std::free(p);
+}
+void operator delete[](void* p) noexcept
+{
+    std::free(p);
+}
+void operator delete(void* p, std::size_t) noexcept
+{
+    std::free(p);
+}
+void operator delete[](void* p, std::size_t) noexcept
+{
+    std::free(p);
+}
+void operator delete(void* p, std::align_val_t) noexcept
+{
+    std::free(p);
+}
+void operator delete[](void* p, std::align_val_t) noexcept
+{
+    std::free(p);
+}
+void operator delete(void* p, std::size_t, std::align_val_t) noexcept
+{
+    std::free(p);
+}
+void operator delete[](void* p, std::size_t, std::align_val_t) noexcept
+{
+    std::free(p);
+}
 #endif
