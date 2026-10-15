@@ -3,6 +3,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <span>
 #include <vector>
 
 #include "simulator/market/market_book.hpp"
@@ -136,6 +137,11 @@ public:
 
     // nullptr if not resting. Invalidated by the next call that changes orders.
     const ShadowOrder* find(OrderId id) const noexcept;
+    // Per side, in priority order; invalidated by the next call that changes orders.
+    std::span<const ShadowOrder> resting_orders() const noexcept
+    {
+        return orders_;
+    }
     std::size_t open_orders() const noexcept
     {
         return orders_.size();

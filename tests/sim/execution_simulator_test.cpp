@@ -601,5 +601,22 @@ TEST_F(RestingOrderTest, NoFillsWhileNotTradingButTheQueueStillMoves)
     EXPECT_EQ(execution_.statistics().fifo_anomalies, 0u);
 }
 
+TEST_F(RestingOrderTest, RestingOrdersListsOurQuotesUntilCancelled)
+{
+    EXPECT_EQ(market(add(1, Side::Buy, kP, 200)), Reports{});
+    EXPECT_EQ(arrive(day(10, Side::Buy, kP, 100)), (Reports{accepted(10, Side::Buy, 100)}));
+    EXPECT_EQ(arrive(day(11, Side::Buy, kP, 50)), (Reports{accepted(11, Side::Buy, 50)}));
+
+    const std::span<const ShadowOrder> resting = execution_.resting_orders();
+    ASSERT_EQ(resting.size(), 2u);
+    EXPECT_EQ(resting[0].id, 10u);
+    EXPECT_EQ(resting[1].id, 11u);
+    EXPECT_EQ(resting[0].ahead_quantity, 200u);
+
+    EXPECT_EQ(cancel(10).size(), 1u);
+    ASSERT_EQ(execution_.resting_orders().size(), 1u);
+    EXPECT_EQ(execution_.resting_orders()[0].id, 11u);
+}
+
 }  // namespace
 }  // namespace simulator

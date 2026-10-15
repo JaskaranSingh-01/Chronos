@@ -3,6 +3,7 @@
 #include <array>
 #include <cstdint>
 #include <random>
+#include <vector>
 
 #include "simulator/market/market_book.hpp"
 
@@ -561,6 +562,47 @@ TEST(MarketBookTest, BooksOnASharedPoolDrawFromTheSameSlots)
     // A book on a shared pool cannot compare the pool with its own orders alone.
     expect_invariants(a);
     expect_invariants(b);
+}
+
+TEST(MarketBookTest, VisitOrdersWalksOneLevelFrontFirst)
+{
+    MarketBook book{kSymbol, 16};
+    const auto add_at = [&](OrderId id, Side side, std::int64_t price) {
+        ASSERT_EQ(book.apply(MarketEvent{.timestamp = static_cast<Timestamp>(id),
+                                         .order_id = id,
+                                         .price = Price{price},
+                                         .quantity = Quantity{10},
+                                         .symbol = kSymbol,
+                                         .type = MarketEventType::Add,
+                                         .side = side}),
+                  ApplyResult::Applied);
+    };
+    add_at(1, Side::Buy, 100);
+    add_at(2, Side::Buy, 100);
+    add_at(3, Side::Buy, 100);
+    add_at(4, Side::Buy, 99);
+    add_at(5, Side::Sell, 101);
+
+    std::vector<OrderId> ids;
+    book.visit_orders(Side::Buy, Price{100}, [&](const Order& order) {
+        ids.push_back(order.id());
+        return true;
+    });
+    EXPECT_EQ(ids, (std::vector<OrderId>{1, 2, 3}));
+
+    ids.clear();
+    book.visit_orders(Side::Buy, Price{100}, [&](const Order& order) {
+        ids.push_back(order.id());
+        return ids.size() < 2;
+    });
+    EXPECT_EQ(ids, (std::vector<OrderId>{1, 2}));
+
+    ids.clear();
+    book.visit_orders(Side::Sell, Price{100}, [&](const Order& order) {
+        ids.push_back(order.id());
+        return true;
+    });
+    EXPECT_TRUE(ids.empty());
 }
 
 } // namespace

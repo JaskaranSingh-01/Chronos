@@ -137,6 +137,24 @@ public:
         side == Side::Buy ? visit(book_.bids()) : visit(book_.asks());
     }
 
+    // Calls f(const Order&) for the orders at `price` on `side`, front of the queue first; stops when f returns false.
+    template <class F>
+    void visit_orders(Side side, Price price, F&& f) const noexcept
+    {
+        auto visit = [&](const auto& levels) {
+            const auto level = levels.find(price);
+            if (level == levels.end()) {
+                return;
+            }
+            for (const Order* order = level->second.front(); order != nullptr; order = order->next()) {
+                if (!f(*order)) {
+                    return;
+                }
+            }
+        };
+        side == Side::Buy ? visit(book_.bids()) : visit(book_.asks());
+    }
+
     // Sequence of the most recent Add or Replace; 0 before the first.
     std::uint64_t last_sequence() const noexcept
     {
@@ -152,7 +170,7 @@ public:
     }
 
     bool is_crossed() const noexcept;  // best bid >  best ask
-    bool is_locked() const noexcept;   // best bid == best ask
+    bool is_locked() const noexcept;  // best bid == best ask
 
     // O(orders); on failure writes the first broken invariant to `error`. A crossed book
     // fails only if `rth` and Trading. The pool count is checked only for an owned pool.
@@ -163,4 +181,4 @@ public:
     std::uint64_t digest() const noexcept;
 };
 
-} // namespace simulator
+}  // namespace simulator
