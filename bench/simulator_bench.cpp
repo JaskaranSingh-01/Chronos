@@ -1,7 +1,8 @@
 // Micro-benchmarks of the replay hot paths (cmake -DCHRONOS_BENCH=ON): MarketBook::apply
 // per event type at depth 1,000 (in cache) and 1,000,000 (not), ItchSource::next, and
-// OrderPool release + acquire. Time is the mean ns per operation of a manually timed
-// batch; the CPU column also counts untimed setup, so it is not comparable.
+// OrderPool release + acquire, as the mean ns per operation of a manually timed batch;
+// the CPU column also counts untimed setup, so it is not comparable. BM_EventLoop is the
+// exception: ms per EventLoop run over 1,000,000 events.
 
 #include <benchmark/benchmark.h>
 
@@ -17,10 +18,14 @@
 #include <vector>
 
 #include "itch/itch_test_builder.hpp"
+#include "simulator/engine/event_loop.hpp"
 #include "simulator/itch/itch_source.hpp"
 #include "simulator/market/instrument_registry.hpp"
 #include "simulator/market/market_book.hpp"
+#include "simulator/market/vector_source.hpp"
 #include "simulator/orders/order_pool.hpp"
+#include "simulator/portfolio/portfolio.hpp"
+#include "simulator/strategies/market_maker.hpp"
 
 namespace simulator {
 namespace {
@@ -307,6 +312,83 @@ void BM_PoolReleaseAcquire(benchmark::State& state)
     }
 }
 
+// n valid events 1 us apart: adds off the mid (never crossed), interleaved with partial executes and deletes.
+std::vector<MarketEvent> loop_stream(std::size_t n)
+{
+    std::mt19937_64 rng{7};
+    std::vector<MarketEvent> events;
+    events.reserve(n);
+    std::vector<OrderId> live;
+    OrderId next_id = 1;
+
+    for (std::size_t i = 0; i < n; ++i) {
+        const auto ts = static_cast<Timestamp>(i + 1) * 1'000;
+        const std::uint64_t roll = rng() % 4;
+        if (live.size() < 64 || roll < 2) {
+            const Side side = rng() % 2 == 0 ? Side::Buy : Side::Sell;
+            const auto offset = static_cast<std::int64_t>(1 + rng() % 20) * kTick;
+            events.push_back(MarketEvent{.timestamp = ts,
+                                         .order_id = next_id,
+                                         .price = Price{side == Side::Buy ? kMid - offset : kMid + offset},
+                                         .quantity = Quantity{kShares},
+                                         .symbol = 0,
+                                         .type = T::Add,
+                                         .side = side});
+            live.push_back(next_id++);
+            continue;
+        }
+        const std::size_t k = rng() % live.size();
+        if (roll == 2) {
+            events.push_back(MarketEvent{
+                .timestamp = ts, .order_id = live[k], .quantity = Quantity{100}, .symbol = 0, .type = T::Execute});
+        } else {
+            events.push_back(MarketEvent{.timestamp = ts, .order_id = live[k], .symbol = 0, .type = T::Delete});
+            live[k] = live.back();
+            live.pop_back();
+        }
+    }
+    return events;
+}
+
+// EventLoop over 1,000,000 events with NullStrategy (mm:0) or a quoting MarketMaker (mm:1).
+void BM_EventLoop(benchmark::State& state)
+{
+    static const std::vector<MarketEvent> events = loop_stream(1'000'000);
+    const Instrument equity{.price_scale = 4, .quantity_scale = 0};
+    const RiskLimits limits{
+        .max_position = 1'000'000, .max_order_quantity = Quantity{1'000'000}, .max_open_orders = 16};
+
+    LoopReport report;
+    for (auto _ : state) {
+        VectorSource source{events};
+        MarketBook book{0, std::size_t{1} << 20};
+        ExecutionSimulator execution;
+        Portfolio portfolio{equity, limits, FeeSchedule{}};
+
+        const auto start = clock_type::now();
+        if (state.range(0) == 1) {
+            MarketMaker strategy{MarketMakerParams{.requote_cooldown_ns = 1'000}};
+            EventLoop<MarketMaker> loop{source,    book,
+                                        execution, portfolio,
+                                        strategy,  LatencyConfig{.order_latency = 50'000, .report_latency = 50'000}};
+            report = loop.run();
+        } else {
+            NullStrategy strategy;
+            EventLoop<NullStrategy> loop{source, book, execution, portfolio, strategy, LatencyConfig{}};
+            report = loop.run();
+        }
+        state.SetIterationTime(seconds(clock_type::now() - start));
+
+        if (!report.replay.succeeded() || report.replay.rejected() != 0) {
+            state.SkipWithError("the benchmark stream must replay cleanly");
+            break;
+        }
+        benchmark::DoNotOptimize(book.digest());
+    }
+    state.SetItemsProcessed(state.iterations() * static_cast<std::int64_t>(events.size()));
+    state.counters["sim_events"] = static_cast<double>(report.sim_events);
+}
+
 // 4,096 batches of 256: ~1 M operations per run, fixed so every run does the same work.
 constexpr benchmark::IterationCount kIterations = 4'096;
 
@@ -326,6 +408,7 @@ BENCHMARK(BM_PoolReleaseAcquire)
     ->Arg(4'194'304)
     ->UseManualTime()
     ->Iterations(kIterations);
+BENCHMARK(BM_EventLoop)->ArgName("mm")->Arg(0)->Arg(1)->UseManualTime()->Unit(benchmark::kMillisecond)->Iterations(5);
 
 } // namespace
 } // namespace simulator
