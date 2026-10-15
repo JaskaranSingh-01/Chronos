@@ -10,6 +10,7 @@
 #include "simulator/engine/event_loop.hpp"
 #include "simulator/market/market_replay.hpp"
 #include "simulator/market/vector_source.hpp"
+#include "simulator/strategies/market_maker.hpp"
 
 namespace simulator {
 namespace {
@@ -555,5 +556,367 @@ TEST(EventLoopTest, NoDrainAfterAFatalFailure)
     EXPECT_EQ(portfolio.position(), 0);
 }
 
-} // namespace
-} // namespace simulator
+// Drives `loop` by hand; with `advance_first`, also advances to just before every market event.
+template <class Loop>
+void drive(Loop& loop, bool advance_first)
+{
+    Timestamp next_ts{0};
+    while (loop.peek(next_ts) == PeekStatus::Event) {
+        if (advance_first && next_ts > 0) {
+            loop.advance_to(next_ts - 1);
+        }
+        if (!loop.step().ok) {
+            break;
+        }
+    }
+    loop.finish();
+}
+
+// random_stream with bids below 100 and asks above, so a quoting strategy trades.
+std::vector<MarketEvent> uncrossed_stream()
+{
+    std::vector<MarketEvent> events = random_stream();
+    for (MarketEvent& event : events) {
+        if (event.type == MarketEventType::Add) {
+            event.price = Price{event.side == Side::Buy ? 90 + event.price.ticks % 10 : 101 + event.price.ticks % 10};
+        }
+    }
+    return events;
+}
+
+struct MarketMakerRun
+{
+    LoopReport report;
+    std::uint64_t digest{0};
+    std::int64_t position{0};
+    std::int64_t cash{0};
+
+    bool operator==(const MarketMakerRun&) const = default;
+};
+
+// mode 0: run(); 1: peek/step; 2: peek/advance_to/step.
+MarketMakerRun run_market_maker(std::span<const MarketEvent> events, LatencyConfig latency, int mode)
+{
+    VectorSource source{events};
+    MarketBook book{kSymbol, 8'192};
+    ExecutionSimulator execution;
+    Portfolio portfolio{kEquity, kWide, FeeSchedule{}};
+    MarketMaker strategy{MarketMakerParams{.quote_size = 10, .max_position = 1'000, .requote_cooldown_ns = 0}};
+    EventLoop<MarketMaker> loop{source, book, execution, portfolio, strategy, latency, {.check_invariants_every = 100}};
+    if (mode == 0) {
+        loop.run();
+    } else {
+        drive(loop, mode == 2);
+    }
+    return {loop.report(), book.digest(), portfolio.position(), portfolio.cash()};
+}
+
+TEST(EventLoopTest, StepApiMatchesRunWithAQuotingStrategy)
+{
+    const std::vector<MarketEvent> events = uncrossed_stream();
+    for (const LatencyConfig latency : {LatencyConfig{0, 0}, LatencyConfig{1, 1}, LatencyConfig{3, 2}}) {
+        const MarketMakerRun expected = run_market_maker(events, latency, 0);
+        ASSERT_TRUE(expected.report.replay.succeeded());
+        EXPECT_GT(expected.report.sim_events, 0u);  // the strategy really traded
+        EXPECT_EQ(run_market_maker(events, latency, 1), expected);
+        EXPECT_EQ(run_market_maker(events, latency, 2), expected);
+    }
+}
+
+// The order arrives at 100 with zero latency, but only after the delete at 100.
+TEST(EventLoopTest, SimEventsAtATimestampWaitForEveryMarketEventAtIt)
+{
+    const std::vector<MarketEvent> events{
+        add(100, 1, Side::Sell, 1'000'000, 100),
+        MarketEvent{.timestamp = 100, .order_id = 1, .symbol = kSymbol, .type = MarketEventType::Delete}};
+
+    for (const bool stepped : {false, true}) {
+        Harness h{events};
+        h.strategy.act = [](StrategyContext& ctx, const MarketEvent& event) {
+            if (event.type == MarketEventType::Add) {
+                OrderId id{0};
+                ASSERT_EQ(ctx.gateway.send(Side::Buy, Price{1'000'000}, Quantity{100}, TimeInForce::Ioc, id),
+                          RiskCheck::Accepted);
+            }
+        };
+        if (stepped) {
+            EventLoop<Recorder> loop{h.source, h.book, h.execution, h.portfolio, h.strategy, LatencyConfig{}};
+            drive(loop, false);
+        } else {
+            h.run(LatencyConfig{});
+        }
+
+        ASSERT_EQ(h.strategy.kinds(), (std::vector<char>{'M', 'M', 'R'}));
+        EXPECT_EQ(h.strategy.seen[2].report.type, ReportType::Expired);
+        EXPECT_EQ(h.strategy.seen[2].report.exchange_time, 100);
+    }
+}
+
+std::vector<MarketEvent> two_far_events()
+{
+    return {add(10, 1, Side::Sell, 1'000'000, 100), add(1'000, 2, Side::Buy, 999'900, 100)};
+}
+
+// Sends an IOC buy of `quantity` at 1,000,000 on the first event.
+void buy_on_first_event(Harness& h, std::uint64_t quantity)
+{
+    h.strategy.act = [quantity](StrategyContext& ctx, const MarketEvent& event) {
+        if (event.order_id == 1) {
+            OrderId id{0};
+            ASSERT_EQ(ctx.gateway.send(Side::Buy, Price{1'000'000}, Quantity{quantity}, TimeInForce::Ioc, id),
+                      RiskCheck::Accepted);
+        }
+    };
+}
+
+TEST(EventLoopTest, AdvanceToRunsDueSimEventsBeforeTheNextMarketEvent)
+{
+    const std::vector<MarketEvent> events = two_far_events();
+    Harness h{events};
+    buy_on_first_event(h, 50);
+    EventLoop<Recorder> loop{h.source,    h.book,     h.execution,
+                             h.portfolio, h.strategy, {.order_latency = 100, .report_latency = 100}};
+    Timestamp next_ts{0};
+    ASSERT_EQ(loop.peek(next_ts), PeekStatus::Event);
+    ASSERT_TRUE(loop.step().ok);
+    ASSERT_EQ(loop.peek(next_ts), PeekStatus::Event);
+    ASSERT_EQ(next_ts, 1'000);
+
+    loop.advance_to(500);
+
+    ASSERT_EQ(h.strategy.kinds(), (std::vector<char>{'M', 'R'}));
+    EXPECT_EQ(h.strategy.seen[1].now, 210);  // arrived at 110, delivered at 210
+    EXPECT_EQ(h.strategy.seen[1].report.type, ReportType::Fill);
+    EXPECT_EQ(h.strategy.seen[1].report.quantity, Quantity{50});
+    EXPECT_EQ(loop.gateway().now(), 500);
+    EXPECT_EQ(loop.report().replay.events, 1u);  // the second event is peeked, not yet counted
+}
+
+TEST(EventLoopTest, AdvanceToHoldsSimEventsAtTheNextMarketTimestamp)
+{
+    const std::vector<MarketEvent> events = two_far_events();
+    Harness h{events};
+    buy_on_first_event(h, 50);
+    EventLoop<Recorder> loop{h.source,    h.book,     h.execution,
+                             h.portfolio, h.strategy, {.order_latency = 990, .report_latency = 0}};  // arrives at 1,000
+    Timestamp next_ts{0};
+    ASSERT_EQ(loop.peek(next_ts), PeekStatus::Event);
+    ASSERT_TRUE(loop.step().ok);
+    ASSERT_EQ(loop.peek(next_ts), PeekStatus::Event);
+
+    loop.advance_to(999);
+    loop.advance_to(1'000);
+
+    EXPECT_EQ(h.strategy.kinds(), (std::vector<char>{'M'}));
+    EXPECT_EQ(loop.gateway().now(), 999);
+    ASSERT_TRUE(loop.step().ok);
+    ASSERT_EQ(loop.peek(next_ts), PeekStatus::EndOfStream);  // finish() drains only once the stream has ended
+    loop.finish();
+    EXPECT_EQ(h.strategy.kinds(), (std::vector<char>{'M', 'M', 'R'}));  // the market event at 1,000 first
+}
+
+TEST(EventLoopTest, CommandsBetweenStepsUseTheAdvancedClock)
+{
+    const std::vector<MarketEvent> events = two_far_events();
+    Harness h{events};
+    EventLoop<Recorder> loop{h.source,    h.book,     h.execution,
+                             h.portfolio, h.strategy, {.order_latency = 100, .report_latency = 100}};
+    Timestamp next_ts{0};
+    ASSERT_EQ(loop.peek(next_ts), PeekStatus::Event);
+    ASSERT_TRUE(loop.step().ok);
+    ASSERT_EQ(loop.peek(next_ts), PeekStatus::Event);
+    loop.advance_to(500);
+
+    OrderId id{0};
+    ASSERT_EQ(loop.gateway().send(Side::Buy, Price{1'000'000}, Quantity{10}, TimeInForce::Ioc, id),
+              RiskCheck::Accepted);
+    loop.advance_to(900);
+
+    ASSERT_EQ(h.strategy.kinds(), (std::vector<char>{'M', 'R'}));
+    EXPECT_EQ(h.strategy.seen[1].report.exchange_time, 600);
+    EXPECT_EQ(h.strategy.seen[1].now, 700);
+}
+
+TEST(EventLoopTest, PeekSeparatesEndOfStreamFromError)
+{
+    {
+        const std::vector<MarketEvent> clean{add(10, 1, Side::Buy, 100, 5)};
+        Harness h{clean};
+        EventLoop<Recorder> loop{h.source, h.book, h.execution, h.portfolio, h.strategy, LatencyConfig{}};
+        Timestamp ts{0};
+        ASSERT_EQ(loop.peek(ts), PeekStatus::Event);
+        ASSERT_TRUE(loop.step().ok);
+        EXPECT_EQ(loop.peek(ts), PeekStatus::EndOfStream);
+        EXPECT_EQ(loop.peek(ts), PeekStatus::EndOfStream);
+        loop.finish();
+        EXPECT_TRUE(loop.report().replay.succeeded());
+    }
+    {
+        const std::vector<MarketEvent> out_of_order{add(10, 1, Side::Sell, 1'000'000, 100),
+                                                    add(5, 2, Side::Buy, 99, 5)};
+        Harness h{out_of_order};
+        buy_on_first_event(h, 10);
+        EventLoop<Recorder> loop{h.source,    h.book,     h.execution,
+                                 h.portfolio, h.strategy, {.order_latency = 1'000, .report_latency = 0}};
+        Timestamp ts{0};
+        ASSERT_EQ(loop.peek(ts), PeekStatus::Event);
+        ASSERT_TRUE(loop.step().ok);
+        EXPECT_EQ(loop.peek(ts), PeekStatus::Error);
+        EXPECT_EQ(loop.report().replay.failure, ReplayFailure::OutOfOrderTimestamp);
+        loop.finish();
+        EXPECT_EQ(loop.report().drained_sim_events, 0u);
+        EXPECT_EQ(loop.report().discarded_sim_events, 1u);  // the arrival never runs after a fatal failure
+    }
+}
+
+TEST(EventLoopTest, PeekTwiceReadsOneEvent)
+{
+    const std::vector<MarketEvent> events{add(10, 1, Side::Buy, 100, 5)};
+    Harness h{events};
+    EventLoop<Recorder> loop{h.source, h.book, h.execution, h.portfolio, h.strategy, LatencyConfig{}};
+    Timestamp first{0};
+    Timestamp second{0};
+    ASSERT_EQ(loop.peek(first), PeekStatus::Event);
+    ASSERT_EQ(loop.peek(second), PeekStatus::Event);
+    EXPECT_EQ(first, second);
+    ASSERT_TRUE(loop.step().ok);
+    EXPECT_EQ(loop.report().replay.events, 1u);
+    EXPECT_EQ(loop.peek(first), PeekStatus::EndOfStream);
+}
+
+TEST(EventLoopTest, StepWithoutAPendingEventDoesNothing)
+{
+    const std::vector<MarketEvent> events{add(10, 1, Side::Buy, 100, 5)};
+    Harness h{events};
+    EventLoop<Recorder> loop{h.source, h.book, h.execution, h.portfolio, h.strategy, LatencyConfig{}};
+    EXPECT_FALSE(loop.step().ok);  // no peek yet
+    EXPECT_EQ(loop.report().replay.events, 0u);
+
+    Timestamp ts{0};
+    ASSERT_EQ(loop.peek(ts), PeekStatus::Event);
+    ASSERT_TRUE(loop.step().ok);
+    ASSERT_EQ(loop.peek(ts), PeekStatus::EndOfStream);
+    EXPECT_FALSE(loop.step().ok);
+    EXPECT_EQ(h.strategy.kinds(), (std::vector<char>{'M'}));
+}
+
+TEST(EventLoopTest, AdvanceToNeverMovesTheClockBackwards)
+{
+    const std::vector<MarketEvent> events = two_far_events();
+    Harness h{events};
+    EventLoop<Recorder> loop{h.source, h.book, h.execution, h.portfolio, h.strategy, LatencyConfig{}};
+    Timestamp ts{0};
+    ASSERT_EQ(loop.peek(ts), PeekStatus::Event);
+    ASSERT_TRUE(loop.step().ok);
+    ASSERT_EQ(loop.gateway().now(), 10);
+
+    loop.advance_to(5);
+
+    EXPECT_EQ(loop.gateway().now(), 10);
+}
+
+TEST(EventLoopTest, AdvanceToAfterEndOfStreamRunsLateArrivals)
+{
+    const std::vector<MarketEvent> events{add(10, 1, Side::Sell, 1'000'000, 100)};
+    Harness h{events};
+    buy_on_first_event(h, 10);
+    EventLoop<Recorder> loop{h.source,    h.book,     h.execution,
+                             h.portfolio, h.strategy, {.order_latency = 100, .report_latency = 0}};
+    Timestamp ts{0};
+    ASSERT_EQ(loop.peek(ts), PeekStatus::Event);
+    ASSERT_TRUE(loop.step().ok);
+    ASSERT_EQ(loop.peek(ts), PeekStatus::EndOfStream);
+
+    loop.advance_to(200);
+
+    ASSERT_EQ(h.strategy.kinds(), (std::vector<char>{'M', 'R'}));
+    EXPECT_EQ(h.strategy.seen[1].report.type, ReportType::Fill);
+    loop.finish();
+    EXPECT_EQ(loop.report().drained_sim_events, 0u);
+}
+
+TEST(EventLoopTest, EarlyFinishDiscardsAndFinishIsIdempotent)
+{
+    const std::vector<MarketEvent> events = two_far_events();
+    Harness h{events};
+    buy_on_first_event(h, 10);
+    EventLoop<Recorder> loop{h.source,    h.book,     h.execution,
+                             h.portfolio, h.strategy, {.order_latency = 100, .report_latency = 0}};
+    Timestamp ts{0};
+    ASSERT_EQ(loop.peek(ts), PeekStatus::Event);
+    ASSERT_TRUE(loop.step().ok);
+    ASSERT_EQ(loop.peek(ts), PeekStatus::Event);  // the event at 1,000 is pending
+
+    loop.finish();
+
+    EXPECT_EQ(loop.report().drained_sim_events, 0u);
+    EXPECT_EQ(loop.report().discarded_sim_events, 1u);  // the arrival at 110, never run
+    EXPECT_EQ(loop.report().replay.rejected(), 0u);  // the peeked event is not counted as read
+    const LoopReport first = loop.report();
+    loop.finish();
+    EXPECT_EQ(loop.report(), first);
+    EXPECT_EQ(h.strategy.kinds(), (std::vector<char>{'M'}));
+}
+
+TEST(EventLoopTest, AdvanceToWithoutPeekStillHoldsAtTheNextMarketEvent)
+{
+    const std::vector<MarketEvent> events = two_far_events();
+    Harness h{events};
+    buy_on_first_event(h, 50);
+    EventLoop<Recorder> loop{h.source,    h.book,
+                             h.execution, h.portfolio,
+                             h.strategy,  {.order_latency = 1'500, .report_latency = 0}};  // arrives at 1,510
+    Timestamp ts{0};
+    ASSERT_EQ(loop.peek(ts), PeekStatus::Event);
+    ASSERT_TRUE(loop.step().ok);
+
+    loop.advance_to(2'000);  // the event at 1,000 has not been peeked
+
+    EXPECT_EQ(h.strategy.kinds(), (std::vector<char>{'M'}));
+    EXPECT_EQ(loop.gateway().now(), 10);
+    ASSERT_TRUE(loop.step().ok);
+    EXPECT_EQ(loop.gateway().now(), 1'000);
+    ASSERT_EQ(loop.peek(ts), PeekStatus::EndOfStream);
+    loop.advance_to(2'000);
+    EXPECT_EQ(h.strategy.kinds(), (std::vector<char>{'M', 'M', 'R'}));
+    EXPECT_EQ(loop.gateway().now(), 2'000);
+}
+
+TEST(EventLoopTest, TimersAreOffOnceTheStreamHasEnded)
+{
+    const std::vector<MarketEvent> events{add(10, 1, Side::Buy, 100, 5)};
+    Harness h{events};
+    EventLoop<Recorder> loop{h.source, h.book, h.execution, h.portfolio, h.strategy, LatencyConfig{}};
+    Timestamp ts{0};
+    ASSERT_EQ(loop.peek(ts), PeekStatus::Event);
+    ASSERT_TRUE(loop.step().ok);
+    EXPECT_TRUE(loop.gateway().set_timer(50, 1));  // the end of the stream has not been seen yet
+
+    ASSERT_EQ(loop.peek(ts), PeekStatus::EndOfStream);
+
+    EXPECT_FALSE(loop.gateway().set_timer(60, 2));
+}
+
+TEST(EventLoopTest, AdvanceToRunsNothingWhenItsPeekFindsAFatalFailure)
+{
+    const std::vector<MarketEvent> out_of_order{add(10, 1, Side::Sell, 1'000'000, 100), add(5, 2, Side::Buy, 99, 5)};
+    Harness h{out_of_order};
+    buy_on_first_event(h, 10);
+    EventLoop<Recorder> loop{h.source,    h.book,     h.execution,
+                             h.portfolio, h.strategy, {.order_latency = 1, .report_latency = 0}};
+    Timestamp ts{0};
+    ASSERT_EQ(loop.peek(ts), PeekStatus::Event);
+    ASSERT_TRUE(loop.step().ok);
+
+    loop.advance_to(1'000);  // reads the event at 5, which is out of order
+
+    EXPECT_EQ(h.strategy.kinds(), (std::vector<char>{'M'}));  // the arrival at 11 did not run
+    EXPECT_EQ(loop.gateway().now(), 10);
+    EXPECT_EQ(loop.report().replay.failure, ReplayFailure::OutOfOrderTimestamp);
+    loop.finish();
+    EXPECT_EQ(loop.report().drained_sim_events, 0u);
+    EXPECT_EQ(loop.report().discarded_sim_events, 1u);
+}
+
+}  // namespace
+}  // namespace simulator

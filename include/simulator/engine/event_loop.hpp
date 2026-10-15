@@ -16,18 +16,30 @@ namespace simulator {
 // Caps the end-of-stream drain, so a strategy that answers every report with an order still ends.
 inline constexpr std::uint64_t max_drain_events = 100'000;
 
+enum class PeekStatus : std::uint8_t {
+    Event,
+    EndOfStream,
+    Error
+};
+
+struct StepResult
+{
+    ApplyResult applied{ApplyResult::Applied};
+    bool ok{false};  // false: there was no pending event, or a fatal failure ended the stream
+};
+
 struct LoopReport
 {
     ReplayReport replay;                    // market side, counted as MarketReplay::run counts it
     std::uint64_t sim_events{0};            // handled, drained ones included
-    std::uint64_t drained_sim_events{0};    // handled after the market stream ended
+    std::uint64_t drained_sim_events{0};    // handled by finish()
     std::uint64_t discarded_sim_events{0};  // never handled: queued at a fatal failure or past the drain cap
 
     bool operator==(const LoopReport&) const = default;
 };
 
-// Merges the historical market stream with our SimQueue in timestamp order and drives the strategy.
-// At end of stream it drains the SimQueue with timers disabled; a fatal failure discards it instead.
+// Merges the historical market stream with our SimQueue in (timestamp, class, sequence) order and
+// drives the strategy: run() to the end, or step by step with peek/advance_to/step/finish.
 template <Strategy S>
 class EventLoop
 {
@@ -43,6 +55,13 @@ private:
     OrderGateway gateway_;
     StrategyContext context_;
     std::vector<ExecutionReport> reports_;  // ExecutionSimulator output, scheduled and cleared after each call
+    LoopReport report_;
+    MarketEvent pending_{};  // read by peek(), applied by step()
+    bool has_pending_{false};
+    bool ended_{false};    // the source returned EndOfStream
+    bool failed_{false};   // a fatal failure ended the stream
+    bool finished_{false};
+    std::uint64_t until_check_{0};
 
     void schedule_reports(Timestamp now) noexcept
     {
@@ -92,7 +111,28 @@ private:
         }
     }
 
+    void fail(ReplayFailure failure, std::string_view message) noexcept
+    {
+        ReplayReport& replay = report_.replay;
+        replay.failure = failure;
+        replay.failed_position = source_.position();
+        replay.message = message;
+        failed_ = true;
+        has_pending_ = false;
+    }
+
+    void run_next_sim() noexcept
+    {
+        const SimEvent sim = queue_.top();  // a copy: handling it may push
+        queue_.pop();
+        ++report_.sim_events;
+        on_sim(sim);
+    }
+
 public:
+    EventLoop(const EventLoop&) = delete;
+    EventLoop& operator=(const EventLoop&) = delete;
+
     EventLoop(MarketEventSource& source, MarketBook& book, ExecutionSimulator& execution, Portfolio& portfolio,
               S& strategy, LatencyConfig latency, ReplayOptions options = {}, std::size_t queue_capacity = 1'024)
         : source_(source),
@@ -104,82 +144,147 @@ public:
           options_(options),
           queue_(queue_capacity),
           gateway_(queue_, portfolio, latency),
-          context_{book, portfolio, gateway_}
+          context_{book, portfolio, gateway_},
+          until_check_(options.check_invariants_every)
     {
         reports_.reserve(64);
     }
 
-    // Runs to the end of the market stream or its first fatal failure. Call once.
-    LoopReport run() noexcept
+    // Reads the next market event into a one-event lookahead; repeated calls return the same event.
+    PeekStatus peek(Timestamp& next_ts) noexcept
     {
-        LoopReport report;
-        ReplayReport& replay = report.replay;
-        MarketEvent event;
-        std::uint64_t until_check = options_.check_invariants_every;
-
-        auto fail = [&](ReplayFailure failure, std::string_view message) {
-            replay.failure = failure;
-            replay.failed_position = source_.position();
-            replay.message = message;
-        };
-
-        for (;;) {
-            const SourceResult result = source_.next(event);
-
-            if (result == SourceResult::EndOfStream) {
-                gateway_.stop_timers();
-                for (; !queue_.empty() && report.drained_sim_events < max_drain_events; ++report.drained_sim_events) {
-                    const SimEvent sim = queue_.top();  // a copy: handling it may push
-                    queue_.pop();
-                    ++report.sim_events;
-                    on_sim(sim);
-                }
-                break;
+        if (failed_) {
+            return PeekStatus::Error;
+        }
+        if (!has_pending_) {
+            if (ended_ || finished_) {
+                return PeekStatus::EndOfStream;
             }
+            const SourceResult result = source_.next(pending_);
+            if (result == SourceResult::EndOfStream) {
+                ended_ = true;
+                gateway_.stop_timers();
+                return PeekStatus::EndOfStream;
+            }
+            ReplayReport& replay = report_.replay;
             if (result == SourceResult::Error) {
                 replay.source_error = source_.error();
                 fail(ReplayFailure::SourceError, to_string(replay.source_error));
-                break;
+                return PeekStatus::Error;
             }
-
-            if (replay.events == 0) {
-                replay.first_timestamp = event.timestamp;
-            } else if (event.timestamp < replay.last_timestamp) {
+            if (replay.events != 0 && pending_.timestamp < replay.last_timestamp) {
                 fail(ReplayFailure::OutOfOrderTimestamp, "timestamp earlier than the previous event's");
+                return PeekStatus::Error;
+            }
+            has_pending_ = true;
+        }
+        next_ts = pending_.timestamp;
+        return PeekStatus::Event;
+    }
+
+    // Peeks, runs the SimEvents due by t ahead of the next market event, then sets the clock to t if that is before it.
+    void advance_to(Timestamp t) noexcept
+    {
+        Timestamp next_ts{0};
+        if (failed_ || finished_ || t < gateway_.now() || peek(next_ts) == PeekStatus::Error) {
+            return;
+        }
+        while (!queue_.empty()) {
+            const Timestamp ts = queue_.top().timestamp;
+            if (ts > t || (has_pending_ && ts >= pending_.timestamp)) {
                 break;
             }
-            replay.last_timestamp = event.timestamp;
-            ++replay.events;
+            run_next_sim();
+        }
+        if (!has_pending_ || t < pending_.timestamp) {
+            gateway_.set_now(t);
+        }
+    }
 
-            // SimEvents strictly before this market event; ties go to the market.
-            while (!queue_.empty() && queue_.top().timestamp < event.timestamp) {
-                const SimEvent sim = queue_.top();  // a copy: handling it may push
-                queue_.pop();
-                ++report.sim_events;
-                on_sim(sim);
-            }
+    // Applies the pending market event after the SimEvents strictly before it; those at its timestamp wait.
+    StepResult step() noexcept
+    {
+        if (!has_pending_) {
+            return {};
+        }
+        while (!queue_.empty() && queue_.top().timestamp < pending_.timestamp) {
+            run_next_sim();
+        }
+        has_pending_ = false;
+        ReplayReport& replay = report_.replay;
+        if (replay.events == 0) {
+            replay.first_timestamp = pending_.timestamp;
+        }
+        replay.last_timestamp = pending_.timestamp;
+        ++replay.events;
+        const ApplyResult applied = on_market(pending_);
+        ++replay.by_type[static_cast<std::size_t>(pending_.type)];
+        ++replay.by_result[static_cast<std::size_t>(applied)];
 
-            const ApplyResult applied = on_market(event);
-            ++replay.by_type[static_cast<std::size_t>(event.type)];
-            ++replay.by_result[static_cast<std::size_t>(applied)];
-
-            if (applied != ApplyResult::Applied || until_check == 0 || --until_check != 0) {
-                continue;
-            }
-            until_check = options_.check_invariants_every;
+        if (applied == ApplyResult::Applied && until_check_ != 0 && --until_check_ == 0) {
+            until_check_ = options_.check_invariants_every;
             ++replay.invariant_checks;
-
-            if (!book_.check_invariants(replay.invariant_error, in_rth(event.timestamp, options_.session_midnight))) {
+            if (!book_.check_invariants(replay.invariant_error,
+                                        in_rth(pending_.timestamp, options_.session_midnight))) {
                 fail(ReplayFailure::InvariantViolation, to_string(replay.invariant_error));
-                break;
+                return {applied, false};
             }
         }
+        return {applied, true};
+    }
 
-        for (; !queue_.empty(); queue_.pop()) {
-            ++report.discarded_sim_events;
+    // Drains the SimQueue after EndOfStream (capped at max_drain_events) and discards the rest; idempotent.
+    void finish() noexcept
+    {
+        if (finished_) {
+            return;
         }
-        return report;
+        finished_ = true;
+        has_pending_ = false;
+        if (ended_ && !failed_) {
+            for (; !queue_.empty() && report_.drained_sim_events < max_drain_events; ++report_.drained_sim_events) {
+                run_next_sim();
+            }
+        }
+        for (; !queue_.empty(); queue_.pop()) {
+            ++report_.discarded_sim_events;
+        }
+    }
+
+    // Runs to the end of the market stream or its first fatal failure.
+    LoopReport run() noexcept
+    {
+        Timestamp next_ts{0};
+        while (peek(next_ts) == PeekStatus::Event && step().ok) {
+        }
+        finish();
+        return report_;
+    }
+
+    const LoopReport& report() const noexcept
+    {
+        return report_;
+    }
+
+    OrderGateway& gateway() noexcept
+    {
+        return gateway_;
+    }
+
+    const MarketBook& book() const noexcept
+    {
+        return book_;
+    }
+
+    const Portfolio& portfolio() const noexcept
+    {
+        return portfolio_;
+    }
+
+    const ExecutionSimulator& execution() const noexcept
+    {
+        return execution_;
     }
 };
 
-} // namespace simulator
+}  // namespace simulator
