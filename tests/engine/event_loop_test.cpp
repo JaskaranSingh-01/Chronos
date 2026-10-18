@@ -338,7 +338,8 @@ TEST(EventLoopTest, RestingOrderFillsAsMakerAndCancelsEndToEnd)
                                .leaves = Quantity{20},
                                .type = ReportType::Fill,
                                .liquidity = Liquidity::Maker,
-                               .side = Side::Buy}));
+                               .side = Side::Buy,
+                               .cause = FillCause::RuleCAdd}));
     EXPECT_EQ(h.strategy.seen[6].now, 1'200);  // drained after the last market event
     EXPECT_EQ(h.strategy.seen[6].report,
               (ExecutionReport{.exchange_time = 1'100,

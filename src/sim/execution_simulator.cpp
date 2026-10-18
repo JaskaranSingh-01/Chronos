@@ -35,7 +35,9 @@ void ExecutionSimulator::fill(ShadowOrder& order, std::uint64_t quantity, Timest
                                   .leaves = Quantity{order.remaining},
                                   .type = ReportType::Fill,
                                   .liquidity = Liquidity::Maker,
-                                  .side = order.side});
+                                  .side = order.side,
+                                  .cause = cause,
+                                  .entry_ahead_quantity = order.entry_ahead_quantity});
 }
 
 void ExecutionSimulator::cross(Side side, Price price, std::uint64_t quantity, Timestamp now, FillCause cause,
@@ -164,12 +166,14 @@ void ExecutionSimulator::on_order_arrive(const OrderRequest& request, Timestamp 
     }
 
     if (request.time_in_force == TimeInForce::Day) {
+        const std::uint64_t ahead = book.quantity_at(request.side, request.price);
         const ShadowOrder order{.id = request.id,
                                 .side = request.side,
                                 .price = request.price,
                                 .remaining = request.quantity.value(),
                                 .anchor_sequence = book.last_sequence(),
-                                .ahead_quantity = book.quantity_at(request.side, request.price)};
+                                .ahead_quantity = ahead,
+                                .entry_ahead_quantity = ahead};
         // Behind every order of ours on this side at a price at least as good.
         orders_.insert(std::find_if(orders_.begin(), orders_.end(),
                                     [&order](const ShadowOrder& o) {

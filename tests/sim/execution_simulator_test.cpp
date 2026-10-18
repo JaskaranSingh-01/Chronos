@@ -209,7 +209,7 @@ ExecutionReport accepted(OrderId id, Side side, std::uint64_t quantity)
 }
 
 ExecutionReport maker(OrderId id, Side side, std::int64_t price, std::uint64_t quantity, std::uint64_t leaves,
-                      Timestamp ts = kNow)
+                      Timestamp ts, FillCause cause, std::uint64_t entry_ahead)
 {
     return ExecutionReport{.exchange_time = ts,
                            .order_id = id,
@@ -218,7 +218,9 @@ ExecutionReport maker(OrderId id, Side side, std::int64_t price, std::uint64_t q
                            .leaves = Quantity{leaves},
                            .type = ReportType::Fill,
                            .liquidity = Liquidity::Maker,
-                           .side = side};
+                           .side = side,
+                           .cause = cause,
+                           .entry_ahead_quantity = entry_ahead};
 }
 
 ExecutionReport cancelled(OrderId id, Side side, std::uint64_t quantity)
@@ -275,7 +277,7 @@ protected:
 };
 
 // Rule (b) shrinks the queue ahead, executions ahead of us never fill us,
-// then rule (a) does.
+// then rule (a) does; each fill reports the 500 shares ahead at entry.
 TEST_F(RestingOrderTest, WorkedExample2QueuePosition)
 {
     EXPECT_EQ(market(add(1, Side::Buy, kP, 200)), Reports{});  // seq 1
@@ -300,8 +302,9 @@ TEST_F(RestingOrderTest, WorkedExample2QueuePosition)
     EXPECT_EQ(ahead(1), 0u);
 
     EXPECT_EQ(market(at(9'000, reduce(MarketEventType::Execute, 3, 60))),  // rule (a)
-              (Reports{maker(1, Side::Buy, kP, 60, 40, 9'000)}));
-    EXPECT_EQ(market(reduce(MarketEventType::Execute, 3, 40)), (Reports{maker(1, Side::Buy, kP, 40, 0, 0)}));
+              (Reports{maker(1, Side::Buy, kP, 60, 40, 9'000, FillCause::RuleAExecute, 500)}));
+    EXPECT_EQ(market(reduce(MarketEventType::Execute, 3, 40)),
+              (Reports{maker(1, Side::Buy, kP, 40, 0, 0, FillCause::RuleAExecute, 500)}));
 
     EXPECT_EQ(execution_.find(1), nullptr);
     EXPECT_EQ(execution_.open_orders(), 0u);
@@ -326,7 +329,8 @@ TEST_F(RestingOrderTest, DeleteAndReplaceOfOrdersAheadShrinkTheQueue)
     // h2 keeps its price under a new id: a fresh sequence, so now behind us.
     EXPECT_EQ(market(replace(2, 20, kP, 300)), Reports{});
     EXPECT_EQ(ahead(1), 0u);
-    EXPECT_EQ(market(reduce(MarketEventType::Execute, 20, 30)), (Reports{maker(1, Side::Sell, kP, 30, 70, 0)}));
+    EXPECT_EQ(market(reduce(MarketEventType::Execute, 20, 30)),
+              (Reports{maker(1, Side::Sell, kP, 30, 70, 0, FillCause::RuleAExecute, 500)}));
 }
 
 // An inside-spread bid fills on a crossing Add: rule (c).
@@ -337,7 +341,8 @@ TEST_F(RestingOrderTest, WorkedExample3CrossingAddFillsAtOurPrice)
     EXPECT_EQ(arrive(day(1, Side::Buy, kP + 100, 50)), (Reports{accepted(1, Side::Buy, 50)}));
     EXPECT_EQ(ahead(1), 0u);
 
-    EXPECT_EQ(market(add(9, Side::Sell, kP + 100, 80)), (Reports{maker(1, Side::Buy, kP + 100, 50, 0, 0)}));
+    EXPECT_EQ(market(add(9, Side::Sell, kP + 100, 80)),
+              (Reports{maker(1, Side::Buy, kP + 100, 50, 0, 0, FillCause::RuleCAdd, 0)}));
     EXPECT_EQ(book_.quantity_at(Side::Sell, Price{kP + 100}), 80u);  // the book never sees our fill
 }
 
@@ -350,8 +355,10 @@ TEST_F(RestingOrderTest, RuleDExecuteAtAWorsePriceFillsUsFirst)
     arrive(day(1, Side::Buy, kP + 100, 50));
     arrive(day(2, Side::Sell, kP + 100, 50));  // the mirror: inside the spread on the ask
 
-    EXPECT_EQ(market(reduce(MarketEventType::Execute, 1, 30)), (Reports{maker(1, Side::Buy, kP + 100, 30, 20, 0)}));
-    EXPECT_EQ(market(reduce(MarketEventType::Execute, 2, 100)), (Reports{maker(2, Side::Sell, kP + 100, 50, 0, 0)}));
+    EXPECT_EQ(market(reduce(MarketEventType::Execute, 1, 30)),
+              (Reports{maker(1, Side::Buy, kP + 100, 30, 20, 0, FillCause::RuleDExecute, 0)}));
+    EXPECT_EQ(market(reduce(MarketEventType::Execute, 2, 100)),
+              (Reports{maker(2, Side::Sell, kP + 100, 50, 0, 0, FillCause::RuleDExecute, 0)}));
 
     // Not on a cancel or delete at the worse price, and not at a better one.
     EXPECT_EQ(market(reduce(MarketEventType::Cancel, 1, 10)), Reports{});
@@ -366,7 +373,8 @@ TEST_F(RestingOrderTest, CrossingReplacementFillsUs)
     market(add(1, Side::Sell, kP + 300, 100));
     arrive(day(1, Side::Buy, kP + 100, 50));
 
-    EXPECT_EQ(market(replace(1, 2, kP + 100, 40)), (Reports{maker(1, Side::Buy, kP + 100, 40, 10, 0)}));
+    EXPECT_EQ(market(replace(1, 2, kP + 100, 40)),
+              (Reports{maker(1, Side::Buy, kP + 100, 40, 10, 0, FillCause::RuleCReplace, 0)}));
 }
 
 // One historical event fills ours best price first, then earliest, capped at its quantity.
@@ -380,11 +388,27 @@ TEST_F(RestingOrderTest, AllocationFollowsOurPriorityAndIsCappedAtTheEventQuanti
     EXPECT_EQ(execution_.open_orders(), 4u);
 
     EXPECT_EQ(market(add(2, Side::Sell, kP, 100)),
-              (Reports{maker(2, Side::Buy, kP + 100, 60, 0, 0), maker(3, Side::Buy, kP + 100, 40, 20, 0)}));
+              (Reports{maker(2, Side::Buy, kP + 100, 60, 0, 0, FillCause::RuleCAdd, 0),
+                       maker(3, Side::Buy, kP + 100, 40, 20, 0, FillCause::RuleCAdd, 0)}));
     EXPECT_EQ(market(add(3, Side::Sell, kP, 30)),
-              (Reports{maker(3, Side::Buy, kP + 100, 20, 0, 0), maker(1, Side::Buy, kP, 10, 50, 0)}));
+              (Reports{maker(3, Side::Buy, kP + 100, 20, 0, 0, FillCause::RuleCAdd, 0),
+                       maker(1, Side::Buy, kP, 10, 50, 0, FillCause::RuleCAdd, 0)}));
     EXPECT_EQ(execution_.open_orders(), 2u);
     EXPECT_EQ(execution_.statistics().maker_quantity, 130u);
+}
+
+// One historical execution fills two of our bids that joined the level at different depths; each reports its own.
+TEST_F(RestingOrderTest, EachFillReportsItsOwnOrdersAheadAtEntry)
+{
+    market(add(1, Side::Buy, kP, 200));
+    arrive(day(1, Side::Buy, kP, 100));  // 200 ahead
+    market(add(2, Side::Buy, kP, 300));
+    arrive(day(2, Side::Buy, kP, 50));   // 500 ahead
+    market(add(3, Side::Buy, kP, 400));  // behind both
+
+    EXPECT_EQ(market(reduce(MarketEventType::Execute, 3, 150)),
+              (Reports{maker(1, Side::Buy, kP, 100, 0, 0, FillCause::RuleAExecute, 200),
+                       maker(2, Side::Buy, kP, 50, 0, 0, FillCause::RuleAExecute, 500)}));
 }
 
 TEST_F(RestingOrderTest, PostOnlyRejectsWhatWouldCrossAndRestsOtherwise)
@@ -438,7 +462,8 @@ TEST_F(RestingOrderTest, RuleAWhileOrdersRemainAheadIsAFifoAnomaly)
     arrive(day(1, Side::Buy, kP, 100));
     market(add(2, Side::Buy, kP, 100));  // behind us
 
-    EXPECT_EQ(market(reduce(MarketEventType::Execute, 2, 50)), (Reports{maker(1, Side::Buy, kP, 50, 50, 0)}));
+    EXPECT_EQ(market(reduce(MarketEventType::Execute, 2, 50)),
+              (Reports{maker(1, Side::Buy, kP, 50, 50, 0, FillCause::RuleAExecute, 200)}));
     EXPECT_EQ(ahead(1), 200u);
     EXPECT_EQ(execution_.statistics().fifo_anomalies, 1u);
 }
@@ -478,9 +503,12 @@ TEST_F(RestingOrderTest, ExecutionWithPriceAtOrWorseThanOursFillsUs)
     arrive(day(1, Side::Buy, kP + 100, 100));
     market(add(3, Side::Buy, kP + 100, 100));  // behind us at our price
 
-    EXPECT_EQ(market(executed_at(3, 10, kP + 100)), (Reports{maker(1, Side::Buy, kP + 100, 10, 90, 0)}));  // (a)
-    EXPECT_EQ(market(executed_at(1, 20, kP + 100)), (Reports{maker(1, Side::Buy, kP + 100, 20, 70, 0)}));  // (d), equal
-    EXPECT_EQ(market(executed_at(2, 30, kP)), (Reports{maker(1, Side::Buy, kP + 100, 30, 40, 0)}));  // (d), worse
+    EXPECT_EQ(market(executed_at(3, 10, kP + 100)),
+              (Reports{maker(1, Side::Buy, kP + 100, 10, 90, 0, FillCause::RuleAExecuteWithPrice, 0)}));  // (a)
+    EXPECT_EQ(market(executed_at(1, 20, kP + 100)),
+              (Reports{maker(1, Side::Buy, kP + 100, 20, 70, 0, FillCause::RuleDExecuteWithPrice, 0)}));  // (d), equal
+    EXPECT_EQ(market(executed_at(2, 30, kP)),
+              (Reports{maker(1, Side::Buy, kP + 100, 30, 40, 0, FillCause::RuleDExecuteWithPrice, 0)}));  // (d), worse
 
     const ExecutionStatistics& stats = execution_.statistics();
     EXPECT_EQ(stats.fills_by[static_cast<std::size_t>(FillCause::RuleAExecuteWithPrice)]
@@ -597,7 +625,8 @@ TEST_F(RestingOrderTest, NoFillsWhileNotTradingButTheQueueStillMoves)
     EXPECT_EQ(market(status(TradingState::Trading)), Reports{});
     EXPECT_EQ(market(reduce(MarketEventType::Execute, 1, 50)), Reports{});
     EXPECT_EQ(ahead(1), 0u);
-    EXPECT_EQ(market(reduce(MarketEventType::Execute, 2, 50)), (Reports{maker(1, Side::Buy, kP, 50, 50, 0)}));  // (d)
+    EXPECT_EQ(market(reduce(MarketEventType::Execute, 2, 50)),
+              (Reports{maker(1, Side::Buy, kP, 50, 50, 0, FillCause::RuleDExecute, 200)}));  // (d)
     EXPECT_EQ(execution_.statistics().fifo_anomalies, 0u);
 }
 

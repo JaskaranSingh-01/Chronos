@@ -19,21 +19,10 @@ struct ShadowOrder
     Side side{Side::Buy};
     Price price{};
     std::uint64_t remaining{0};
-    std::uint64_t anchor_sequence{0};  // book.last_sequence() at arrival
-    std::uint64_t ahead_quantity{0};   // historical shares ahead of us at our price
+    std::uint64_t anchor_sequence{0};       // book.last_sequence() at arrival
+    std::uint64_t ahead_quantity{0};        // historical shares ahead of us at our price
+    std::uint64_t entry_ahead_quantity{0};  // ahead_quantity at arrival; rule (b) never changes it
 };
-
-// The fill rule and historical message behind a resting-order fill.
-// An Execute with a price is ITCH C, without one ITCH E.
-enum class FillCause : std::uint8_t {
-    RuleAExecute,
-    RuleAExecuteWithPrice,
-    RuleDExecute,
-    RuleDExecuteWithPrice,
-    RuleCAdd,
-    RuleCReplace
-};
-inline constexpr std::size_t fill_cause_count = 6;
 
 // Exchange-local session phase; each cross is the first second after 09:30 or 16:00.
 enum class SessionPhase : std::uint8_t {
