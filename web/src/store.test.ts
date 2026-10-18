@@ -1,6 +1,16 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { Candle, Execution, Hello, ServerMessage, SessionState, Snapshot, Trade } from './protocol';
-import { apply, createStore, initial, mergeBars, selectCanTrade, selectOrders, withHistory, type Env } from './store';
+import type { Candle, Execution, Hello, MyOrder, ServerMessage, SessionState, Snapshot, Trade } from './protocol';
+import {
+  apply,
+  createStore,
+  initial,
+  mergeBars,
+  selectCanTrade,
+  selectOrders,
+  selectTradeBlock,
+  withHistory,
+  type Env,
+} from './store';
 
 const T = 1_577_716_200_000_000_000; // 2019-12-30 09:30:00 ET, epoch ns
 const S = 1_000_000_000;
@@ -309,14 +319,64 @@ describe('selectors', () => {
     expect(apply(s, fill(1)).snap).toBe(s.snap);
   });
 
+  it('return one array for an unchanged list of resting orders, and a new one when any of its fields change', () => {
+    const rest = (over: Partial<MyOrder> = {}): MyOrder => ({
+      id: 1,
+      side: 'buy',
+      price: 100_000,
+      remaining: 100,
+      ahead_quantity: 250,
+      ahead_orders: 2,
+      ...over,
+    });
+    const first = run(hello(), snapshot({ type: 'state', my_orders: [rest()] }));
+    const second = apply(first, snapshot({ snapshot_seq: 2, my_orders: [rest()] }));
+    expect(second.snap?.my_orders).not.toBe(first.snap?.my_orders); // each snapshot parses its own
+    expect(selectOrders(second)).toBe(selectOrders(first));
+    expect(selectOrders(second)).toEqual([rest()]);
+    const changes: MyOrder[][] = [
+      [rest({ remaining: 99 })],
+      [rest({ ahead_quantity: 249 })],
+      [rest({ ahead_orders: 1 })],
+      [rest({ price: 99_900 })],
+      [rest({ side: 'sell' })],
+      [rest({ id: 2 })],
+      [rest(), rest({ id: 3 })],
+      [],
+    ];
+    let seq = 2;
+    for (const orders of changes) {
+      const unchanged = selectOrders(second); // each change is measured from the same list
+      const now = selectOrders(apply(second, snapshot({ snapshot_seq: ++seq, my_orders: orders })));
+      expect(now).not.toBe(unchanged);
+      expect(now).toEqual(orders);
+      const again = apply(second, snapshot({ snapshot_seq: ++seq, my_orders: structuredClone(orders) }));
+      expect(selectOrders(again)).toBe(now);
+    }
+  });
+
   it('allow trading only to a connected controller on a trading symbol that is neither seeking nor ended', () => {
     const s = { ...run(hello(), snapshot({ type: 'state' })), status: 'open' as const };
     expect(selectCanTrade(s)).toBe(true);
     expect(selectCanTrade({ ...s, hello: hello({ role: 'viewer' }) })).toBe(false);
     expect(selectCanTrade({ ...s, status: 'closed' })).toBe(false);
     expect(selectCanTrade({ ...s, state: 'seeking' })).toBe(false);
+    expect(selectCanTrade({ ...s, state: 'ended' })).toBe(false);
     expect(selectCanTrade({ ...s, snap: snapshot({ trading_state: 'halted' }) })).toBe(false);
     expect(selectCanTrade({ ...s, snap: snapshot({ symbol: '' }) })).toBe(false);
+  });
+
+  it('say why trading is unavailable, for the ticket to show', () => {
+    const s = { ...run(hello(), snapshot({ type: 'state' })), status: 'open' as const };
+    expect(selectTradeBlock(s)).toBe('');
+    expect(selectTradeBlock(initial)).toBe('Not connected');
+    expect(selectTradeBlock({ ...s, status: 'closed' })).toBe('Not connected');
+    expect(selectTradeBlock({ ...s, hello: hello({ role: 'viewer' }) })).toBe('Viewers cannot trade');
+    expect(selectTradeBlock({ ...s, snap: null })).toBe('No symbol loaded');
+    expect(selectTradeBlock({ ...s, snap: snapshot({ symbol: '' }) })).toBe('No symbol loaded');
+    expect(selectTradeBlock({ ...s, snap: snapshot({ trading_state: 'halted' }) })).toBe('Not trading: halted');
+    expect(selectTradeBlock({ ...s, state: 'seeking' })).toBe('Seeking');
+    expect(selectTradeBlock({ ...s, state: 'ended' })).toBe('Session ended');
   });
 });
 

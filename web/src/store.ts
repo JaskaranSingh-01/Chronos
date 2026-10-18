@@ -5,6 +5,7 @@ import type {
   Execution,
   Hello,
   History,
+  MyOrder,
   Order,
   ServerMessage,
   SessionState,
@@ -193,17 +194,33 @@ export function apply(s: State, m: ServerMessage): State {
 }
 
 const none: never[] = [];
-// Every snapshot parses its own empty array, so an empty list maps to one constant to keep the panel from re-rendering.
-export const selectOrders = (s: State) => (s.snap && s.snap.my_orders.length > 0 ? s.snap.my_orders : none);
-// Manual trading: the controller, connected, on a symbol that is trading, neither seeking nor ended.
-export const selectCanTrade = (s: State) =>
-  s.hello?.role === 'controller' &&
-  s.status === 'open' &&
-  s.snap !== null &&
-  s.snap.symbol !== '' &&
-  s.snap.trading_state === 'trading' &&
-  s.state !== 'seeking' &&
-  s.state !== 'ended';
+let lastOrders: MyOrder[] = none;
+const sameOrder = (a: MyOrder, b: MyOrder) =>
+  a.id === b.id &&
+  a.side === b.side &&
+  a.price === b.price &&
+  a.remaining === b.remaining &&
+  a.ahead_quantity === b.ahead_quantity &&
+  a.ahead_orders === b.ahead_orders;
+// Each snapshot parses a new array: an empty list maps to a constant and an unchanged one to the last array returned.
+export function selectOrders(s: State): MyOrder[] {
+  const next = s.snap?.my_orders ?? none;
+  if (next.length === 0) return none;
+  if (next.length !== lastOrders.length || !next.every((o, i) => sameOrder(o, lastOrders[i]))) lastOrders = next;
+  return lastOrders;
+}
+// Why manual trading is unavailable, or '' when it is not: the controller, connected, on a trading symbol, not seeking.
+// ponytail: an attached strategy is not visible to the client; the server's not_ready is the only signal for it.
+export function selectTradeBlock(s: State): string {
+  if (!s.hello || s.status !== 'open') return 'Not connected';
+  if (s.hello.role !== 'controller') return 'Viewers cannot trade';
+  if (!s.snap || s.snap.symbol === '') return 'No symbol loaded';
+  if (s.snap.trading_state !== 'trading') return `Not trading: ${s.snap.trading_state}`;
+  if (s.state === 'seeking') return 'Seeking';
+  if (s.state === 'ended') return 'Session ended';
+  return '';
+}
+export const selectCanTrade = (s: State) => selectTradeBlock(s) === '';
 
 export function createStore(env: Env) {
   let state = initial;
