@@ -1,5 +1,6 @@
 #include "chronos/server/http_server.hpp"
 
+#include <atomic>
 #include <charconv>
 #include <chrono>
 #include <cstdint>
@@ -77,7 +78,7 @@ struct HttpServer::Impl
     std::mutex mutex;  // the hub and every peer: each Peer call, its construction and its destruction
     std::unordered_map<crow::websocket::connection*, std::unique_ptr<Peer>> peers;
     std::shared_future<void> running;  // wait() and stop() may be on different threads
-    bool stopped{false};
+    std::atomic<bool> stopped{false};  // the first stop() wins, from any thread
 
     Impl(Hub& h, ServerOptions o)
         : hub(h), options(std::move(o))
@@ -188,7 +189,7 @@ crow::response HttpServer::Impl::static_file(std::string path)
     crow::response response;
     response.set_static_file_info_unsafe((options.web / path).string());
     if (response.code == 404) {
-        return crow::response{404, "no such file in " + options.web.string() + " (the UI is built into web/dist)"};
+        return crow::response{404, "no such file (the UI is built into web/dist)"};
     }
     return response;
 }
@@ -231,6 +232,8 @@ HttpServer::~HttpServer()
     stop();
 }
 
+// ponytail: a non-loopback bind guards trading, not availability: Crow writes HTTP responses with a blocking write
+// and keeps slow or silent sockets; put a buffering reverse proxy in front, or move to async writes.
 bool HttpServer::start()
 {
     impl_->app.bindaddr(impl_->options.host).port(impl_->options.port).concurrency(4);
@@ -253,10 +256,9 @@ void HttpServer::wait()
 
 void HttpServer::stop()
 {
-    if (!impl_->running.valid() || impl_->stopped) {
+    if (!impl_->running.valid() || impl_->stopped.exchange(true)) {
         return;
     }
-    impl_->stopped = true;
     impl_->app.stop();
     impl_->running.wait();
     const std::lock_guard lock{impl_->mutex};

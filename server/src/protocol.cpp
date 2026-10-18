@@ -263,6 +263,10 @@ bool decode(std::string_view text, ClientMessage& message, std::string& error)
         return decode_control(j, message.control);
     }
     if (type == "order") {
+        std::uint64_t client_id = 0;
+        if (read(j, "client_id", std::numeric_limits<std::uint64_t>::max(), client_id)) {
+            message.client_id = client_id;
+        }
         return decode_order(j, command);
     }
     if (type == "cancel") {
@@ -281,12 +285,18 @@ bool decode(std::string_view text, ClientMessage& message, std::string& error)
     return false;
 }
 
-std::string encode_hello(std::string_view session_id, std::uint64_t generation, bool controller, int price_scale)
+std::string encode_hello(std::string_view session_id, std::uint64_t generation, bool controller,
+                         const SessionConfig& config)
 {
     json j = envelope("hello", session_id, generation);
     j["protocol"] = ws_protocol;
     j["role"] = controller ? "controller" : "viewer";
-    j["price_scale"] = price_scale;
+    j["price_scale"] = config.instrument.price_scale;
+    j["quantity_scale"] = config.instrument.quantity_scale;
+    j["fees"] = {{"maker", config.fees.maker_fee_per_share}, {"taker", config.fees.taker_fee_per_share}};
+    j["limits"] = {{"max_position", config.limits.max_position},
+                   {"max_order_quantity", config.limits.max_order_quantity.value()},
+                   {"max_open_orders", config.limits.max_open_orders}};
     return text(j);
 }
 
@@ -307,6 +317,7 @@ std::string encode_snapshot(std::string_view session_id, const Snapshot& s, bool
     j["progress"] = s.progress;
     j["failure"] = s.failure;
     j["source_error"] = to_string(s.source_error);
+    j["trading_state"] = s.trading_state;
     j["bids"] = array_of(std::span{s.bids}.first(s.bid_levels), level_json);
     j["asks"] = array_of(std::span{s.asks}.first(s.ask_levels), level_json);
     j["trades"] = array_of(std::span{s.trades}.first(s.trade_count), trade_json);
@@ -405,13 +416,16 @@ std::string encode_progress(std::string_view session_id, std::uint64_t generatio
 }
 
 std::string encode_error(std::string_view session_id, std::uint64_t generation, std::string_view code,
-                         std::string_view message, std::uint64_t command_seq)
+                         std::string_view message, std::uint64_t command_seq, std::optional<std::uint64_t> client_id)
 {
     json j = envelope("error", session_id, generation);
     j["code"] = code;
     j["message"] = message;
     if (command_seq != 0) {
         j["command_seq"] = command_seq;
+    }
+    if (client_id) {
+        j["client_id"] = *client_id;
     }
     return text(j);
 }

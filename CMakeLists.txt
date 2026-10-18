@@ -140,8 +140,8 @@ FetchContent_Declare(
     URL https://github.com/CrowCpp/Crow/archive/refs/tags/v1.3.4.tar.gz
     URL_HASH SHA256=6be759b3a648b41f0adc3a8408a53fd0243775217b4e32e8101d69e4aadf48cc
     SOURCE_SUBDIR none
-    # Upstream master's overflow-safe max_payload check; v1.3.4 and v1.3.5 lack it.
-    PATCH_COMMAND patch -p1 -i ${PROJECT_SOURCE_DIR}/cmake/crow-1.3.4-max-payload.patch
+    # Upstream fixes Crow 1.3.4 lacks: overflow-safe max_payload, a request-body cap, pong only when idle.
+    PATCH_COMMAND patch -p1 -i ${PROJECT_SOURCE_DIR}/cmake/crow-1.3.4.patch
 )
 
 FetchContent_MakeAvailable(asio crow)
@@ -342,6 +342,14 @@ chronos_serve_test(BadOptionExitsTwo 2 --data . --date 2019-12-30 --frobnicate)
 chronos_serve_test(MissingDateExitsTwo 2 --data .)
 chronos_serve_test(BadPortExitsTwo 2 --data . --date 2019-12-30 --port 70000)
 chronos_serve_test(MissingFileExitsTwo 2 --data /nonexistent/chronos-data --date 2019-12-30)
+
+# A day file with no stock directory exits 2 and says so; other failures exit 2 too, so the message is checked.
+set(serve_fixture ${PROJECT_BINARY_DIR}/chronos-serve-fixture)
+file(WRITE ${serve_fixture}/12302019.NASDAQ_ITCH50.bin "not itch")
+add_test(NAME ChronosServeCliTest.NoStockDirectoryExitsTwo
+         COMMAND sh -c "out=$(\"$0\" \"$@\" 2>&1); test $? -eq 2 && echo \"$out\" | grep -q ': no stock directory'"
+                 $<TARGET_FILE:chronos-serve> --data ${serve_fixture} --date 2019-12-30)
+set_tests_properties(ChronosServeCliTest.NoStockDirectoryExitsTwo PROPERTIES TIMEOUT 20)  # serving would never exit
 
 
 # -------------------------

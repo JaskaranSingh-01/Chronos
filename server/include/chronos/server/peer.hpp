@@ -2,6 +2,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -28,6 +29,7 @@ private:
         std::uint64_t command_seq{0};
         std::uint64_t record_seq{0};  // of its Admitted record
         std::uint64_t generation{0};
+        std::optional<std::uint64_t> client_id{};  // an order's, for its log_unavailable
     };
 
     Hub& hub_;
@@ -59,17 +61,17 @@ public:
     bool poll(Timestamp now, std::vector<std::string>& out);
 };
 
-// What every connection to one session shares. The server calls each Peer of a hub under one lock, so the scratch
-// poll() copies into and encodes from within one call is shared too: a connection costs a Peer, not 1.3 MB.
+// What every connection to one session shares. Call every Peer of one Hub under one lock: the scratch poll() copies
+// into and encodes from within one call is shared too, so a connection costs a Peer, not 1.3 MB.
 struct Hub
 {
     ReplaySession& session;
-    const LogQueue* log{nullptr};      // with writer: its failure refuses the commands not yet logged
+    const LogQueue* log{nullptr};      // set with writer; without it a log failure is never seen
     const LogWriter* writer{nullptr};  // set: commands are acked once their record is in the log
     std::string session_id{};
     std::string token{};  // empty: no auth message is needed
     bool fsync{false};
-    int price_scale{4};
+    SessionConfig config{};  // what hello tells a client: its scales, fees and limits
     std::vector<std::string> symbols{};  // the tickers a symbol switch may name
     const Peer* controller{nullptr};     // the one connection that may control and trade
     std::vector<Record> reports = std::vector<Record>(Peer::reports_per_poll);  // poll()'s ring chunk

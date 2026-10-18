@@ -32,8 +32,9 @@ void wait_until_written(const LogQueue& queue)
     ASSERT_TRUE(eventually([&] { return queue.size() == 0 || queue.failed(); }));
 }
 
-// The lines a session logs for one post-only buy it applies: the header, Received, Admitted and Applied.
-std::vector<std::string> sample_log(const SessionConfig& cfg)
+// The lines a session logs for one post-only buy it applies: the header, Received, Admitted and Applied; closed, also
+// the trailer.
+std::vector<std::string> sample_log(const SessionConfig& cfg, bool closed = false)
 {
     const std::vector<MarketEvent> events{add(100, 1, Side::Sell, 1'000'000, 100)};
     const Scratch scratch{"sample"};
@@ -43,6 +44,9 @@ std::vector<std::string> sample_log(const SessionConfig& cfg)
         ReplaySession session{cfg, over(events), &queue};
         session.submit(post_only_buy(999'800, 10), 42);
         session.tick(kWall);
+        if (closed) {
+            session.close();
+        }
     }
     return read_lines(scratch.path);
 }
@@ -319,7 +323,7 @@ TEST(CommandLogTest, AReproductionStopsAtTheTrailerAndChecksItsDigests)
             script(session, t);
             session.tick(kWall + t * 7 * kMs);
         }
-        session.close();  // mid-stream, with orders resting and in flight
+        session.close();  // mid-stream, with orders resting
         closed = outcome(session.book(), session.execution(), session.portfolio(), session.loop_report());
         wait_until_written(queue);
     }
@@ -337,6 +341,12 @@ TEST(CommandLogTest, AReproductionStopsAtTheTrailerAndChecksItsDigests)
     tampered.end->digests.portfolio ^= 1;
     Generation again{cfg, over(events)(name(logged.ticker)), StrategySpec{}};
     EXPECT_FALSE(reproduce(again, tampered));
+
+    LoggedGeneration untrailed = logged;  // a session that never closed: reproduce to the end of the stream
+    untrailed.end.reset();
+    Generation whole{cfg, over(events)(name(logged.ticker)), StrategySpec{}};
+    EXPECT_TRUE(reproduce(whole, untrailed));
+    EXPECT_EQ(whole.loop.report().replay.events, 3'000u);
 
     // A switched generation reproduces from its log end to end: the ticker its header names is part of its input.
     std::vector<MarketEvent> bbb = events;  // a second ticker's stream: the same shape, 5,000 ticks higher
@@ -399,6 +409,37 @@ TEST(CommandLogTest, AReproductionStopsAtTheTrailerAndChecksItsDigests)
     ASSERT_TRUE(logged.end.has_value());
     Generation first_again{cfg, by_ticker(name(logged.ticker)), StrategySpec{}};
     EXPECT_TRUE(reproduce(first_again, logged));
+}
+
+// close() runs the simulator events due at the clock before it takes its digests, as a reproduction's advance_to()
+// does; with no latency, an order applied at the clock is still in flight until then.
+TEST(CommandLogTest, AReproductionMatchesATrailerWrittenAfterANonEmptyDrain)
+{
+    const std::vector<MarketEvent> events{add(100, 1, Side::Sell, 1'000'000, 100), add(200, 2, Side::Buy, 999'900, 100),
+                                          add(300, 3, Side::Buy, 999'700, 100)};
+    const SessionConfig cfg = config();
+    const Scratch scratch{"drain"};
+    Outcome closed;
+    {
+        LogQueue queue;
+        const LogWriter writer{queue, scratch.path, cfg, false};
+        ReplaySession session{cfg, over(events), &queue};
+        session.control(step(2));
+        session.submit(post_only_buy(999'800, 10), 0);
+        session.tick(kWall);  // two events, then the order at the clock
+        EXPECT_TRUE(session.execution().resting_orders().empty());  // in flight
+        session.close();
+        EXPECT_EQ(session.execution().resting_orders().size(), 1u);  // arrived and rested
+        closed = outcome(session.book(), session.execution(), session.portfolio(), session.loop_report());
+        wait_until_written(queue);
+    }
+    LoggedGeneration logged;
+    std::string error;
+    ASSERT_TRUE(read_log(scratch.path, 1, logged, error)) << error;
+    ASSERT_TRUE(logged.end.has_value());
+    Generation fresh{cfg, over(events)(name(logged.ticker)), StrategySpec{}};
+    ASSERT_TRUE(reproduce(fresh, logged));
+    EXPECT_EQ(outcome(fresh.book, fresh.execution, fresh.portfolio, fresh.loop.report()), closed);
 }
 
 TEST(CommandLogTest, AFullLogRefusesNewCommandsAndTheEngineRunsOn)
@@ -574,6 +615,16 @@ TEST(CommandLogTest, ReadLogRefusesATruncatedLine)
     EXPECT_EQ(refusal(path), "line 2: a second header for generation 1");
     write_log(path, {tampered(0, "\"protocol\":1", "\"protocol\":2"), good[1]});
     EXPECT_EQ(refusal(path), "line 1: unsupported log protocol");
+
+    // Two trailers for one generation, the second with a later seq.
+    std::vector<std::string> closed = sample_log(config(), true);  // the trailer is last; line n has seq n
+    std::string again = closed.back();
+    const std::string seq = "\"seq\":" + std::to_string(closed.size());
+    ASSERT_NE(again.find(seq), std::string::npos);
+    again.replace(again.find(seq), seq.size(), "\"seq\":" + std::to_string(closed.size() + 1));
+    closed.push_back(again);
+    write_log(path, closed);
+    EXPECT_EQ(refusal(path), "line " + std::to_string(closed.size()) + ": a second trailer for generation 1");
 }
 
 }  // namespace

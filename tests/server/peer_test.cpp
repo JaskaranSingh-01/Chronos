@@ -96,6 +96,9 @@ TEST(PeerTest, TheSecondConnectionIsAViewerAndGetsNotController)
         ASSERT_EQ(reply.size(), 1u);
         EXPECT_EQ(reply[0]["code"], "not_controller");
     }
+    // An order's refusal names its client_id; a control's has none to name.
+    EXPECT_EQ(send(second, client_message("order", kBuy)).at(0)["client_id"], 9);
+    EXPECT_FALSE(send(second, client_message("control", R"(,"action":"play")")).at(0).contains("client_id"));
     EXPECT_TRUE(send(second, client_message("resync", R"(,"from_report_seq":1)")).empty());  // a viewer may resync
     EXPECT_TRUE(send(*first, client_message("order", kBuy)).empty());
 
@@ -294,12 +297,16 @@ TEST(PeerTest, ACommandIsAckedOnceLoggedAndSubmitsAreRateLimited)
     const std::vector<json> stale = send(peer, client_message("order", kBuy, 2));
     EXPECT_EQ(stale.at(0)["code"], "stale_generation");
     EXPECT_EQ(stale.at(0)["command_seq"], 2);
+    EXPECT_EQ(stale.at(0)["client_id"], 9);
 
     // 50 submits a second: the 51st in the same second is refused, the next second admits again.
     for (int i = 2; i < 50; ++i) {
         ASSERT_TRUE(send(peer, client_message("cancel", R"(,"order_id":1)")).empty());
     }
     EXPECT_EQ(send(peer, client_message("cancel", R"(,"order_id":1)")).at(0)["code"], "rate_limited");
+    const std::vector<json> limited = send(peer, client_message("order", kBuy));
+    EXPECT_EQ(limited.at(0)["code"], "rate_limited");
+    EXPECT_EQ(limited.at(0)["client_id"], 9);
     EXPECT_TRUE(send(peer, client_message("cancel", R"(,"order_id":1)"), kWall + kSecond).empty());
 }
 
@@ -322,6 +329,7 @@ TEST(PeerTest, ACommandWhoseRecordNeverReachesTheLogGetsLogUnavailable)
     ASSERT_EQ(refused.size(), 1u);
     EXPECT_EQ(refused[0]["code"], "log_unavailable");
     EXPECT_EQ(refused[0]["command_seq"], 1);
+    EXPECT_EQ(refused[0]["client_id"], 9);
 }
 
 TEST(PeerTest, ACommandLoggedBeforeTheLogFailedIsStillAcked)
@@ -357,6 +365,14 @@ TEST(PeerTest, MessagesForAnotherSessionOrGenerationAndMalformedOnesAreRefused)
         return reply.empty() ? std::string{} : reply[0]["code"].get<std::string>();
     };
     EXPECT_EQ(code("not json"), "bad_request");
+    EXPECT_FALSE(send(peer, "not json").at(0).contains("client_id"));
+    // An order refused after its client_id was read names it, even when another key is what failed.
+    const std::vector<json> no_price = send(peer,
+                                            client_message("order",
+                                                           R"(,"client_id":9,"side":"buy",)"
+                                                           R"("order_type":"ioc","qty":1)"));
+    EXPECT_EQ(no_price.at(0)["code"], "bad_request");
+    EXPECT_EQ(no_price.at(0)["client_id"], 9);
     EXPECT_EQ(code(R"({"type":"control","session_id":"old","generation":1,"action":"play"})"), "stale_generation");
     EXPECT_EQ(code(client_message("control", R"(,"action":"play")", 2)), "stale_generation");
     EXPECT_EQ(code(client_message("control", R"(,"action":"symbol","symbol":"MSFT")")), "bad_request");

@@ -9,6 +9,7 @@
 #include "simulator/itch/itch_decoder.hpp"
 #include "simulator/itch/itch_message_reader.hpp"
 #include "simulator/itch/itch_source.hpp"
+#include "simulator/market/market_book.hpp"
 #include "simulator/market/vector_source.hpp"
 
 namespace simulator::server {

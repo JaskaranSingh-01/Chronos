@@ -201,6 +201,7 @@ TEST(SnapshotTest, HistoryIsReadSafelyWhileTheEnginePublishes)
     std::vector<Trade> trades;
     ASSERT_TRUE(session.read_history(1, 0, candles, trades));
     EXPECT_EQ(candles.size(), 20u);  // seconds 0 to 19; the bar of 20 s is still open
+    ASSERT_FALSE(trades.empty());
     EXPECT_EQ(trades.back().timestamp, 20'000 * kMs);
 }
 
@@ -264,6 +265,18 @@ TEST(SnapshotTest, AFailingStreamEndsTheSessionWithItsFailureInTheSnapshot)
     EXPECT_EQ(s.failure, ReplayFailure::OutOfOrderTimestamp);
     EXPECT_EQ(s.event_seq, 1u);
     EXPECT_EQ(session.submit(ioc_buy(10), 0).error, ErrorCode::NotReady);
+}
+
+TEST(SnapshotTest, ASnapshotCarriesTheBooksTradingState)
+{
+    const std::vector<MarketEvent> events{add(100, 1, Side::Buy, 999'900, 100), halt(200)};
+    ReplaySession session{config(), over(events)};
+    session.control(step(1));
+    session.tick(kWall);
+    EXPECT_EQ(latest(session).trading_state, TradingState::Trading);
+    session.control(step(1));
+    session.tick(kWall + snapshot_interval);
+    EXPECT_EQ(latest(session).trading_state, TradingState::Halted);
 }
 
 TEST(SnapshotTest, APausedSessionPublishesAChangeAtTheNextFrameOnly)

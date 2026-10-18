@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <limits>
+#include <optional>
 #include <set>
 #include <string>
 #include <thread>
@@ -122,7 +123,15 @@ TEST(ProtocolTest, RefusesAnythingOutsideItsSchema)
     EXPECT_FALSE(decode(client_message("frobnicate"), ignored, error));
     EXPECT_EQ(error, "unknown type frobnicate");
     EXPECT_FALSE(decode(client_message(std::string(1'000, 'x')), ignored, error));
-    EXPECT_EQ(error, "unknown type " + std::string(32, 'x'));  // at most 32 characters of the client's type
+    EXPECT_EQ(error, "unknown type " + std::string(32, 'x'));  // at most 32 bytes of the client's type
+
+    // A refused order keeps the client_id it carried, for the error that answers it; other messages carry none.
+    EXPECT_FALSE(decode(client_message("order", R"(,"client_id":0,"side":"sel","order_type":"ioc","price":1,"qty":1)"),
+                        ignored, error));
+    EXPECT_EQ(ignored.client_id, std::optional<std::uint64_t>{0});
+    EXPECT_FALSE(decode(client_message("order", R"(,"client_id":-1,"qty":1)"), ignored, error));
+    EXPECT_FALSE(ignored.client_id.has_value());
+    EXPECT_FALSE(decoded(client_message("cancel", R"(,"order_id":3)")).client_id.has_value());
 
     EXPECT_TRUE(refused("[1]"));
     EXPECT_TRUE(refused(R"({"type":"auth","token":"t","extra":1})"));      // a key the message does not have
@@ -265,6 +274,7 @@ TEST(ProtocolTest, EncodesSnapshotsRecordsAndReplies)
     s.speed = 10;
     s.progress = 0.5;
     s.source_error = SourceError::None;
+    s.trading_state = TradingState::QuotationOnly;
     s.bids[0] = LevelInfo{.price = Price{2'905'500}, .quantity = 300, .order_count = 2};
     s.bid_levels = 1;
     s.asks[0] = LevelInfo{.price = Price{2'905'600}, .quantity = 200, .order_count = 1};
@@ -308,6 +318,7 @@ TEST(ProtocolTest, EncodesSnapshotsRecordsAndReplies)
                           R"("ahead_quantity":290,"ahead_orders":2}])"));
     EXPECT_EQ(snapshot["failure"], "none");
     EXPECT_EQ(snapshot["source_error"], "None");
+    EXPECT_EQ(snapshot["trading_state"], "quotation_only");
     EXPECT_EQ(snapshot["metrics"],
               json::parse(R"({"events_per_second":1234,"dropped_snapshots":3,"command_queue_depth":6,)"
                           R"("log_failed":false})"));
@@ -327,14 +338,31 @@ TEST(ProtocolTest, EncodesSnapshotsRecordsAndReplies)
         }
         return keys;
     };
-    std::set<std::string> snapshot_keys{"type",      "session_id",      "generation",
-                                        "symbol",    "snapshot_seq",    "exchange_ts",
-                                        "event_seq", "last_report_seq", "last_command_seq",
-                                        "state",     "speed",           "progress",
-                                        "failure",   "source_error",    "bids",
-                                        "asks",      "trades",          "trades_truncated",
-                                        "candle",    "closed_candles",  "candles_truncated",
-                                        "account",   "my_orders",       "my_orders_truncated",
+    std::set<std::string> snapshot_keys{"type",
+                                        "session_id",
+                                        "generation",
+                                        "symbol",
+                                        "snapshot_seq",
+                                        "exchange_ts",
+                                        "event_seq",
+                                        "last_report_seq",
+                                        "last_command_seq",
+                                        "state",
+                                        "speed",
+                                        "progress",
+                                        "failure",
+                                        "source_error",
+                                        "trading_state",
+                                        "bids",
+                                        "asks",
+                                        "trades",
+                                        "trades_truncated",
+                                        "candle",
+                                        "closed_candles",
+                                        "candles_truncated",
+                                        "account",
+                                        "my_orders",
+                                        "my_orders_truncated",
                                         "metrics"};
     EXPECT_EQ(keys_of(snapshot), snapshot_keys);
     EXPECT_FALSE(snapshot.contains("full_resync"));
@@ -416,10 +444,13 @@ TEST(ProtocolTest, EncodesSnapshotsRecordsAndReplies)
     EXPECT_EQ(end["kind"], "generation_end");
     EXPECT_EQ(end["market_event_seq"], 3);
 
-    EXPECT_EQ(json::parse(encode_hello("s1", 3, true, 4)),
+    SessionConfig session = config();
+    session.fees = {.maker_fee_per_share = -1, .taker_fee_per_share = 3};
+    EXPECT_EQ(json::parse(encode_hello("s1", 3, true, session)),
               json::parse(R"({"type":"hello","session_id":"s1","generation":3,"protocol":1,"role":"controller",)"
-                          R"("price_scale":4})"));
-    EXPECT_EQ(json::parse(encode_hello("s1", 3, false, 4))["role"], "viewer");
+                          R"("price_scale":4,"quantity_scale":0,"fees":{"maker":-1,"taker":3},)"
+                          R"("limits":{"max_position":1000,"max_order_quantity":500,"max_open_orders":4}})"));
+    EXPECT_EQ(json::parse(encode_hello("s1", 3, false, session))["role"], "viewer");
     EXPECT_EQ(json::parse(encode_command_ack("s1", 3, 12, true))["persisted"], "fsynced");
     EXPECT_EQ(json::parse(encode_command_ack("s1", 3, 12, false)),
               json::parse(R"({"type":"ack","session_id":"s1","generation":3,"command_seq":12,"persisted":"flushed"})"));
@@ -430,6 +461,8 @@ TEST(ProtocolTest, EncodesSnapshotsRecordsAndReplies)
               json::parse(R"({"type":"error","session_id":"s1","generation":3,"code":"queue_full",)"
                           R"("message":"order refused","command_seq":12})"));
     EXPECT_FALSE(json::parse(encode_error("s1", 3, "bad_request", "not JSON")).contains("command_seq"));
+    EXPECT_FALSE(json::parse(encode_error("s1", 3, "bad_request", "not JSON")).contains("client_id"));
+    EXPECT_EQ(json::parse(encode_error("s1", 3, "rate_limited", "too many", 0, 0))["client_id"], 0);  // 0 is an id
 
     const std::vector<std::string> symbols{"AAPL", "MSFT"};
     EXPECT_EQ(json::parse(encode_symbols(symbols)), json::parse(R"({"symbols":["AAPL","MSFT"]})"));

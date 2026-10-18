@@ -10,6 +10,7 @@
 #include <string>
 #include <string_view>
 #include <system_error>
+#include <utility>
 #include <vector>
 
 #include "chronos/server/command_log.hpp"
@@ -31,15 +32,16 @@ constexpr std::string_view serve_usage =
     "\n"
     "Serves an interactive replay of DIR/MMDDYYYY.NASDAQ_ITCH50.bin; the UI picks the symbol.\n"
     "  --host IP               the address to bind, an IP address (default 127.0.0.1); any other requires a\n"
-    "                          token, and one is made and printed once if --token is not given\n"
+    "                          token, and one is made and printed once if --token is not given; it guards\n"
+    "                          trading, not availability: put a buffering reverse proxy in front\n"
     "  --port N                default 8080\n"
     "  --web DIR               the built UI (default web/dist)\n"
     "  --token T               /api needs 'Authorization: Bearer T'; a WebSocket's first message is auth{T}\n"
     "  --fsync                 sync each command line of the log (sessions/<id>.jsonl) to the device\n"
     "  --allow-truncated-tail  a file cut mid-message ends there instead of failing\n"
     "\n"
-    "exit status: 0 after SIGINT or SIGTERM; 2 bad usage, a data file that cannot be opened, or an\n"
-    "address that cannot be bound\n";
+    "exit status: 0 after SIGINT or SIGTERM; 2 bad usage, a data file that cannot be opened or has no stock\n"
+    "directory, a log that cannot be written, or an address that cannot be bound\n";
 
 struct ServeArgs
 {
@@ -151,6 +153,11 @@ int main(int argc, char** argv)
         std::fprintf(stderr, "error: %s\n", file.error());
         return 2;
     }
+    std::vector<std::string> symbols = symbol_directory(file.bytes());
+    if (symbols.empty()) {
+        std::fprintf(stderr, "error: %s: no stock directory\n", path.c_str());
+        return 2;
+    }
     const std::chrono::minutes utc_offset = us_eastern_utc_offset(parsed.date);
     const std::string token = required_token(parsed.host, parsed.token);
     const std::string session_id = new_session_id();
@@ -170,7 +177,12 @@ int main(int argc, char** argv)
         .source_size = file.bytes().size()};
     // Declared in this order, so destroyed writer last: the server, then the engine thread, before the session.
     LogQueue queue;
-    const LogWriter writer{queue, sessions / (session_id + ".jsonl"), config, parsed.fsync};
+    const std::filesystem::path log_path = sessions / (session_id + ".jsonl");
+    const LogWriter writer{queue, log_path, config, parsed.fsync};
+    if (queue.failed()) {
+        std::fprintf(stderr, "error: cannot write the log %s\n", log_path.c_str());
+        return 2;
+    }
     ReplaySession session{config, itch_factory(file.bytes(), parsed.date, utc_offset, parsed.allow_truncated_tail),
                           &queue};
     std::optional<SessionRunner> runner{std::in_place, session};
@@ -180,17 +192,17 @@ int main(int argc, char** argv)
             .session_id = session_id,
             .token = token,
             .fsync = parsed.fsync,
-            .price_scale = config.instrument.price_scale,
-            .symbols = symbol_directory(file.bytes())};
+            .config = config,
+            .symbols = std::move(symbols)};
     HttpServer server{hub,
                       ServerOptions{.host = parsed.host, .port = parsed.port, .web = parsed.web, .sessions = sessions}};
     if (!server.start()) {
         std::fprintf(stderr, "error: cannot serve on %s port %u\n", parsed.host.c_str(), unsigned{parsed.port});
         return 2;
     }
-    std::printf("chronos-serve: http://%s:%u/ with %zu symbols; session %s, log %s\n", parsed.host.c_str(),
-                unsigned{server.port()}, hub.symbols.size(), session_id.c_str(),
-                (sessions / (session_id + ".jsonl")).c_str());
+    const std::string shown = parsed.host.find(':') == std::string::npos ? parsed.host : "[" + parsed.host + "]";
+    std::printf("chronos-serve: http://%s:%u/ with %zu symbols; session %s, log %s\n", shown.c_str(),
+                unsigned{server.port()}, hub.symbols.size(), session_id.c_str(), log_path.c_str());
     if (parsed.token.empty() && !token.empty()) {
         std::printf("token (shown once): %s\n", token.c_str());
     }

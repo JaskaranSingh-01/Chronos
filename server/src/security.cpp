@@ -17,7 +17,7 @@ bool loopback_host(std::string_view host, std::uint16_t port)
 std::string random_hex(std::size_t bytes)
 {
     constexpr std::string_view digits = "0123456789abcdef";
-    std::random_device device;
+    std::random_device device{"/dev/urandom"};
     std::string hex;
     for (std::size_t i = 0; i < bytes; ++i) {
         const unsigned byte = device() & 0xFFU;

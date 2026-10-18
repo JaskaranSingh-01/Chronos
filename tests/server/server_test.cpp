@@ -259,6 +259,7 @@ struct Served
               .writer = writer,
               .session_id = "test",
               .token = std::move(token),
+              .config = config(),
               .symbols = {"AAA", "BBB"}},
           server{hub, std::move(options)},
           runner{session}
@@ -350,7 +351,9 @@ TEST(ServerTest, AWebSocketFromAnotherOriginIsRefused)
     EXPECT_EQ(Client{served.server.port()}.upgrade("", served.host()), 403);
     EXPECT_EQ(Client{served.server.port()}.upgrade("http://evil.example:" + port, "evil.example:" + port), 403);
     const std::unique_ptr<Client> own = served.connect();
-    EXPECT_EQ(await(*own, "hello")["role"], "controller");
+    const json hello = await(*own, "hello");
+    EXPECT_EQ(hello["role"], "controller");
+    EXPECT_EQ(hello["limits"]["max_position"], 1'000);  // the session's config, for the ticket's checks
 }
 
 TEST(ServerTest, AMessageOverSixtyFourKibibytesClosesTheConnection)
@@ -387,6 +390,15 @@ TEST(ServerTest, AMessageOverSixtyFourKibibytesClosesTheConnection)
     }
     EXPECT_TRUE(binary->closed());
     EXPECT_EQ(binary->close_frame(), kClosedByServer);
+
+    // No route takes a body: a 100 KB one aborts the parse, and the server still serves.
+    Client http{served.server.port()};
+    const std::string body(100'000, 'x');
+    EXPECT_NE(http.request("GET /api/symbols HTTP/1.1\r\nHost: " + served.host() +
+                           "\r\nContent-Length: 100000\r\nConnection: close\r\n\r\n" + body)
+                  .first,
+              200);
+    EXPECT_EQ(served.get("/api/symbols").first, 200);
 }
 
 TEST(ServerTest, ATokenGuardsHttpAndTheWebSocketsFirstMessage)

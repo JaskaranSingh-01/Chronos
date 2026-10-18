@@ -80,7 +80,7 @@ Applied apply_command(Generation& generation, const Command& command) noexcept;
 struct Digests
 {
     std::uint64_t book{0};       // MarketBook::digest()
-    std::uint64_t execution{0};  // the execution statistics and our resting orders
+    std::uint64_t execution{0};  // the execution counters and our resting orders
     std::uint64_t portfolio{0};  // position, cash, PnL, fees, drawdown and open orders
 
     bool operator==(const Digests&) const = default;

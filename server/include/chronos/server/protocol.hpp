@@ -2,6 +2,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <span>
 #include <string>
 #include <string_view>
@@ -39,13 +40,16 @@ struct ClientMessage
     Control control{};                 // Control
     Command command{};                 // Command, with command.generation set
     std::uint64_t from_report_seq{0};  // Resync
+    std::optional<std::uint64_t> client_id{};  // an order's, kept even when the rest of it is refused
 };
 
 // False, with `error` saying what is wrong, if `text` is not one client message. A key given twice keeps its last
 // value, as JSON.parse does, and the command log records the command as decoded.
 bool decode(std::string_view text, ClientMessage& message, std::string& error);
 
-std::string encode_hello(std::string_view session_id, std::uint64_t generation, bool controller, int price_scale);
+// The role, and the session's price and quantity scales, fees and risk limits.
+std::string encode_hello(std::string_view session_id, std::uint64_t generation, bool controller,
+                         const SessionConfig& config);
 // A snapshot, or with `state` the full authoritative state a (re)connect or a gap starts from; `full_resync`: after
 // a gap, so the client's report history is incomplete.
 std::string encode_snapshot(std::string_view session_id, const Snapshot& snapshot, bool state, bool full_resync);
@@ -58,9 +62,10 @@ std::string encode_command_ack(std::string_view session_id, std::uint64_t genera
 // Reports `from` to `to` were overwritten before the client read them.
 std::string encode_gap(std::string_view session_id, std::uint64_t generation, std::uint64_t from, std::uint64_t to);
 std::string encode_progress(std::string_view session_id, std::uint64_t generation, Timestamp seek);
-// `command_seq` 0: the error is not about a command.
+// `command_seq` 0: the error is not about a command; `client_id` is the order's, when its message carried one.
 std::string encode_error(std::string_view session_id, std::uint64_t generation, std::string_view code,
-                         std::string_view message, std::uint64_t command_seq = 0);
+                         std::string_view message, std::uint64_t command_seq = 0,
+                         std::optional<std::uint64_t> client_id = std::nullopt);
 
 // GET /api/symbols.
 std::string encode_symbols(std::span<const std::string> symbols);

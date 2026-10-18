@@ -49,7 +49,7 @@ bool Peer::receive(std::string_view text, Timestamp now, std::vector<std::string
     ReplaySession& session = hub_.session;
     const std::uint64_t generation = session.generation();
     const auto refuse = [&](std::string_view code, std::string_view why, std::uint64_t command_seq = 0) {
-        out.push_back(encode_error(hub_.session_id, generation, code, why, command_seq));
+        out.push_back(encode_error(hub_.session_id, generation, code, why, command_seq, message.client_id));
         return true;
     };
     if (!valid) {
@@ -93,7 +93,10 @@ bool Peer::receive(std::string_view text, Timestamp now, std::vector<std::string
         return refuse(to_string(admission.error), "command refused", admission.seq);
     }
     if (hub_.writer != nullptr) {
-        acks_.push_back({.command_seq = admission.seq, .record_seq = admission.record_seq, .generation = generation});
+        acks_.push_back({.command_seq = admission.seq,
+                         .record_seq = admission.record_seq,
+                         .generation = generation,
+                         .client_id = message.client_id});
     }
     return true;
 }
@@ -105,7 +108,7 @@ bool Peer::poll(Timestamp now, std::vector<std::string>& out)
     }
     ReplaySession& session = hub_.session;
     if (!hello_sent_) {
-        out.push_back(encode_hello(hub_.session_id, session.generation(), hub_.controller == this, hub_.price_scale));
+        out.push_back(encode_hello(hub_.session_id, session.generation(), hub_.controller == this, hub_.config));
         hello_sent_ = true;
     }
 
@@ -158,7 +161,7 @@ bool Peer::poll(Timestamp now, std::vector<std::string>& out)
                 out.push_back(encode_command_ack(hub_.session_id, ack.generation, ack.command_seq, hub_.fsync));
             } else if (failed) {
                 out.push_back(encode_error(hub_.session_id, ack.generation, to_string(ErrorCode::LogUnavailable),
-                                           "the command could not be logged", ack.command_seq));
+                                           "the command could not be logged", ack.command_seq, ack.client_id));
             } else {
                 acks_[kept++] = ack;
             }

@@ -1,0 +1,30 @@
+--- a/include/crow/parser.h
++++ b/include/crow/parser.h
+@@ -88,6 +88,7 @@
+         static int on_body(http_parser* self_, const char* at, size_t length)
+         {
+             HTTPParser* self = static_cast<HTTPParser*>(self_);
++            if (self->req.body.size() + length > 64 * 1024) return 1; // abort the parse: a body over 64 KiB
+             self->req.body.insert(self->req.body.end(), at, at + length);
+             return 0;
+         }
+--- a/include/crow/websocket.h
++++ b/include/crow/websocket.h
+@@ -512,7 +512,7 @@
+                     }
+                     break;
+                     case WebSocketReadState::Mask:
+-                        if ((message_.size() + remaining_length_) > max_payload_bytes_)
++                        if (message_.size() > max_payload_bytes_ || remaining_length_ > max_payload_bytes_ - message_.size())
+                         {
+                             close_connection_ = true;
+                             adaptor_.close();
+@@ -701,7 +701,7 @@
+                     break;
+                     case 0x9: // Ping
+                     {
+-                        send_pong(fragment_);
++                        if (sending_buffers_.empty() && write_buffers_.empty()) send_pong(fragment_); // RFC 6455 5.5.3: a pong may skip older pings
+                     }
+                     break;
+                     case 0xA: // Pong

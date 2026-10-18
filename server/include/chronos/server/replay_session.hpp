@@ -148,6 +148,7 @@ struct Snapshot
     double progress{0};  // the source's position over SessionConfig::source_size; 0 if that is unknown
     ReplayFailure failure{ReplayFailure::None};
     SourceError source_error{SourceError::None};
+    TradingState trading_state{TradingState::Trading};  // the book's: anything but Trading means no matching
     std::array<LevelInfo, snapshot_levels> bids{};  // best first
     std::array<LevelInfo, snapshot_levels> asks{};
     std::size_t bid_levels{0};
@@ -243,7 +244,7 @@ private:
     {
         std::uint64_t generation{0};
         std::vector<Candle> candles;  // closed 1 s bars, oldest first
-        std::array<Trade, snapshot_trades> trades{};
+        std::array<Trade, snapshot_trades> trades{};  // a ring: trade i at i % snapshot_trades
         std::uint64_t trades_total{0};
     };
     mutable std::mutex history_mutex_;

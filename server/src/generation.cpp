@@ -2,6 +2,8 @@
 
 #include <utility>
 
+#include "simulator/market/market_book.hpp"
+
 namespace simulator::server {
 namespace {
 

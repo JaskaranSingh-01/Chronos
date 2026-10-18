@@ -627,6 +627,7 @@ void ReplaySession::publish_snapshot(Timestamp wall_now) noexcept
         : static_cast<double>(g.source->position()) / static_cast<double>(config_.source_size);
     s.failure = replay.failure;
     s.source_error = replay.source_error;
+    s.trading_state = g.book.trading_state();
     s.bid_levels = g.book.depth(Side::Buy, s.bids);
     s.ask_levels = g.book.depth(Side::Sell, s.asks);
 

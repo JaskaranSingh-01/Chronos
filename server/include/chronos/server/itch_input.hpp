@@ -16,6 +16,7 @@ namespace simulator::server {
 std::vector<std::string> symbol_directory(std::span<const std::byte> bytes);
 
 // Names the market data in the command log: "<name> <size in bytes> <FNV-1a 64 of the first and last MiB, hex>".
+// ponytail: an edit between the first and last MiB at the same size goes unseen; hash the whole file if that matters.
 std::string input_fingerprint(std::string_view name, std::span<const std::byte> bytes);
 
 // One ITCH day's streams: per ticker, an ItchSource with its own one-instrument registry; for the empty ticker, an
