@@ -131,6 +131,7 @@ add_library(chronos_server
     server/src/candles.cpp
     server/src/command_log.cpp
     server/src/generation.cpp
+    server/src/itch_input.cpp
     server/src/replay_session.cpp
     server/src/session_runner.cpp
 )
@@ -236,6 +237,7 @@ add_executable(chronos_server_tests
     tests/server/channels_test.cpp
     tests/server/command_log_test.cpp
     tests/server/generation_test.cpp
+    tests/server/itch_input_test.cpp
     tests/server/replay_session_test.cpp
     tests/server/restart_test.cpp
     tests/server/session_runner_test.cpp
