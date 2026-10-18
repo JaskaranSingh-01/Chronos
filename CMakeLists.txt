@@ -301,6 +301,16 @@ target_link_libraries(chronos_server_tests
 
 gtest_discover_tests(chronos_server_tests)
 
+# Writes the small ITCH day the web end-to-end tests serve (web/e2e).
+add_executable(chronos-e2e-fixture
+
+    tests/e2e/itch_fixture.cpp
+)
+
+target_compile_options(chronos-e2e-fixture PRIVATE ${CHRONOS_WARNINGS})
+
+target_include_directories(chronos-e2e-fixture PRIVATE ${PROJECT_SOURCE_DIR}/tests)
+
 # Its own executable: the counting operator new must stay out of simulator_tests.
 if(CHRONOS_COUNT_ALLOCATIONS)
     add_executable(alloc_counter_test

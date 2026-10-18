@@ -10,6 +10,8 @@
 # - isolation: the engine (include/, src/, app/) never includes server or web code, and
 #   simulator_lib links only the standard library.
 # - server-tsan: chronos_server_tests under ThreadSanitizer (Linux clang; TSan does not start on macOS 27).
+# - web: the Trading Terminal (web/): typecheck, build and Vitest, then the Playwright end-to-end tests against a
+#   Release chronos-serve on the fixture day chronos-e2e-fixture writes.
 name: CI
 
 on: [push, pull_request]
@@ -83,3 +85,28 @@ jobs:
         run: cmake --build build --parallel 4 --target chronos_server_tests
       - name: Test
         run: TSAN_OPTIONS=halt_on_error=1 ./build/chronos_server_tests --gtest_brief=1
+
+  web:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: Build chronos-serve and the fixture writer
+        working-directory: .
+        run: |
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+          cmake --build build --parallel 4 --target chronos-serve chronos-e2e-fixture
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run build
+      - run: npm test
+      - run: npx playwright install --with-deps chromium
+      - run: npx playwright test
