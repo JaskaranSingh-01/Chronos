@@ -1,0 +1,266 @@
+#include "chronos/server/http_server.hpp"
+
+#include <charconv>
+#include <chrono>
+#include <cstdint>
+#include <filesystem>
+#include <fstream>
+#include <functional>
+#include <future>
+#include <iterator>
+#include <memory>
+#include <mutex>
+#include <optional>
+#include <string>
+#include <string_view>
+#include <unordered_map>
+#include <utility>
+#include <vector>
+
+#include <crow.h>
+
+#include "chronos/server/protocol.hpp"
+#include "chronos/server/security.hpp"
+
+namespace simulator::server {
+namespace {
+
+Timestamp wall_now() noexcept
+{
+    return std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now().time_since_epoch())
+        .count();
+}
+
+crow::response json_response(int code, std::string body)
+{
+    crow::response response{code, std::move(body)};
+    response.set_header("Content-Type", "application/json");
+    return response;
+}
+
+// The query parameter `key` as a whole number; false if it is missing or anything else.
+template <class I>
+bool number(const crow::request& request, const char* key, I& value)
+{
+    const char* text = request.url_params.get(key);
+    if (text == nullptr) {
+        return false;
+    }
+    const std::string_view view{text};
+    const auto [end, error] = std::from_chars(view.data(), view.data() + view.size(), value);
+    return error == std::errc{} && end == view.data() + view.size();
+}
+
+// A log up to its last newline, so a line the writer is still writing is never served half.
+std::string complete_lines(const std::filesystem::path& path)
+{
+    std::ifstream in{path, std::ios::binary};
+    std::string text{std::istreambuf_iterator<char>{in}, {}};
+    text.resize(text.find_last_of('\n') + 1);  // npos + 1 is 0: no complete line yet
+    return text;
+}
+
+// A session id from a URL names a file only if it is letters, digits, '-' and '_'.
+bool plain_id(std::string_view id)
+{
+    constexpr std::string_view allowed = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_";
+    return !id.empty() && id.size() <= 64 && id.find_first_not_of(allowed) == std::string_view::npos;
+}
+
+}  // namespace
+
+struct HttpServer::Impl
+{
+    Hub& hub;
+    ServerOptions options;
+    crow::SimpleApp app;
+    std::mutex mutex;  // the hub and every peer: each Peer call, its construction and its destruction
+    std::unordered_map<crow::websocket::connection*, std::unique_ptr<Peer>> peers;
+    std::shared_future<void> running;  // wait() and stop() may be on different threads
+    bool stopped{false};
+
+    Impl(Hub& h, ServerOptions o)
+        : hub(h), options(std::move(o))
+    {
+        routes();
+    }
+
+    void routes();
+    crow::response api(const crow::request& request, const std::function<crow::response()>& serve);
+    crow::response history(const crow::request& request);
+    crow::response static_file(std::string path);
+    void pump();
+    static void deliver(crow::websocket::connection& connection, std::vector<std::string>& out, bool keep);
+};
+
+void HttpServer::Impl::routes()
+{
+    app.loglevel(crow::LogLevel::Warning);
+    CROW_ROUTE(app, "/api/symbols")([this](const crow::request& request) {
+        return api(request, [this] { return json_response(200, encode_symbols(hub.symbols)); });
+    });
+    CROW_ROUTE(app, "/api/history")(
+        [this](const crow::request& request) { return api(request, [&] { return history(request); }); });
+    CROW_ROUTE(app, "/api/sessions/<string>/log")([this](const crow::request& request, const std::string& id) {
+        return api(request, [&] {
+            const std::filesystem::path path = options.sessions / (id + ".jsonl");
+            if (!plain_id(id) || !std::filesystem::is_regular_file(path)) {
+                return crow::response{404};
+            }
+            crow::response response{200, complete_lines(path)};
+            response.set_header("Content-Type", "application/x-ndjson");
+            return response;
+        });
+    });
+    // Crow drops a connection whose message passes max_message_bytes before onmessage; onopen follows onaccept's allow.
+    CROW_WEBSOCKET_ROUTE(app, "/ws")
+        .max_payload(max_message_bytes)
+        .onaccept([this](const crow::request& request, std::optional<crow::response>& refusal, void**) {
+            if (!websocket_allowed(request.get_header_value("Origin"), request.get_header_value("Host"), hub.token,
+                                   app.port())) {
+                refusal = crow::response{403};
+            }
+        })
+        .onopen([this](crow::websocket::connection& connection) {
+            const std::lock_guard lock{mutex};
+            peers.emplace(&connection, std::make_unique<Peer>(hub, wall_now()));
+        })
+        .onmessage([this](crow::websocket::connection& connection, const std::string& text, bool binary) {
+            const std::lock_guard lock{mutex};
+            const auto peer = peers.find(&connection);
+            if (peer == peers.end()) {
+                return;
+            }
+            std::vector<std::string> out;
+            const bool keep = !binary && peer->second->receive(text, wall_now(), out);  // the protocol is text
+            deliver(connection, out, keep);
+            if (!keep) {
+                peers.erase(peer);
+            }
+        })
+        .onclose([this](crow::websocket::connection& connection, const std::string&, std::uint16_t) {
+            const std::lock_guard lock{mutex};
+            peers.erase(&connection);
+        });
+    CROW_ROUTE(app, "/")([this] { return static_file("index.html"); });
+    CROW_ROUTE(app, "/<path>")([this](const std::string& path) { return static_file(path); });
+    app.tick(std::chrono::milliseconds{1'000 / 30}, [this] { pump(); });
+}
+
+// Serves an /api request that the token, or else the loopback Host, allows.
+crow::response HttpServer::Impl::api(const crow::request& request, const std::function<crow::response()>& serve)
+{
+    const int status =
+        api_status(request.get_header_value("Host"), request.get_header_value("Authorization"), hub.token, app.port());
+    return status == 0 ? serve() : crow::response{status};
+}
+
+// GET /api/history?session_id&generation&from_ts: the generation's bars and latest trades, as of its last snapshot.
+// ponytail: a full-day read holds the history lock about 1-3 ms and may drop one snapshot frame for every client;
+// per-client rate limiting or paging comes when needed.
+crow::response HttpServer::Impl::history(const crow::request& request)
+{
+    const char* session_id = request.url_params.get("session_id");
+    std::uint64_t generation = 0;
+    Timestamp from_ts = 0;
+    if (session_id == nullptr || !number(request, "generation", generation) || !number(request, "from_ts", from_ts)) {
+        return json_response(400, R"({"error":"bad_request"})");
+    }
+    if (session_id != hub.session_id) {
+        return json_response(404, R"({"error":"unknown_session"})");
+    }
+    std::vector<Candle> candles;
+    std::vector<Trade> trades;
+    // False: the history holds another generation, or none of this one is published yet (an empty answer, not stale).
+    if (!hub.session.read_history(generation, from_ts, candles, trades)) {
+        const std::uint64_t current = hub.session.generation();
+        if (generation != current) {
+            return json_response(409, R"({"error":"stale_generation","generation":)" + std::to_string(current) + "}");
+        }
+    }
+    return json_response(200, encode_history(hub.session_id, generation, candles, trades));
+}
+
+// A file of the built UI; public, as it holds no secrets.
+crow::response HttpServer::Impl::static_file(std::string path)
+{
+    crow::utility::sanitize_filename(path);
+    crow::response response;
+    response.set_static_file_info_unsafe((options.web / path).string());
+    if (response.code == 404) {
+        return crow::response{404, "no such file in " + options.web.string() + " (the UI is built into web/dist)"};
+    }
+    return response;
+}
+
+// Once a frame, on Crow's main thread: polls every connection, so one that never authenticates times out.
+void HttpServer::Impl::pump()
+{
+    const std::lock_guard lock{mutex};
+    const Timestamp now = wall_now();
+    std::vector<std::string> out;
+    for (auto peer = peers.begin(); peer != peers.end();) {
+        out.clear();
+        const bool keep = peer->second->poll(now, out);
+        deliver(*peer->first, out, keep);
+        peer = keep ? std::next(peer) : peers.erase(peer);
+    }
+}
+
+// Sends under the hub lock, so the connection outlives the call; every close has one code and reason.
+// ponytail: Crow exposes no per-connection send backlog, so a client that stops reading its socket buffers its frames
+// in Crow (about 1 MB/s at 30 snapshots/s); a write-completion hook would let the pump hold it to the latest snapshot.
+void HttpServer::Impl::deliver(crow::websocket::connection& connection, std::vector<std::string>& out, bool keep)
+{
+    for (std::string& text : out) {
+        connection.send_text(std::move(text));
+    }
+    if (!keep) {
+        // ponytail: Crow keeps a closed socket until the client answers the close, so a silent client holds its fd; a
+        // Crow patch that shuts the socket a few seconds after close() bounds it.
+        connection.close("closed by the server", crow::websocket::CloseStatusCode::PolicyViolated);
+    }
+}
+
+HttpServer::HttpServer(Hub& hub, ServerOptions options)
+    : impl_(std::make_unique<Impl>(hub, std::move(options)))
+{}
+
+HttpServer::~HttpServer()
+{
+    stop();
+}
+
+bool HttpServer::start()
+{
+    impl_->app.bindaddr(impl_->options.host).port(impl_->options.port).concurrency(4);
+    impl_->running = impl_->app.run_async().share();
+    // A failed bind still reports a started server, but never a bound one.
+    return impl_->app.wait_for_server_start() == std::cv_status::no_timeout && impl_->app.is_bound();
+}
+
+std::uint16_t HttpServer::port() const
+{
+    return impl_->app.port();
+}
+
+void HttpServer::wait()
+{
+    if (impl_->running.valid()) {
+        impl_->running.wait();
+    }
+}
+
+void HttpServer::stop()
+{
+    if (!impl_->running.valid() || impl_->stopped) {
+        return;
+    }
+    impl_->stopped = true;
+    impl_->app.stop();
+    impl_->running.wait();
+    const std::lock_guard lock{impl_->mutex};
+    impl_->peers.clear();  // the connections are Crow's, and its threads are gone
+}
+
+}  // namespace simulator::server

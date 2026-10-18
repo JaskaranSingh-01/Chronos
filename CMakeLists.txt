@@ -126,11 +126,37 @@ FetchContent_Declare(
 
 FetchContent_MakeAvailable(json)
 
+# Crow (BSD-3) over standalone Asio for HTTP and WebSocket: header-only and pinned. Their own CMake files are not run:
+# a SOURCE_SUBDIR with no CMakeLists.txt makes FetchContent download only. SYSTEM keeps their warnings out of ours.
+FetchContent_Declare(
+    asio
+    URL https://github.com/chriskohlhoff/asio/archive/refs/tags/asio-1-30-2.tar.gz
+    URL_HASH SHA256=755bd7f85a4b269c67ae0ea254907c078d408cce8e1a352ad2ed664d233780e8
+    SOURCE_SUBDIR none
+)
+
+FetchContent_Declare(
+    crow
+    URL https://github.com/CrowCpp/Crow/archive/refs/tags/v1.3.4.tar.gz
+    URL_HASH SHA256=6be759b3a648b41f0adc3a8408a53fd0243775217b4e32e8101d69e4aadf48cc
+    SOURCE_SUBDIR none
+    # Upstream master's overflow-safe max_payload check; v1.3.4 and v1.3.5 lack it.
+    PATCH_COMMAND patch -p1 -i ${PROJECT_SOURCE_DIR}/cmake/crow-1.3.4-max-payload.patch
+)
+
+FetchContent_MakeAvailable(asio crow)
+
+add_library(crow_headers INTERFACE)
+target_include_directories(crow_headers SYSTEM INTERFACE ${crow_SOURCE_DIR}/include ${asio_SOURCE_DIR}/asio/include)
+# CROW_DISABLE_STATIC_DIR: no implicit /static/ route serving the working directory.
+target_compile_definitions(crow_headers INTERFACE ASIO_STANDALONE ASIO_NO_DEPRECATED CROW_DISABLE_STATIC_DIR)
+
 add_library(chronos_server
 
     server/src/candles.cpp
     server/src/command_log.cpp
     server/src/generation.cpp
+    server/src/http_server.cpp
     server/src/itch_input.cpp
     server/src/peer.cpp
     server/src/protocol.cpp
@@ -152,7 +178,7 @@ target_link_libraries(chronos_server
         Threads::Threads
 )
 
-target_link_libraries(chronos_server PRIVATE nlohmann_json::nlohmann_json)
+target_link_libraries(chronos_server PRIVATE nlohmann_json::nlohmann_json crow_headers)
 
 # The command log's header records the commit (generated/build_info.hpp).
 add_dependencies(chronos_server build_info)
@@ -246,6 +272,7 @@ add_executable(chronos_server_tests
     tests/server/replay_session_test.cpp
     tests/server/restart_test.cpp
     tests/server/security_test.cpp
+    tests/server/server_test.cpp
     tests/server/session_runner_test.cpp
     tests/server/snapshot_test.cpp
 )
