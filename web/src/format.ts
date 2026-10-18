@@ -42,3 +42,11 @@ export function etOffset(epochSeconds: number): number {
   const f = Object.fromEntries(fields.formatToParts(at * 1_000).map((p) => [p.type, Number(p.value)]));
   return Date.UTC(f.year, f.month - 1, f.day, f.hour, f.minute, f.second) / 1_000 - at;
 }
+
+// The epoch ns of New York wall-clock time `hhmmss` (HH:MM or HH:MM:SS) on the session day of `ns`.
+export function seekTs(ns: number, hhmmss: string): number {
+  const [hours, minutes, seconds = 0] = hhmmss.split(':').map(Number);
+  const now = Math.floor(ns / 1e9);
+  const midnight = now - ((now + etOffset(now)) % 86_400);
+  return (midnight + hours * 3_600 + minutes * 60 + seconds) * 1e9; // whole seconds x 1e9 are exact in a double
+}

@@ -84,13 +84,13 @@ const bar = (second: number, close: number, volume = 100): Candle => [
   volume,
 ];
 
-const generationStart = (generation: number, seq: number): ServerMessage => ({
+const generationStart = (generation: number, seq: number, symbol = 'ACME'): ServerMessage => ({
   type: 'report',
   kind: 'generation_start',
   session_id: 's1',
   generation,
   seq,
-  symbol: 'ACME',
+  symbol,
   strategy: 'none',
 });
 
@@ -211,6 +211,31 @@ describe('apply', () => {
       seek: T + 5 * S,
     });
     expect(s.seekAt).toBe(T + 5 * S);
+  });
+
+  it('knows the symbol from generation_start alone, as after a seek that made a generation and no snapshot', () => {
+    const s = run(hello(), snapshot({ type: 'state' }));
+    expect(s.symbol).toBe('ACME');
+    const seek = apply(s, generationStart(3, 2, 'MSFT'));
+    expect([seek.symbol, seek.snap]).toEqual(['MSFT', null]);
+    expect(apply(seek, generationStart(2, 3, 'ACME')).symbol).toBe('MSFT'); // an older generation's start
+    expect(apply(seek, snapshot({ generation: 3, symbol: 'MSFT' })).symbol).toBe('MSFT');
+    expect(apply(s, hello({ generation: 3 })).symbol).toBe(''); // a new generation's symbol is not yet known
+    expect(run(hello({ generation: 1 }), snapshot({ generation: 1, symbol: '' })).symbol).toBe(''); // the empty ticker
+  });
+
+  it('clears the notice on a control ack and a new generation, and the seek target when a seek starts', () => {
+    const progress = (seek: number): ServerMessage => ({ type: 'progress', session_id: 's1', generation: 2, seek });
+    const s = run(hello(), snapshot({ type: 'state' }), progress(T + 5 * S));
+    const failed = apply(s, { type: 'error', session_id: 's1', generation: 2, code: 'not_ready', message: 'ended' });
+    expect(failed.notice).toBe('not_ready: ended');
+    expect(apply(failed, controlAck(1, 'play', 'playing')).notice).toBe('');
+    expect(apply(failed, generationStart(3, 1)).notice).toBe('');
+    expect(apply(failed, snapshot({ failure: 'source_error', source_error: 'eof' })).notice).not.toBe('');
+    expect(s.seekAt).toBe(T + 5 * S);
+    expect(apply(s, controlAck(1, 'speed', 'seeking')).seekAt).toBe(T + 5 * S); // another control: the seek goes on
+    expect(apply(s, controlAck(1, 'seek', 'seeking')).seekAt).toBe(0);
+    expect(apply(s, generationStart(3, 1)).seekAt).toBe(0); // a backward seek begins a generation
   });
 
   it('shows errors and rejections, naming an order by its client_id', () => {
@@ -519,6 +544,12 @@ describe('createStore', () => {
     expect(store.cancel(1)).toBe(false);
     expect(store.get().notice).toBe('not connected');
     expect(f.sent).toHaveLength(2);
+  });
+
+  it('shows a note the UI puts on the notice line', () => {
+    const store = createStore(fake().env);
+    store.notify('unknown symbol X');
+    expect(store.get().notice).toBe('unknown symbol X');
   });
 
   it('sends a market order with no price key', async () => {

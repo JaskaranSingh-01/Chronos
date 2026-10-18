@@ -347,6 +347,23 @@ TEST(ReplaySessionTest, FullSpeedYieldsEveryTickSoAPauseIsSeen)
     EXPECT_EQ(session.tick(kWall), ReplaySession::never);
     EXPECT_EQ(session.loop_report().replay.events, ReplaySession::events_per_tick);
     EXPECT_EQ(session.state(), SessionState::Paused);
+
+    session.control(step(1));
+    session.control(step(1));  // two Steps before one tick add up: two events, not one
+    session.tick(kWall);
+    EXPECT_EQ(session.loop_report().replay.events, ReplaySession::events_per_tick + 2);
+    EXPECT_EQ(session.state(), SessionState::Paused);
+
+    session.control(step(5'000));
+    session.tick(kWall);  // one tick's budget of the 5,000
+    EXPECT_EQ(session.state(), SessionState::Stepping);
+    session.control(kPause);
+    session.tick(kWall);
+    const std::uint64_t before = session.loop_report().replay.events;
+    session.control(step(1));
+    session.tick(kWall);
+    EXPECT_EQ(session.loop_report().replay.events, before + 1);  // the cut-short Step left nothing owed
+    EXPECT_EQ(session.state(), SessionState::Paused);
 }
 
 TEST(ReplaySessionTest, CommandsQueuedWhenTheStreamEndsAreRefusedNotReady)

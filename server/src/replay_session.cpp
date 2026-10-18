@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 #include <utility>
 
 #include "chronos/server/command_log.hpp"
@@ -408,8 +409,11 @@ void ReplaySession::apply_control(const Control& control, Timestamp wall_now) no
         break;
     case ControlType::Step:
         if (!ended) {
+            // A Step while stepping adds to the steps owed (saturating), so two in one tick advance two events.
+            steps_left_ = state_.load() == SessionState::Stepping
+                ? steps_left_ + std::min(control.steps, std::numeric_limits<std::uint64_t>::max() - steps_left_)
+                : control.steps;
             state_.store(SessionState::Stepping);
-            steps_left_ = control.steps;
         }
         break;
     case ControlType::Speed:

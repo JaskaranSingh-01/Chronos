@@ -20,6 +20,7 @@ export interface State {
   symbols: string[];
   hello: Hello | null;
   generation: number; // the newest seen in any envelope
+  symbol: string; // this generation's, from its generation_start or a snapshot; '' until known
   snap: Snapshot | null; // the latest of `generation`; null until its first state
   state: SessionState; // from snapshots and control acks
   seq: number; // the last ring seq applied: reports and control acks
@@ -50,6 +51,7 @@ export const initial: State = {
   symbols: [],
   hello: null,
   generation: 0,
+  symbol: '',
   snap: null,
   state: 'ended',
   seq: 0,
@@ -112,7 +114,10 @@ function newGeneration(s: State, generation: number): State {
   return {
     ...s,
     generation,
+    symbol: '',
     snap: null,
+    seekAt: 0,
+    notice: '',
     fills: [],
     tape: [],
     bars: [],
@@ -142,6 +147,7 @@ function onSnapshot(s: State, m: Snapshot): State {
   return {
     ...s,
     snap: m,
+    symbol: m.symbol,
     state: m.state,
     // A state with nothing to recover holds every report up to its watermark.
     seq: m.type === 'state' && (m.full_resync || s.seq === 0) ? Math.max(s.seq, m.last_report_seq) : s.seq,
@@ -176,10 +182,17 @@ export function apply(s: State, m: ServerMessage): State {
       if (!('control' in m)) return s; // a command ack: logged; its verdict follows as lifecycle reports
       // A replay after a reconnect brings acks older than the state: they advance the cursor but not the state.
       if (m.seq <= s.seq) return s;
-      return { ...s, seq: m.seq, state: m.seq > (s.snap?.last_report_seq ?? 0) ? m.state : s.state };
+      return {
+        ...s,
+        seq: m.seq,
+        state: m.seq > (s.snap?.last_report_seq ?? 0) ? m.state : s.state,
+        seekAt: m.control === 'seek' ? 0 : s.seekAt, // the last seek's target is not this one's
+        notice: '', // a control the server applied answers an earlier refusal
+      };
     case 'report': {
       if (m.seq <= s.seq) return s;
       const next = { ...s, seq: m.seq };
+      if (m.kind === 'generation_start' && m.generation === s.generation) next.symbol = m.symbol;
       if (m.kind === 'execution' && m.report_type === 'fill' && m.generation === s.generation) {
         next.fills = [...s.fills, m];
       }
@@ -365,6 +378,7 @@ export function createStore(env: Env) {
       env.save(tokenKey, value);
       void start();
     },
+    notify: (notice: string) => set({ ...state, notice }),
     control: (c: Control) => send({ type: 'control', ...c }),
     order: (o: Order) => send({ type: 'order', client_id: ++clientId, ...o }),
     cancel: (order_id: number) => send({ type: 'cancel', order_id }),
