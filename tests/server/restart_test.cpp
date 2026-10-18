@@ -53,9 +53,10 @@ TEST(RestartTest, RestartRefusesStaleCommandsAndStartsAFreshGeneration)
     ASSERT_EQ(session.submit(fresh, 0).error, ErrorCode::None);
     session.tick(kWall);
 
-    EXPECT_EQ(
-        trace(session),
-        (std::vector<std::string>{"applied cmd1 @200 ev2", "refused cmd2 stale_generation", "applied cmd4 @99 ev0"}));
+    // The restart closes generation 1 at its clock, where cmd1's zero-latency order arrives.
+    EXPECT_EQ(trace(session),
+              (std::vector<std::string>{"applied cmd1 @200 ev2", "report ord1 accepted 10 @200", "accepted cmd1",
+                                        "refused cmd2 stale_generation", "applied cmd4 @99 ev0"}));
     EXPECT_EQ(session.portfolio().open_orders(), 1u);  // generation 2 holds only its own order
     EXPECT_EQ(starts(session), (std::vector<std::uint64_t>{1, 2}));
 }

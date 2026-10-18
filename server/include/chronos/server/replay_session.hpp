@@ -52,8 +52,9 @@ struct Control
 enum class RecordKind : std::uint8_t {
     Lifecycle,  // one step of a command
     Report,     // an execution report delivered to the session's strategy
-    Ack,             // a control, applied
-    GenerationStart  // a new generation and the strategy it starts with
+    Ack,              // a control, applied
+    GenerationStart,  // a new generation and the strategy it starts with
+    GenerationEnd     // a generation's last boundary and digests: the log's trailer, at a restart and at close()
 };
 
 // A command's steps; Applied means it reached the gateway, and an order's or cancel's verdict follows.
@@ -84,6 +85,7 @@ struct Record
     ExecutionReport report{};             // Report
     Control control{};                    // Ack; GenerationStart: control.symbol is the generation's ticker
     SessionState state{SessionState::Paused};  // Ack: the state after the control
+    Digests digests{};                         // GenerationEnd
 };
 
 // submit()'s and control()'s answer.
@@ -322,6 +324,9 @@ public:
     Timestamp tick(Timestamp wall_now) noexcept;
     // Engine thread. When the next snapshot is due: every frame while Playing, else only once something is new.
     Timestamp snapshot_due() const noexcept;
+    // Engine thread: brings the generation to its clock and publishes its trailer. restart() calls it, and the owner
+    // once, after the runner has stopped.
+    void close() noexcept;
     // Engine thread: the exchange clock and the current generation's state.
     Timestamp clock() noexcept;
     const MarketBook& book() const noexcept;

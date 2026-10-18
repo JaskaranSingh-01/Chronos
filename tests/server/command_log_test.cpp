@@ -5,7 +5,9 @@
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
+#include <memory>
 #include <string>
+#include <string_view>
 #include <system_error>
 #include <vector>
 
@@ -225,6 +227,7 @@ TEST(CommandLogTest, ReplayingTheLogReproducesTheBookExecutionAndPortfolio)
         }
         EXPECT_FALSE(queue.failed());
         second = outcome(session.book(), session.execution(), session.portfolio(), session.loop_report());
+        session.close();  // ended: the trailer changes nothing
         for (const Record& r : records(session)) {
             const bool applied = r.kind == RecordKind::Lifecycle && r.step == Lifecycle::Applied;
             applied_first += applied && r.generation == 1 ? 1 : 0;
@@ -245,6 +248,8 @@ TEST(CommandLogTest, ReplayingTheLogReproducesTheBookExecutionAndPortfolio)
     ASSERT_TRUE(read_log(path, 1, logged, error)) << error;
     EXPECT_TRUE(logged.start == StrategySpec{});
     EXPECT_EQ(logged.applied.size(), applied_first);
+    ASSERT_TRUE(logged.end.has_value());  // the restart's trailer
+    EXPECT_EQ(logged.end->market_event_seq, 3'000u);
     Generation fresh{cfg, over(events)(name(logged.ticker)), StrategySpec{}};
     ASSERT_TRUE(reproduce(fresh, logged));
     EXPECT_EQ(outcome(fresh.book, fresh.execution, fresh.portfolio, fresh.loop.report()), first);
@@ -252,6 +257,7 @@ TEST(CommandLogTest, ReplayingTheLogReproducesTheBookExecutionAndPortfolio)
     ASSERT_TRUE(read_log(path, 2, logged, error)) << error;
     EXPECT_EQ(logged.start.kind, SessionStrategyKind::ImbalanceTaker);
     EXPECT_EQ(logged.applied.size(), applied_second);
+    ASSERT_TRUE(logged.end.has_value());  // close()'s trailer
     Generation again{cfg, over(events)(name(logged.ticker)), StrategySpec{}};
     ASSERT_TRUE(reproduce(again, logged));
     EXPECT_EQ(outcome(again.book, again.execution, again.portfolio, again.loop.report()), second);
@@ -281,7 +287,7 @@ TEST(CommandLogTest, TheLogHasAHeaderPerGenerationAndOneFlushedLinePerRecord)
         EXPECT_TRUE(eventually([&] { return writer.persisted_seq() == last_logged; }));
     }
     const std::vector<std::string> lines = read_lines(path);
-    ASSERT_EQ(lines.size(), 5u);
+    ASSERT_EQ(lines.size(), 6u);
     const auto has = [&](std::size_t line, const std::string& text) {
         return lines[line].find(text) != std::string::npos;
     };
@@ -304,13 +310,120 @@ TEST(CommandLogTest, TheLogHasAHeaderPerGenerationAndOneFlushedLinePerRecord)
     EXPECT_TRUE(has(3, "\"exchange_ts\":99"));
     EXPECT_TRUE(has(3, "\"market_event_seq\":0"));
     EXPECT_TRUE(has(3, "\"order_id\":1"));
-    EXPECT_TRUE(has(4, "\"type\":\"header\""));
-    EXPECT_TRUE(has(4, "\"generation\":2"));
-    EXPECT_TRUE(has(4, "\"ticker\":\"MSFT\""));
+    EXPECT_TRUE(has(4, "\"type\":\"trailer\""));  // the symbol switch closes generation 1 where it stood
+    EXPECT_TRUE(has(4, "\"seq\":5"));
+    EXPECT_TRUE(has(4, "\"generation\":1"));
+    EXPECT_TRUE(has(4, "\"exchange_ts\":99"));
+    EXPECT_TRUE(has(4, "\"market_event_seq\":0"));
+    EXPECT_TRUE(has(4, "\"book_digest\":"));
+    EXPECT_TRUE(has(5, "\"type\":\"header\""));
+    EXPECT_TRUE(has(5, "\"generation\":2"));
+    EXPECT_TRUE(has(5, "\"ticker\":\"MSFT\""));
     LoggedGeneration logged;
     std::string error;
     ASSERT_TRUE(read_log(path, 2, logged, error)) << error;
     EXPECT_EQ(name(logged.ticker), "MSFT");
+    EXPECT_FALSE(logged.end.has_value());  // generation 2 was never closed
+    ASSERT_TRUE(read_log(path, 1, logged, error)) << error;
+    ASSERT_TRUE(logged.end.has_value());
+    EXPECT_EQ(logged.end->exchange_ts, 99);
+}
+
+TEST(CommandLogTest, AReproductionStopsAtTheTrailerAndChecksItsDigests)
+{
+    const std::vector<MarketEvent> events = random_stream(3'000);
+    const SessionConfig cfg = config({.order_latency = 1'500'000, .report_latency = 500'000});
+    const Scratch scratch{"trailer"};
+    Outcome closed;
+    {
+        LogQueue queue;
+        const LogWriter writer{queue, scratch.path, cfg, false};
+        ReplaySession session{cfg, over(events), &queue};
+        session.control(kPlay);
+        for (int t = 0; t < 30; ++t) {  // orders, a pause, a step mid-timestamp, then play
+            script(session, t);
+            session.tick(kWall + t * 7 * kMs);
+        }
+        session.close();  // mid-stream, with orders resting and in flight
+        closed = outcome(session.book(), session.execution(), session.portfolio(), session.loop_report());
+        wait_until_written(queue);
+    }
+    LoggedGeneration logged;
+    std::string error;
+    ASSERT_TRUE(read_log(scratch.path, 1, logged, error)) << error;
+    ASSERT_TRUE(logged.end.has_value());
+    EXPECT_GT(logged.end->market_event_seq, 0u);
+    EXPECT_LT(logged.end->market_event_seq, 3'000u);
+    Generation fresh{cfg, over(events)(name(logged.ticker)), StrategySpec{}};
+    ASSERT_TRUE(reproduce(fresh, logged));
+    EXPECT_EQ(outcome(fresh.book, fresh.execution, fresh.portfolio, fresh.loop.report()), closed);
+
+    LoggedGeneration tampered = logged;  // a trailer whose digest does not match is a failed reproduction
+    tampered.end->digests.portfolio ^= 1;
+    Generation again{cfg, over(events)(name(logged.ticker)), StrategySpec{}};
+    EXPECT_FALSE(reproduce(again, tampered));
+
+    // A switched generation reproduces from its log end to end: the ticker its header names is part of its input.
+    std::vector<MarketEvent> bbb = events;  // a second ticker's stream: the same shape, 5,000 ticks higher
+    for (MarketEvent& event : bbb) {
+        event.price.ticks += event.type == MarketEventType::Add ? 5'000 : 0;
+    }
+    const SourceFactory by_ticker = [&](std::string_view t) {
+        return std::make_unique<VectorSource>(t == "BBB" ? bbb : events);
+    };
+    const Scratch switched{"switched"};
+    Outcome live;
+    {
+        LogQueue queue;
+        const LogWriter writer{queue, switched.path, cfg, false};
+        ReplaySession session{cfg, by_ticker, &queue};
+        Timestamp wall = kWall;
+        const auto run = [&](int ticks) {
+            for (int i = 0; i < ticks; ++i) {
+                session.tick(wall += 7 * kMs);
+            }
+        };
+        LevelInfo bid;
+        LevelInfo ask;
+        session.control(kPlay);
+        run(10);
+        session.book().best(Side::Buy, bid);
+        session.submit(post_only_buy(bid.price.ticks, 10), 0);
+        run(10);
+        session.control(Control{.type = ControlType::Symbol, .symbol = ticker("BBB")});
+        run(1);  // the switch: generation 2 replays BBB, paused before its first event
+        session.control(kPlay);
+        run(10);
+        session.book().best(Side::Sell, ask);
+        session.submit(Command{.generation = 2,
+                               .order_type = OrderType::Ioc,
+                               .side = Side::Buy,
+                               .price = ask.price,
+                               .quantity = Quantity{10}},
+                       0);
+        run(10);
+        session.close();
+        live = outcome(session.book(), session.execution(), session.portfolio(), session.loop_report());
+        wait_until_written(queue);
+    }
+    EXPECT_GT(live.execution.taker_fills, 0u);
+    ASSERT_TRUE(read_log(switched.path, 2, logged, error)) << error;
+    EXPECT_EQ(name(logged.ticker), "BBB");
+    EXPECT_EQ(logged.applied.size(), 1u);
+    ASSERT_TRUE(logged.end.has_value());
+    Generation bbb_again{cfg, by_ticker(name(logged.ticker)), StrategySpec{}};
+    ASSERT_TRUE(reproduce(bbb_again, logged));
+    EXPECT_EQ(bbb_again.book.digest(), live.digest);
+    EXPECT_EQ(outcome(bbb_again.book, bbb_again.execution, bbb_again.portfolio, bbb_again.loop.report()), live);
+
+    Generation wrong{cfg, by_ticker(""), StrategySpec{}};  // the first ticker's stream is not generation 2's input
+    EXPECT_FALSE(reproduce(wrong, logged));
+    EXPECT_NE(wrong.book.digest(), live.digest);
+
+    ASSERT_TRUE(read_log(switched.path, 1, logged, error)) << error;  // the switch's trailer closed generation 1
+    ASSERT_TRUE(logged.end.has_value());
+    Generation first_again{cfg, by_ticker(name(logged.ticker)), StrategySpec{}};
+    EXPECT_TRUE(reproduce(first_again, logged));
 }
 
 TEST(CommandLogTest, AFullLogRefusesNewCommandsAndTheEngineRunsOn)

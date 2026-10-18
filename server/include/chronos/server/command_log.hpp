@@ -7,6 +7,7 @@
 #include <cstdio>
 #include <filesystem>
 #include <mutex>
+#include <optional>
 #include <string>
 #include <thread>
 #include <vector>
@@ -87,6 +88,7 @@ struct LoggedGeneration
     Ticker ticker{};  // its input
     StrategySpec start{};  // the strategy it started with
     std::vector<Record> applied{};  // its Applied command steps, in log order
+    std::optional<Record> end{};  // its trailer, if the session closed it: where it stopped, and its digests
 };
 
 // Reads the log at `path`, which must have exactly one header for `generation`, and refuses any line that does not
@@ -95,7 +97,8 @@ bool read_log(const std::filesystem::path& path, std::uint64_t generation, Logge
               std::string& error);
 
 // Attaches the logged start strategy to the fresh `generation` (built over the logged ticker), replays the applied
-// commands at their boundaries, then to the end; false on a mismatch.
+// commands at their boundaries, then on to the trailer's boundary, or to the end without one; false on a mismatch,
+// including the trailer's digests.
 bool reproduce(Generation& generation, const LoggedGeneration& logged) noexcept;
 
 }  // namespace simulator::server

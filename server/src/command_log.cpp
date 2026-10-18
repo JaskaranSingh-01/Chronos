@@ -6,6 +6,7 @@
 #include <cerrno>
 #include <cstdint>
 #include <fstream>
+#include <limits>
 #include <system_error>
 #include <utility>
 
@@ -171,9 +172,19 @@ SessionConfig config_from(const json& header)
                                      .session_midnight = header.at("session_midnight").get<Timestamp>()}};
 }
 
-// The line for a command step or a report; a GenerationStart is a header, which needs the config.
+// The line for a command step, a report or a trailer; a GenerationStart is a header, which needs the config.
 json record_json(const Record& r)
 {
+    if (r.kind == RecordKind::GenerationEnd) {
+        return {{"type", "trailer"},
+                {"seq", r.seq},
+                {"generation", r.generation},
+                {"exchange_ts", r.exchange_ts},
+                {"market_event_seq", r.market_event_seq},
+                {"book_digest", r.digests.book},
+                {"execution_digest", r.digests.execution},
+                {"portfolio_digest", r.digests.portfolio}};
+    }
     if (r.kind == RecordKind::Report) {
         return {{"type", "report"},
                 {"seq", r.seq},
@@ -232,6 +243,18 @@ Record command_record_from(const json& line)
                   .exchange_ts = line.at("exchange_ts").get<Timestamp>(),
                   .market_event_seq = line.at("market_event_seq").get<std::uint64_t>(),
                   .order_id = line.at("order_id").get<OrderId>()};
+}
+
+Record trailer_record_from(const json& line)
+{
+    return Record{.seq = line.at("seq").get<std::uint64_t>(),
+                  .generation = line.at("generation").get<std::uint64_t>(),
+                  .kind = RecordKind::GenerationEnd,
+                  .exchange_ts = line.at("exchange_ts").get<Timestamp>(),
+                  .market_event_seq = line.at("market_event_seq").get<std::uint64_t>(),
+                  .digests = {.book = line.at("book_digest").get<std::uint64_t>(),
+                              .execution = line.at("execution_digest").get<std::uint64_t>(),
+                              .portfolio = line.at("portfolio_digest").get<std::uint64_t>()}};
 }
 
 Record report_record_from(const json& line)
@@ -441,6 +464,9 @@ bool read_log(const std::filesystem::path& path, std::uint64_t generation, Logge
             } else if (type == "report") {
                 record = report_record_from(line);
                 expected = record_json(record);
+            } else if (type == "trailer") {
+                record = trailer_record_from(line);
+                expected = record_json(record);
             } else {
                 error = where + "unexpected field or value";
                 return false;
@@ -468,6 +494,12 @@ bool read_log(const std::filesystem::path& path, std::uint64_t generation, Logge
                 has_header = true;
                 found.ticker = record.control.symbol;
                 found.start = record.command.strategy;
+            } else if (record.kind == RecordKind::GenerationEnd) {
+                if (found.end) {
+                    error = where + "a second trailer for generation " + std::to_string(generation);
+                    return false;
+                }
+                found.end = record;
             } else if (record.kind == RecordKind::Lifecycle && record.step == Lifecycle::Applied) {
                 found.applied.push_back(record);
             }
@@ -510,12 +542,20 @@ bool reproduce(Generation& generation, const LoggedGeneration& logged) noexcept
             return false;
         }
     }
-    while (loop.peek(next_ts) == PeekStatus::Event && loop.step().ok) {
+    // On to where the session left the generation (its trailer's boundary), or to the end of the stream.
+    const std::uint64_t stop = logged.end ? logged.end->market_event_seq : std::numeric_limits<std::uint64_t>::max();
+    while (loop.report().replay.events < stop && loop.peek(next_ts) == PeekStatus::Event && loop.step().ok) {
         generation.strategy.delivered.clear();
     }
-    loop.finish();
+    if (loop.peek(next_ts) != PeekStatus::Event) {
+        loop.finish();
+    } else if (logged.end) {
+        loop.advance_to(logged.end->exchange_ts);
+    }
     generation.strategy.delivered.clear();
-    return true;
+    return !logged.end ||
+        (loop.report().replay.events == stop && loop.gateway().now() == logged.end->exchange_ts &&
+         digests(generation) == logged.end->digests);
 }
 
 }  // namespace simulator::server

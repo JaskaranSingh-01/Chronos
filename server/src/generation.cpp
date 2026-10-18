@@ -42,6 +42,29 @@ Generation::Generation(const SessionConfig& config, std::unique_ptr<MarketEventS
       loop(*source, book, execution, portfolio, strategy, config.latency, config.options)
 {}
 
+Digests digests(const Generation& generation) noexcept
+{
+    Digests d{.book = generation.book.digest(), .execution = fnv1a_offset_basis, .portfolio = fnv1a_offset_basis};
+    const ExecutionStatistics& e = generation.execution.statistics();
+    for (const std::uint64_t value :
+         {e.maker_fills, e.maker_quantity, e.taker_fills, e.taker_quantity, e.accepted_quantity, e.would_cross_rejects,
+          e.not_trading_rejects, e.cancelled, e.cancel_rejects, e.fifo_anomalies}) {
+        fnv1a_mix(d.execution, value);
+    }
+    for (const ShadowOrder& order : generation.execution.resting_orders()) {
+        for (const std::uint64_t value : {order.id, static_cast<std::uint64_t>(order.price.ticks), order.remaining,
+                                          order.ahead_quantity, std::uint64_t{order.side == Side::Buy}}) {
+            fnv1a_mix(d.execution, value);
+        }
+    }
+    const Portfolio& p = generation.portfolio;
+    for (const std::int64_t value : {p.position(), p.cash(), p.realised_pnl(), p.unrealised_pnl(), p.fees(),
+                                     p.max_drawdown(), static_cast<std::int64_t>(p.open_orders())}) {
+        fnv1a_mix(d.portfolio, static_cast<std::uint64_t>(value));
+    }
+    return d;
+}
+
 Applied apply_command(Generation& generation, const Command& command) noexcept
 {
     const bool manual = command.type == CommandType::Order || command.type == CommandType::Cancel;

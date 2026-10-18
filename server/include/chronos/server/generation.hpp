@@ -76,4 +76,16 @@ struct Applied
 // Applies one command at the loop's clock through the gateway strategies use.
 Applied apply_command(Generation& generation, const Command& command) noexcept;
 
+// Fingerprints of a generation's state, for the command log's trailer.
+struct Digests
+{
+    std::uint64_t book{0};       // MarketBook::digest()
+    std::uint64_t execution{0};  // the execution statistics and our resting orders
+    std::uint64_t portfolio{0};  // position, cash, PnL, fees, drawdown and open orders
+
+    bool operator==(const Digests&) const = default;
+};
+
+Digests digests(const Generation& generation) noexcept;
+
 }  // namespace simulator::server

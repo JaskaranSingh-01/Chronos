@@ -322,6 +322,20 @@ void ReplaySession::publish_start() noexcept
                    .control = {.symbol = ticker_}});
 }
 
+// The simulator events due by the clock run first, as a reproduction's advance_to() runs them.
+void ReplaySession::close() noexcept
+{
+    if (state_.load() != SessionState::Ended) {
+        engine_->loop.advance_to(clock());
+        publish_delivered();
+    }
+    publish(Record{.generation = generation_.load(),
+                   .kind = RecordKind::GenerationEnd,
+                   .exchange_ts = clock(),
+                   .market_event_seq = engine_->loop.report().replay.events,
+                   .digests = digests(*engine_)});
+}
+
 // Puts the clock just before the first market event, or ends an empty or failed stream.
 void ReplaySession::load() noexcept
 {
@@ -337,6 +351,7 @@ void ReplaySession::load() noexcept
 // first event.
 void ReplaySession::restart() noexcept
 {
+    close();
     const StrategySpec spec = engine_->strategy.spec();
     engine_.reset();
     engine_.emplace(config_, factory_(name(ticker_)), spec);
