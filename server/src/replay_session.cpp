@@ -1,0 +1,404 @@
+#include "chronos/server/replay_session.hpp"
+
+#include <algorithm>
+#include <utility>
+
+namespace simulator::server {
+namespace {
+
+// What admission can check without the book: a limit order has a positive price; an attach names a strategy.
+bool valid(const Command& command) noexcept
+{
+    switch (command.type) {
+    case CommandType::Order:
+        return command.order_type == OrderType::Market || command.price.ticks > 0;
+    case CommandType::Attach:
+        return command.strategy.kind != SessionStrategyKind::None;
+    case CommandType::Cancel:
+    case CommandType::Detach:
+        return true;
+    }
+    return false;
+}
+
+bool awaits_verdict(const Command& command) noexcept
+{
+    return command.type == CommandType::Order || command.type == CommandType::Cancel;
+}
+
+// The simulator's verdict in an order's or a cancel's first report.
+ErrorCode verdict(const ExecutionReport& report) noexcept
+{
+    if (report.type == ReportType::CancelRejected) {
+        return ErrorCode::CancelRejected;
+    }
+    if (report.type != ReportType::Rejected) {
+        return ErrorCode::None;
+    }
+    switch (report.reason) {
+    case RejectReason::WouldCross:
+        return ErrorCode::WouldCross;
+    case RejectReason::NotTrading:
+        return ErrorCode::NotTrading;
+    case RejectReason::None:
+    case RejectReason::InvalidOrder:
+        break;
+    }
+    return ErrorCode::InvalidOrder;
+}
+
+}  // namespace
+
+ReplaySession::ReplaySession(SessionConfig config, SourceFactory factory)
+    : config_(std::move(config)), factory_(std::move(factory))
+{
+    batch_.reserve(command_capacity);
+    controls_batch_.reserve(control_capacity);
+    awaiting_.reserve(command_capacity);
+    engine_.emplace(config_, factory_(), StrategySpec{});
+    load();
+}
+
+Admission ReplaySession::submit(Command command, Timestamp received_wall_ts) noexcept
+{
+    const std::lock_guard lock{inbox_mutex_};
+    command.command_seq = next_command_seq_++;
+    command.received_wall_ts = received_wall_ts;
+    const std::uint64_t current = generation_.load();
+    ErrorCode error = admission(command, current);
+    if (error == ErrorCode::None && !commands_.push(command)) {
+        error = ErrorCode::QueueFull;
+    }
+    publish(Record{.generation = current, .step = Lifecycle::Received, .command = command});
+    publish(Record{.generation = current,
+                   .step = error == ErrorCode::None ? Lifecycle::Admitted : Lifecycle::RejectedAtAdmission,
+                   .reason = error,
+                   .command = command});
+    if (error == ErrorCode::None) {
+        inbox_cv_.notify_one();
+    }
+    return {.seq = command.command_seq, .error = error};
+}
+
+Admission ReplaySession::control(Control control) noexcept
+{
+    const std::lock_guard lock{inbox_mutex_};
+    control.control_seq = next_control_seq_++;
+    const bool bad = (control.type == ControlType::Step && control.steps == 0) ||
+        (control.type == ControlType::Speed && control.speed > max_speed);
+    ErrorCode error = bad ? ErrorCode::BadRequest : ErrorCode::None;
+    if (error == ErrorCode::None && !controls_.push(control)) {
+        error = ErrorCode::QueueFull;
+    }
+    if (error == ErrorCode::None) {
+        inbox_cv_.notify_one();
+    }
+    return {.seq = control.control_seq, .error = error};
+}
+
+RecordRing<Record>::Read ReplaySession::reports_since(std::uint64_t from_seq, std::span<Record> out) const noexcept
+{
+    return ring_.read(from_seq, out);
+}
+
+SessionState ReplaySession::state() const noexcept
+{
+    return state_.load();
+}
+
+std::uint64_t ReplaySession::generation() const noexcept
+{
+    return generation_.load();
+}
+
+Timestamp ReplaySession::tick(Timestamp wall_now) noexcept
+{
+    drain_inbox();
+    for (const Control& control : controls_batch_) {
+        apply_control(control, wall_now);
+    }
+    controls_batch_.clear();
+
+    const SessionState state = state_.load();
+    bool more = false;
+    switch (state) {
+    case SessionState::Playing:
+        more = play(wall_now);
+        break;
+    case SessionState::Stepping:
+        more = step_some();
+        break;
+    case SessionState::Paused:
+    case SessionState::Ended:
+        break;
+    }
+    apply_batch();
+    return more ? wall_now : due_wall();
+}
+
+Timestamp ReplaySession::clock() noexcept
+{
+    return engine_->loop.gateway().now();
+}
+
+const MarketBook& ReplaySession::book() const noexcept
+{
+    return engine_->book;
+}
+
+const Portfolio& ReplaySession::portfolio() const noexcept
+{
+    return engine_->portfolio;
+}
+
+const ExecutionSimulator& ReplaySession::execution() const noexcept
+{
+    return engine_->execution;
+}
+
+const LoopReport& ReplaySession::loop_report() const noexcept
+{
+    return engine_->loop.report();
+}
+
+// Admission's refusal of `command`, or None; the engine checks again when it applies the command.
+ErrorCode ReplaySession::admission(const Command& command, std::uint64_t generation) const noexcept
+{
+    if (!valid(command)) {
+        return ErrorCode::BadRequest;
+    }
+    if (state_.load() == SessionState::Ended) {
+        return ErrorCode::NotReady;
+    }
+    if (command.generation != generation) {
+        return ErrorCode::StaleGeneration;
+    }
+    return ErrorCode::None;
+}
+
+// The engine's refusal of a drained command, or None.
+ErrorCode ReplaySession::refusal(const Command& command) const noexcept
+{
+    if (state_.load() == SessionState::Ended) {
+        return ErrorCode::NotReady;
+    }
+    if (command.generation != generation_.load()) {
+        return ErrorCode::StaleGeneration;
+    }
+    if (awaits_verdict(command) && awaiting_.size() == command_capacity) {
+        return ErrorCode::QueueFull;
+    }
+    return ErrorCode::None;
+}
+
+void ReplaySession::publish(const Record& record) noexcept
+{
+    ring_.publish(record);
+}
+
+void ReplaySession::lifecycle(Lifecycle step, const Command& command, ErrorCode reason, OrderId order_id) noexcept
+{
+    publish(Record{.generation = generation_.load(),
+                   .step = step,
+                   .reason = reason,
+                   .command = command,
+                   .batch_seq = batch_seq_,
+                   .exchange_ts = clock(),
+                   .market_event_seq = engine_->loop.report().replay.events,
+                   .order_id = order_id});
+}
+
+// Publishes the reports the strategy was delivered, and the simulator's verdict on our orders and cancels.
+void ReplaySession::publish_delivered() noexcept
+{
+    std::vector<ExecutionReport>& delivered = engine_->strategy.delivered;
+    for (const ExecutionReport& report : delivered) {
+        publish(Record{.generation = generation_.load(),
+                       .kind = RecordKind::Report,
+                       .order_id = report.order_id,
+                       .report = report});
+        const bool cancel = report.type == ReportType::Cancelled || report.type == ReportType::CancelRejected;
+        const auto waiting = std::find_if(awaiting_.begin(), awaiting_.end(), [&](const Awaiting& a) {
+            return a.order_id == report.order_id && a.cancel == cancel;
+        });
+        if (waiting == awaiting_.end()) {
+            continue;
+        }
+        const ErrorCode reason = verdict(report);
+        lifecycle(reason == ErrorCode::None ? Lifecycle::SimulatorAccepted : Lifecycle::SimulatorRejected,
+                  waiting->command, reason, report.order_id);
+        awaiting_.erase(waiting);
+    }
+    delivered.clear();
+}
+
+// Puts the clock just before the first market event, or ends an empty or failed stream.
+void ReplaySession::load() noexcept
+{
+    Timestamp first{0};
+    if (engine_->loop.peek(first) == PeekStatus::Event) {
+        engine_->loop.advance_to(first - 1);
+    } else {
+        end();
+    }
+}
+
+void ReplaySession::end() noexcept
+{
+    engine_->loop.finish();
+    publish_delivered();
+    state_.store(SessionState::Ended);
+}
+
+void ReplaySession::drain_inbox() noexcept
+{
+    const std::unique_lock lock{inbox_mutex_, std::try_to_lock};
+    if (!lock.owns_lock()) {
+        return;  // the server holds it: the next tick drains
+    }
+    Command command;
+    while (commands_.pop(command)) {
+        batch_.push_back(command);
+    }
+    Control control;
+    while (controls_.pop(control)) {
+        controls_batch_.push_back(control);
+    }
+}
+
+void ReplaySession::apply_control(const Control& control, Timestamp wall_now) noexcept
+{
+    const bool ended = state_.load() == SessionState::Ended;
+    switch (control.type) {
+    case ControlType::Play:
+        if (!ended) {
+            state_.store(SessionState::Playing);
+            anchor_wall_ = wall_now;
+            anchor_exchange_ = clock();
+        }
+        break;
+    case ControlType::Pause:
+        if (!ended) {
+            state_.store(SessionState::Paused);
+        }
+        break;
+    case ControlType::Step:
+        if (!ended) {
+            state_.store(SessionState::Stepping);
+            steps_left_ = control.steps;
+        }
+        break;
+    case ControlType::Speed:
+        speed_ = control.speed;
+        anchor_wall_ = wall_now;
+        anchor_exchange_ = clock();
+        break;
+    }
+    publish(
+        Record{.generation = generation_.load(), .kind = RecordKind::Ack, .control = control, .state = state_.load()});
+}
+
+// Applies the market events paced time has reached, then the simulator events due by it; true if more are due now.
+bool ReplaySession::play(Timestamp wall_now) noexcept
+{
+    Generation& g = *engine_;
+    const Timestamp target = speed_ == 0 ? never : anchor_exchange_ + (wall_now - anchor_wall_) * speed_;
+    Timestamp next_ts{0};
+    PeekStatus status = g.loop.peek(next_ts);
+    for (std::size_t n = 0; status == PeekStatus::Event && next_ts <= target; ++n) {
+        if (n >= events_per_tick && next_ts != clock()) {
+            break;  // the budget is spent, and never inside one timestamp
+        }
+        step_market();
+        status = g.loop.peek(next_ts);
+    }
+    if (status != PeekStatus::Event) {
+        end();
+        return false;
+    }
+    g.loop.advance_to(std::min(target, next_ts - 1));
+    publish_delivered();
+    return next_ts <= target;
+}
+
+// Applies up to events_per_tick of the market events a Step asked for; true if some are left.
+// A Step may stop inside a timestamp; a batch there applies before its remaining events, and only its own events wait.
+bool ReplaySession::step_some() noexcept
+{
+    Timestamp next_ts{0};
+    for (std::size_t n = 0; steps_left_ > 0 && n < events_per_tick; ++n, --steps_left_) {
+        if (engine_->loop.peek(next_ts) != PeekStatus::Event) {
+            break;
+        }
+        step_market();
+    }
+    if (engine_->loop.peek(next_ts) != PeekStatus::Event) {
+        end();
+        return false;
+    }
+    if (steps_left_ > 0) {
+        return true;
+    }
+    state_.store(SessionState::Paused);
+    return false;
+}
+
+void ReplaySession::step_market() noexcept
+{
+    engine_->loop.step();
+    publish_delivered();
+}
+
+// Applies the commands drained this tick as one batch at the clock, after the simulator events due by it.
+void ReplaySession::apply_batch() noexcept
+{
+    if (batch_.empty()) {
+        return;
+    }
+    ++batch_seq_;
+    engine_->loop.advance_to(clock());  // a simulator event at the clock comes before a command at it
+    publish_delivered();
+    for (const Command& command : batch_) {
+        last_command_seq_ = command.command_seq;
+        ErrorCode error = refusal(command);
+        Applied applied;
+        if (error == ErrorCode::None) {
+            applied = apply_command(*engine_, command);
+            error = applied.error;
+        }
+        lifecycle(error == ErrorCode::None ? Lifecycle::Applied : Lifecycle::RejectedAtApply, command, error,
+                  applied.order_id);
+        if (error == ErrorCode::None && awaits_verdict(command)) {
+            awaiting_.push_back(Awaiting{
+                .order_id = applied.order_id, .cancel = command.type == CommandType::Cancel, .command = command});
+        }
+    }
+    batch_.clear();
+}
+
+// While playing, the wall time at which pacing reaches the next market or simulator event; otherwise never.
+Timestamp ReplaySession::due_wall() const noexcept
+{
+    if (state_.load() != SessionState::Playing) {
+        return never;
+    }
+    const EventLoop<SessionStrategy>& loop = engine_->loop;
+    Timestamp due = never;
+    if (const MarketEvent* next = loop.pending(); next != nullptr) {
+        due = next->timestamp;
+    }
+    Timestamp sim_ts{0};
+    if (loop.next_sim_time(sim_ts)) {
+        due = std::min(due, sim_ts);
+    }
+    if (due == never) {
+        return never;
+    }
+    const Timestamp ahead = due - anchor_exchange_;
+    if (speed_ == 0 || ahead <= 0) {
+        return anchor_wall_;
+    }
+    return anchor_wall_ + (ahead + speed_ - 1) / speed_;
+}
+
+}  // namespace simulator::server
