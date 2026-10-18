@@ -12,9 +12,9 @@ import {
 } from 'lightweight-charts';
 import { useEffect, useRef, useState } from 'react';
 import { points, timeframes, type Frame, type Point } from './candles';
-import { etOffset } from './format';
+import { chartDigits, etOffset } from './format';
 import type { Execution } from './protocol';
-import { store, type State } from './store';
+import { selectFirstRun, store, useStore, type State } from './store';
 
 const color = {
   buy: '#26a69a',
@@ -24,8 +24,6 @@ const color = {
   order: '#58a6ff',
   position: '#e6edf3',
 };
-// Prices carry sub-penny digits when a tick is under a cent (10^price_scale > 100); otherwise cents.
-const decimals = (scale: number) => (scale > 100 ? 4 : 2);
 const label = (seconds: number) =>
   seconds < 60 ? `${seconds}s` : seconds < 3_600 ? `${seconds / 60}m` : `${seconds / 3_600}h`;
 
@@ -35,6 +33,12 @@ function shade(p: Point, last: boolean): string {
   if (p.halted) return 'rgba(239, 83, 80, 0.18)';
   const second = p.time % 86_400;
   return second < 34_200 || second >= 57_600 ? 'rgba(125, 142, 163, 0.10)' : 'rgba(0, 0, 0, 0)';
+}
+
+// Tells a controller with no symbol loaded what to do.
+function FirstRun() {
+  const show = useStore(selectFirstRun);
+  return show ? <p className="prompt">Type a ticker (e.g. AAPL) in the Symbol box and press Enter or Load.</p> : null;
 }
 
 export function Chart() {
@@ -72,6 +76,7 @@ export function Chart() {
     const lines = new Map<string, IPriceLine>();
     let drawn: Point[] = [];
     let version = -1;
+    let digits = 2; // the price decimals on the axis and legend; the series start at lightweight-charts' default
     // What the last draw saw: a notification that changed none of it redraws nothing.
     let seenBars: State['bars'] | undefined;
     let seenHalts: State['halts'] | undefined;
@@ -103,9 +108,6 @@ export function Chart() {
           offset: first === undefined ? 0 : etOffset(first / 1e9),
         };
         drawn = points(s.bars, s.halts, frame);
-        const d = decimals(frame.scale);
-        const priceFormat = { type: 'price', precision: d, minMove: 10 ** -d } as const;
-        for (const series of [candles, vwap, ema]) series.applyOptions({ priceFormat });
         version = s.barsVersion;
         const all = drawn.map((p, i) => rows(p, i === drawn.length - 1));
         candles.setData(all.map((r) => r.candle));
@@ -126,6 +128,13 @@ export function Chart() {
           ema.update(r.ema);
           background.update(r.shade);
         });
+      }
+      const bid = s.snap?.bids[0]?.[0];
+      const price = drawn.findLast((p) => p.bar)?.bar?.close ?? (bid === undefined ? undefined : bid / frame.scale);
+      if (price !== undefined && chartDigits(price) !== digits) {
+        digits = chartDigits(price);
+        const priceFormat = { type: 'price', precision: digits, minMove: 10 ** -digits } as const;
+        for (const series of [candles, vwap, ema]) series.applyOptions({ priceFormat });
       }
       seenBars = s.bars;
       seenHalts = s.halts;
@@ -199,7 +208,7 @@ export function Chart() {
     let hovered: Time | undefined;
     const showLegend = () => {
       const bar = (hovered === undefined ? drawn.findLast((p) => p.bar) : drawn.find((p) => p.time === hovered))?.bar;
-      const p = (price: number) => price.toFixed(decimals(frame.scale));
+      const p = (price: number) => price.toFixed(digits);
       legend.current!.textContent = bar
         ? `O ${p(bar.open)} H ${p(bar.high)} L ${p(bar.low)} C ${p(bar.close)} V ${bar.volume}`
         : '';
@@ -229,6 +238,7 @@ export function Chart() {
       </div>
       <div className="legend" ref={legend} />
       <div className="plot" ref={box} />
+      <FirstRun />
     </div>
   );
 }

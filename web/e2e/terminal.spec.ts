@@ -47,8 +47,20 @@ async function stepUntilResting(page: Page) {
 
 test('an order placed in the terminal fills and shows in Fills and the account', async ({ page, url }) => {
   await page.goto(url);
+  const prompt = page.getByText('Type a ticker (e.g. AAPL) in the Symbol box');
+  await expect(prompt).toBeVisible();
+  await expect(page.getByLabel('Symbol')).toBeFocused();
+  await expect(page.getByText('Read-only')).toHaveCount(0);
+  // The controller seat is taken, so a second tab is a viewer and says so.
+  const second = await page.context().newPage();
+  await second.goto(url);
+  await expect(second.getByText('Read-only: another window or tab controls this session.')).toBeVisible();
+  await expect(second.getByLabel('Symbol')).toBeDisabled();
   await pickAcme(page);
+  await expect(prompt).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Open 09:30' })).toBeEnabled();
   await stepTheBook(page);
+  await expect(page.locator('.legend')).toContainText('C 10.01 V');
   await page.locator('.level.sell').click();
   await expect(page.getByLabel('Price')).toHaveValue('10.01');
   await page.getByRole('button', { name: 'IOC' }).click();
@@ -110,6 +122,8 @@ test('a reconnect during a restart ends on the new generation with no stale comm
 test('a seek lands on the New York time typed', async ({ page, url }) => {
   await page.goto(url);
   await pickAcme(page);
+  await page.getByRole('button', { name: 'Open 09:30' }).click();
+  await expect(page.getByTestId('clock')).toHaveText('09:30:00.000 ET');
   await page.getByLabel('Seek to').fill('09:31:45');
   await page.getByRole('button', { name: 'Seek' }).click();
   await expect(page.getByTestId('clock')).toHaveText('09:31:45.000 ET');

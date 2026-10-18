@@ -25,6 +25,9 @@ export function px(ticks: number, digits: number): string {
   return (ticks / 10 ** digits).toFixed(cents ? Math.min(digits, 2) : digits);
 }
 
+// The decimals a chart shows a price in dollars at: cents from $1 up, where US equities tick in cents, else four.
+export const chartDigits = (dollars: number) => (dollars >= 1 ? 2 : 4);
+
 // Money at `digits` decimals as dollars; `signed` for profit and loss.
 export const money = (value: number, digits: number) => usd.format(value / 10 ** digits);
 export const signed = (value: number, digits: number) => usdSigned.format(value / 10 ** digits);

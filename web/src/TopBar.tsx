@@ -1,6 +1,6 @@
-import { memo, useState } from 'react';
+import { memo, useEffect, useRef, useState } from 'react';
 import { clock, seekTs, signed } from './format';
-import { store, useStore } from './store';
+import { selectFirstRun, store, useStore } from './store';
 
 const speeds: [number, string][] = [
   [1, '1×'],
@@ -31,12 +31,21 @@ export function TopBar() {
   const state = useStore((s) => s.state);
   const seekAt = useStore((s) => s.seekAt);
   const notice = useStore((s) => s.notice);
+  const fresh = useStore(selectFirstRun);
   const [typed, setTyped] = useState('');
   const [time, setTime] = useState('');
+  const symbolBox = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    if (fresh) symbolBox.current?.focus();
+  }, [fresh]);
   const viewer = hello?.role !== 'controller';
   // Generation 1 is the empty ticker: until a symbol loads, only the switcher and the speed work.
   const idle = viewer || generation <= 1 || status !== 'open';
   const seeking = state === 'seeking';
+  const cannotSeek = idle || seeking || !snap;
+  const seekTo = (clockTime: string) => {
+    if (snap) store.control({ action: 'seek', ts: seekTs(snap.exchange_ts, clockTime) });
+  };
   // The exchange time shown: a running seek's position, else the book's; 0 (shown as a dash) before a symbol loads.
   const at = seeking && seekAt > 0 ? seekAt : (snap?.exchange_ts ?? 0);
   return (
@@ -54,15 +63,17 @@ export function TopBar() {
         }}
       >
         <input
+          ref={symbolBox}
           aria-label="Symbol"
           list="symbols"
-          size={8}
+          size={10}
           placeholder={symbol || 'Symbol'}
           value={typed}
           disabled={viewer}
           onChange={(e) => setTyped(e.target.value)}
         />
         <Symbols />
+        <button disabled={viewer || !typed.trim()}>Load</button>
       </form>
       <button disabled={idle} onClick={() => store.control({ action: 'restart' })}>
         ⟲ Restart
@@ -94,7 +105,7 @@ export function TopBar() {
       <form
         onSubmit={(e) => {
           e.preventDefault();
-          if (snap && time) store.control({ action: 'seek', ts: seekTs(snap.exchange_ts, time) });
+          if (time) seekTo(time);
         }}
       >
         <input
@@ -102,10 +113,13 @@ export function TopBar() {
           type="time"
           step="1"
           value={time}
-          disabled={idle || seeking || !snap}
+          disabled={cannotSeek}
           onChange={(e) => setTime(e.target.value)}
         />
-        <button disabled={idle || seeking || !snap || !time}>Seek</button>
+        <button disabled={cannotSeek || !time}>Seek</button>
+        <button type="button" disabled={cannotSeek} onClick={() => seekTo('09:30')}>
+          Open 09:30
+        </button>
       </form>
       {seeking && (
         <button disabled={viewer} onClick={() => store.control({ action: 'cancel_seek' })}>

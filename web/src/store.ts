@@ -394,6 +394,9 @@ export const store = createStore({
   host: () => location.host,
 });
 
+// A controller that has not loaded a symbol yet: generation 1 is the empty ticker.
+export const selectFirstRun = (s: State) => s.hello?.role === 'controller' && s.generation <= 1;
+
 // A panel's slice of the state; it re-renders only when that slice changes, so selectors return stable references.
 export function useStore<T>(select: (s: State) => T): T {
   return useSyncExternalStore(store.subscribe, () => select(store.get()));

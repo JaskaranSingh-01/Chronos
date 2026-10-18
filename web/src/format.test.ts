@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { clock, etOffset, money, px, seekTs, shares, signed, tone } from './format';
+import { chartDigits, clock, etOffset, money, px, seekTs, shares, signed, tone } from './format';
 
 const open = 1_577_716_200; // 2019-12-30 09:30:00 ET, epoch seconds
 
@@ -21,6 +21,10 @@ describe('format', () => {
       '+$12.40',
       '$0.00',
     ]);
+  });
+
+  it('charts prices from $1 up in cents and cheaper ones in four decimals', () => {
+    expect([290.1207, 1, 0.9999, 0.05].map(chartDigits)).toEqual([2, 2, 4, 4]);
   });
 
   it('shows prices at any scale, whole or in cents, and negative ones', () => {

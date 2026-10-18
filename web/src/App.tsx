@@ -29,12 +29,23 @@ function Gate() {
   );
 }
 
+// Says why every control is disabled: another window holds the controller seat.
+function ViewerBanner() {
+  const viewer = useStore((s) => s.hello?.role === 'viewer');
+  return viewer ? (
+    <p className="banner">
+      Read-only: another window or tab controls this session. Close it and reload this page to take control.
+    </p>
+  ) : null;
+}
+
 // The Trading Terminal. Each panel subscribes to its own slice, so a snapshot never re-renders this tree.
 export function App() {
   const [price, setPrice] = useState('');
   return (
     <div className="terminal">
       <TopBar />
+      <ViewerBanner />
       <main>
         <section className="col">
           <Chart />
