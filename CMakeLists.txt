@@ -115,6 +115,8 @@ target_link_libraries(simulator
 # Server library: the interactive session. The engine never depends on it (scripts/check-isolation.sh).
 # -------------------------
 
+find_package(Threads REQUIRED)
+
 add_library(chronos_server
 
     server/src/candles.cpp
@@ -130,6 +132,7 @@ target_compile_options(chronos_server PRIVATE ${CHRONOS_WARNINGS})
 target_link_libraries(chronos_server
     PUBLIC
         simulator_lib
+        Threads::Threads
 )
 
 
@@ -213,6 +216,7 @@ gtest_discover_tests(simulator_tests)
 add_executable(chronos_server_tests
 
     tests/server/candles_test.cpp
+    tests/server/channels_test.cpp
 )
 
 target_compile_options(chronos_server_tests PRIVATE ${CHRONOS_WARNINGS})
