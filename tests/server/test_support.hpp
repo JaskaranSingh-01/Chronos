@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <random>
 #include <string>
+#include <string_view>
 #include <thread>
 #include <utility>
 #include <vector>
@@ -80,10 +81,17 @@ inline std::vector<MarketEvent> spaced_bids(std::size_t n)
     return events;
 }
 
-// A factory of VectorSources over `events`, which the caller keeps alive.
+// A factory of VectorSources over `events`, whatever the ticker; the caller keeps `events` alive.
 inline SourceFactory over(const std::vector<MarketEvent>& events)
 {
-    return [&events] { return std::make_unique<VectorSource>(events); };
+    return [&events](std::string_view) { return std::make_unique<VectorSource>(events); };
+}
+
+inline Ticker ticker(std::string_view text)
+{
+    Ticker t{};
+    EXPECT_TRUE(to_ticker(text, t)) << text;
+    return t;
 }
 
 // Every record on the session's ring, oldest first.

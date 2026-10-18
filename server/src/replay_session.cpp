@@ -61,7 +61,7 @@ ReplaySession::ReplaySession(SessionConfig config, SourceFactory factory, LogQue
     batch_.reserve(command_capacity);
     controls_batch_.reserve(control_capacity);
     awaiting_.reserve(command_capacity);
-    engine_.emplace(config_, factory_(), StrategySpec{});
+    engine_.emplace(config_, factory_(name(ticker_)), StrategySpec{});
     publish_start();
     load();
 }
@@ -92,7 +92,8 @@ Admission ReplaySession::control(Control control) noexcept
     const std::lock_guard lock{inbox_mutex_};
     control.control_seq = next_control_seq_++;
     const bool bad = (control.type == ControlType::Step && control.steps == 0) ||
-        (control.type == ControlType::Speed && control.speed > max_speed);
+        (control.type == ControlType::Speed && control.speed > max_speed) ||
+        (control.type == ControlType::Symbol && name(control.symbol).empty());
     ErrorCode error = bad ? ErrorCode::BadRequest : ErrorCode::None;
     if (error == ErrorCode::None && !controls_.push(control)) {
         error = ErrorCode::QueueFull;
@@ -293,7 +294,8 @@ void ReplaySession::publish_start() noexcept
 {
     publish(Record{.generation = generation_.load(),
                    .kind = RecordKind::GenerationStart,
-                   .command = {.strategy = engine_->strategy.spec()}});
+                   .command = {.strategy = engine_->strategy.spec()},
+                   .control = {.symbol = ticker_}});
 }
 
 // Puts the clock just before the first market event, or ends an empty or failed stream.
@@ -307,12 +309,13 @@ void ReplaySession::load() noexcept
     }
 }
 
-// Builds the next generation from a fresh source, keeping the attached strategy, and pauses before its first event.
+// Builds the next generation from a fresh source of ticker_, keeping the attached strategy, and pauses before its
+// first event.
 void ReplaySession::restart() noexcept
 {
     const StrategySpec spec = engine_->strategy.spec();
     engine_.reset();
-    engine_.emplace(config_, factory_(), spec);
+    engine_.emplace(config_, factory_(name(ticker_)), spec);
     generation_.fetch_add(1);
     awaiting_.clear();
     candles_ = CandleBuilder{};
@@ -375,6 +378,10 @@ void ReplaySession::apply_control(const Control& control, Timestamp wall_now) no
         anchor_exchange_ = clock();
         break;
     case ControlType::Restart:
+        restart();
+        break;
+    case ControlType::Symbol:
+        ticker_ = control.symbol;
         restart();
         break;
     case ControlType::Seek:
@@ -548,6 +555,7 @@ void ReplaySession::publish_snapshot(Timestamp wall_now) noexcept
     Snapshot& s = snapshot_;
     const ReplayReport& replay = g.loop.report().replay;
     s.generation = generation_.load();
+    s.symbol = ticker_;
     s.snapshot_seq = snapshot_seq_ + 1;
     s.exchange_ts = clock();
     s.event_seq = replay.events;

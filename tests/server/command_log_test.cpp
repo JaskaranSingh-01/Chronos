@@ -80,14 +80,13 @@ void write_log(const std::filesystem::path& path, const std::vector<std::string>
     out << tail;
 }
 
-// read_log's error for the log at `path`, which it must refuse, leaving `applied` empty.
+// read_log's error for the log at `path`, which it must refuse, leaving `logged` empty.
 std::string refusal(const std::filesystem::path& path, std::uint64_t generation = 1)
 {
-    std::vector<Record> applied;
-    StrategySpec start;
+    LoggedGeneration logged;
     std::string error;
-    EXPECT_FALSE(read_log(path, generation, start, applied, error));
-    EXPECT_TRUE(applied.empty());
+    EXPECT_FALSE(read_log(path, generation, logged, error));
+    EXPECT_TRUE(logged.applied.empty());
     return error;
 }
 
@@ -241,22 +240,20 @@ TEST(CommandLogTest, ReplayingTheLogReproducesTheBookExecutionAndPortfolio)
     EXPECT_GT(second.execution.taker_fills, 0u);  // the strategy it started with trades
     EXPECT_EQ(not_ready, 1u);
 
-    std::vector<Record> applied;
-    StrategySpec start;
+    LoggedGeneration logged;
     std::string error;
-    ASSERT_TRUE(read_log(path, 1, start, applied, error)) << error;
-    EXPECT_TRUE(start == StrategySpec{});
-    EXPECT_EQ(applied.size(), applied_first);
-    Generation fresh{cfg, over(events)(), StrategySpec{}};
-    ASSERT_TRUE(reproduce(fresh, start, applied));
+    ASSERT_TRUE(read_log(path, 1, logged, error)) << error;
+    EXPECT_TRUE(logged.start == StrategySpec{});
+    EXPECT_EQ(logged.applied.size(), applied_first);
+    Generation fresh{cfg, over(events)(name(logged.ticker)), StrategySpec{}};
+    ASSERT_TRUE(reproduce(fresh, logged));
     EXPECT_EQ(outcome(fresh.book, fresh.execution, fresh.portfolio, fresh.loop.report()), first);
 
-    applied.clear();
-    ASSERT_TRUE(read_log(path, 2, start, applied, error)) << error;
-    EXPECT_EQ(start.kind, SessionStrategyKind::ImbalanceTaker);
-    EXPECT_EQ(applied.size(), applied_second);
-    Generation again{cfg, over(events)(), StrategySpec{}};
-    ASSERT_TRUE(reproduce(again, start, applied));
+    ASSERT_TRUE(read_log(path, 2, logged, error)) << error;
+    EXPECT_EQ(logged.start.kind, SessionStrategyKind::ImbalanceTaker);
+    EXPECT_EQ(logged.applied.size(), applied_second);
+    Generation again{cfg, over(events)(name(logged.ticker)), StrategySpec{}};
+    ASSERT_TRUE(reproduce(again, logged));
     EXPECT_EQ(outcome(again.book, again.execution, again.portfolio, again.loop.report()), second);
 }
 
@@ -273,7 +270,7 @@ TEST(CommandLogTest, TheLogHasAHeaderPerGenerationAndOneFlushedLinePerRecord)
         ReplaySession session{cfg, over(events), &queue};
         session.submit(post_only_buy(999'800, 10), 42);
         session.tick(kWall);
-        session.control(Control{.type = ControlType::Restart});
+        session.control(Control{.type = ControlType::Symbol, .symbol = ticker("MSFT")});
         session.tick(kWall);
         std::uint64_t last_logged = 0;  // the generation 2 header: an Ack is never logged
         for (const Record& r : records(session)) {
@@ -296,6 +293,7 @@ TEST(CommandLogTest, TheLogHasAHeaderPerGenerationAndOneFlushedLinePerRecord)
     EXPECT_TRUE(has(0, "\"max_order_quantity\":500"));
     EXPECT_TRUE(has(0, "\"book_capacity\":16384"));
     EXPECT_TRUE(has(0, "\"kind\":\"none\""));
+    EXPECT_TRUE(has(0, "\"ticker\":\"\""));  // no symbol chosen yet
     EXPECT_TRUE(has(1, "\"seq\":2"));  // in seq order: the header has no seq
     EXPECT_TRUE(has(2, "\"seq\":3"));
     EXPECT_TRUE(has(3, "\"seq\":4"));
@@ -308,6 +306,11 @@ TEST(CommandLogTest, TheLogHasAHeaderPerGenerationAndOneFlushedLinePerRecord)
     EXPECT_TRUE(has(3, "\"order_id\":1"));
     EXPECT_TRUE(has(4, "\"type\":\"header\""));
     EXPECT_TRUE(has(4, "\"generation\":2"));
+    EXPECT_TRUE(has(4, "\"ticker\":\"MSFT\""));
+    LoggedGeneration logged;
+    std::string error;
+    ASSERT_TRUE(read_log(path, 2, logged, error)) << error;
+    EXPECT_EQ(name(logged.ticker), "MSFT");
 }
 
 TEST(CommandLogTest, AFullLogRefusesNewCommandsAndTheEngineRunsOn)
@@ -437,17 +440,15 @@ TEST(CommandLogTest, ReadLogRefusesATruncatedLine)
     };
 
     // The log as written reads, and a submit thread's Received may come before its generation's header.
-    std::vector<Record> applied;
-    StrategySpec start;
+    LoggedGeneration logged;
     std::string error;
     write_log(path, good);
-    ASSERT_TRUE(read_log(path, 1, start, applied, error)) << error;
-    EXPECT_EQ(applied.size(), 1u);
-    EXPECT_TRUE(start == StrategySpec{});
-    applied.clear();
+    ASSERT_TRUE(read_log(path, 1, logged, error)) << error;
+    EXPECT_EQ(logged.applied.size(), 1u);
+    EXPECT_TRUE(logged.start == StrategySpec{});
     write_log(path, {good[1], good[0], good[2], good[3]});
-    ASSERT_TRUE(read_log(path, 1, start, applied, error)) << error;
-    EXPECT_EQ(applied.size(), 1u);
+    ASSERT_TRUE(read_log(path, 1, logged, error)) << error;
+    EXPECT_EQ(logged.applied.size(), 1u);
 
     // A line cut off by a crash.
     write_log(path, {good[0]}, good[1].substr(0, good[1].size() / 2));
@@ -466,6 +467,8 @@ TEST(CommandLogTest, ReadLogRefusesATruncatedLine)
     write_log(path, {good[0], tampered(3, "\"type\":\"command\"", "\"type\":\"comment\"")});
     EXPECT_EQ(refusal(path), "line 2: " + unexpected);
     write_log(path, {tampered(0, "\"kind\":\"none\"", "\"kind\":\"mm\"")});
+    EXPECT_EQ(refusal(path), "line 1: " + unexpected);
+    write_log(path, {tampered(0, "\"ticker\":\"\"", "\"ticker\":\"TOOLONGXX\"")});
     EXPECT_EQ(refusal(path), "line 1: " + unexpected);
 
     // A record line whose seq does not follow the previous record line's.

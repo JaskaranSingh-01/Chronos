@@ -7,7 +7,6 @@
 #include <cstdio>
 #include <filesystem>
 #include <mutex>
-#include <span>
 #include <string>
 #include <thread>
 #include <vector>
@@ -82,13 +81,21 @@ public:
     std::uint64_t persisted_seq() const noexcept;
 };
 
-// Reads the log at `path`, which must have exactly one header for `generation`, and refuses any line that does not
-// parse back to exactly the text the writer wrote. On success `start` is the header's starting strategy and
-// `generation`'s Applied records are appended to `applied`; otherwise false with `error` naming the line.
-bool read_log(const std::filesystem::path& path, std::uint64_t generation, StrategySpec& start,
-              std::vector<Record>& applied, std::string& error);
+// One generation of a command log: what reproduce() needs.
+struct LoggedGeneration
+{
+    Ticker ticker{};  // its input
+    StrategySpec start{};  // the strategy it started with
+    std::vector<Record> applied{};  // its Applied command steps, in log order
+};
 
-// Attaches `start` to a fresh `generation`, replays `applied` at their boundaries, then to the end; false on mismatch.
-bool reproduce(Generation& generation, const StrategySpec& start, std::span<const Record> applied) noexcept;
+// Reads the log at `path`, which must have exactly one header for `generation`, and refuses any line that does not
+// parse back to exactly the text the writer wrote. False, with `error` naming the line, if it cannot.
+bool read_log(const std::filesystem::path& path, std::uint64_t generation, LoggedGeneration& logged,
+              std::string& error);
+
+// Attaches the logged start strategy to the fresh `generation` (built over the logged ticker), replays the applied
+// commands at their boundaries, then to the end; false on a mismatch.
+bool reproduce(Generation& generation, const LoggedGeneration& logged) noexcept;
 
 }  // namespace simulator::server

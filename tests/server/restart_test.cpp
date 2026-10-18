@@ -5,6 +5,8 @@
 #include <cstddef>
 #include <memory>
 #include <span>
+#include <string>
+#include <string_view>
 #include <vector>
 
 #include "chronos/server/replay_session.hpp"
@@ -161,6 +163,38 @@ TEST(RestartTest, SeekingBackwardRestartsAndFastForwards)
     EXPECT_EQ(far.loop_report().replay.events, 10'000u);
 }
 
+TEST(RestartTest, ASymbolSwitchStartsAGenerationOnTheNewTicker)
+{
+    const std::vector<MarketEvent> aaa{add(100, 1, Side::Buy, 999'900, 100)};
+    const std::vector<MarketEvent> bbb{add(200, 1, Side::Sell, 1'000'100, 50), add(300, 2, Side::Sell, 1'000'200, 50)};
+    std::vector<std::string> built;  // the tickers the factory was asked for
+    ReplaySession session{config(), [&](std::string_view t) {
+                              built.emplace_back(t);
+                              return std::make_unique<VectorSource>(t == "BBB" ? bbb : aaa);
+                          }};
+    EXPECT_EQ(session.control(Control{.type = ControlType::Symbol}).error, ErrorCode::BadRequest);  // no ticker
+    session.control(Control{.type = ControlType::Symbol, .symbol = ticker("BBB")});
+    session.tick(kWall);
+
+    EXPECT_EQ(session.generation(), 2u);
+    EXPECT_EQ(session.state(), SessionState::Paused);
+    EXPECT_EQ(name(latest(session).symbol), "BBB");
+    session.control(step(2));
+    session.tick(kWall);
+    EXPECT_EQ(session.loop_report().replay.events, 2u);  // BBB's two events, not the first generation's one
+
+    session.control(Control{.type = ControlType::Restart});  // a restart keeps the ticker
+    session.tick(kWall);
+    EXPECT_EQ(built, (std::vector<std::string>{"", "BBB", "BBB"}));
+    std::vector<std::string> started;  // each generation's ticker, from its GenerationStart record
+    for (const Record& r : records(session)) {
+        if (r.kind == RecordKind::GenerationStart) {
+            started.emplace_back(name(r.control.symbol));
+        }
+    }
+    EXPECT_EQ(started, (std::vector<std::string>{"", "BBB", "BBB"}));
+}
+
 TEST(RestartTest, ARestartedItchSessionReplaysTheSameDay)
 {
     itch_test::ItchBuilder itch;
@@ -177,7 +211,8 @@ TEST(RestartTest, ARestartedItchSessionReplaysTheSameDay)
     InstrumentRegistry registry{1};
     SessionConfig cfg = config();
     cfg.source_size = bytes.size();
-    ReplaySession session{cfg, [&] { return std::make_unique<ItchSource>(bytes, itch_config, registry); }};
+    ReplaySession session{cfg,
+                          [&](std::string_view) { return std::make_unique<ItchSource>(bytes, itch_config, registry); }};
     const Timestamp midnight = session_midnight_ns(2019y / 12 / 30, -5h);
 
     session.control(kFullSpeed);

@@ -34,6 +34,7 @@ enum class ControlType : std::uint8_t {
     Speed,
     Seek,
     Restart,
+    Symbol,
     CancelSeek
 };
 
@@ -45,6 +46,7 @@ struct Control
     std::uint64_t steps{0};  // Step: market events to apply
     std::uint32_t speed{1};  // Speed: exchange ns per wall ns; 0 = as fast as possible
     Timestamp seek_ts{0};    // Seek: the exchange time to stop at
+    Ticker symbol{};         // Symbol: the ticker the next generation replays
 };
 
 enum class RecordKind : std::uint8_t {
@@ -80,7 +82,7 @@ struct Record
     std::uint64_t market_event_seq{0};    // engine steps: market events applied so far
     OrderId order_id{0};                  // Applied orders and cancels, their verdicts, and Report
     ExecutionReport report{};             // Report
-    Control control{};                    // Ack
+    Control control{};                    // Ack; GenerationStart: control.symbol is the generation's ticker
     SessionState state{SessionState::Paused};  // Ack: the state after the control
 };
 
@@ -132,6 +134,7 @@ struct SnapshotMetrics
 struct Snapshot
 {
     std::uint64_t generation{0};
+    Ticker symbol{};  // the generation's ticker
     std::uint64_t snapshot_seq{0};
     Timestamp exchange_ts{0};
     std::uint64_t event_seq{0};  // market events applied
@@ -188,6 +191,7 @@ private:
 
     SessionConfig config_;
     SourceFactory factory_;
+    Ticker ticker_{};                   // the current generation's input; the engine thread's
     std::optional<Generation> engine_;  // the current generation
 
     // The admission point: any thread, under inbox_mutex_.

@@ -120,17 +120,18 @@ Command command_from(const json& line)
                    .strategy = strategy_from(payload.at("strategy"))};
 }
 
-json header_json(const SessionConfig& config, std::uint64_t generation, const StrategySpec& strategy,
-                 const std::string& commit, bool dirty)
+// The header line of the generation `start` (a GenerationStart record) begins.
+json header_json(const SessionConfig& config, const Record& start, const std::string& commit, bool dirty)
 {
     return {
         {"type", "header"},
         {"protocol", log_protocol},
         {"session_id", config.session_id},
-        {"generation", generation},
+        {"generation", start.generation},
         {"commit", commit},
         {"dirty", dirty},
         {"input", config.input},
+        {"ticker", std::string{name(start.control.symbol)}},
         {"symbol", config.symbol},
         {"book_capacity", config.book_capacity},
         {"instrument",
@@ -144,7 +145,7 @@ json header_json(const SessionConfig& config, std::uint64_t generation, const St
           {"max_open_orders", config.limits.max_open_orders}}},
         {"session_midnight", config.options.session_midnight},
         {"check_invariants_every", config.options.check_invariants_every},
-        {"strategy", strategy_json(strategy)}};
+        {"strategy", strategy_json(start.command.strategy)}};
 }
 
 SessionConfig config_from(const json& header)
@@ -385,7 +386,7 @@ void LogWriter::run()
     Record record;
     while (queue_.pop(record)) {
         const json line = record.kind == RecordKind::GenerationStart
-            ? header_json(config_, record.generation, record.command.strategy, build_commit, build_dirty)
+            ? header_json(config_, record, build_commit, build_dirty)
             : record_json(record);
         const std::string text = dump_line(line) + '\n';
         const bool command = record.kind == RecordKind::Lifecycle;
@@ -398,16 +399,14 @@ void LogWriter::run()
     }
 }
 
-bool read_log(const std::filesystem::path& path, std::uint64_t generation, StrategySpec& start,
-              std::vector<Record>& applied, std::string& error)
+bool read_log(const std::filesystem::path& path, std::uint64_t generation, LoggedGeneration& logged, std::string& error)
 {
     std::ifstream in{path};
     if (!in) {
         error = "cannot open " + path.string();
         return false;
     }
-    std::vector<Record> found;
-    StrategySpec header_strategy;
+    LoggedGeneration found;
     bool has_header = false;
     std::uint64_t last_seq = 0;  // of the previous record line; headers carry none
     std::string text;
@@ -430,8 +429,12 @@ bool read_log(const std::filesystem::path& path, std::uint64_t generation, Strat
                 record = Record{.generation = line.at("generation").get<std::uint64_t>(),
                                 .kind = RecordKind::GenerationStart,
                                 .command = {.strategy = strategy_from(line.at("strategy"))}};
-                expected = header_json(config_from(line), record.generation, record.command.strategy,
-                                       line.at("commit").get<std::string>(), line.at("dirty").get<bool>());
+                if (!to_ticker(line.at("ticker").get<std::string>(), record.control.symbol)) {
+                    error = where + "unexpected field or value";
+                    return false;
+                }
+                expected = header_json(config_from(line), record, line.at("commit").get<std::string>(),
+                                       line.at("dirty").get<bool>());
             } else if (type == "command") {
                 record = command_record_from(line);
                 expected = record_json(record);
@@ -463,9 +466,10 @@ bool read_log(const std::filesystem::path& path, std::uint64_t generation, Strat
                     return false;
                 }
                 has_header = true;
-                header_strategy = record.command.strategy;
+                found.ticker = record.control.symbol;
+                found.start = record.command.strategy;
             } else if (record.kind == RecordKind::Lifecycle && record.step == Lifecycle::Applied) {
-                found.push_back(record);
+                found.applied.push_back(record);
             }
         } catch (const json::exception& e) {
             error = where + e.what();
@@ -476,18 +480,17 @@ bool read_log(const std::filesystem::path& path, std::uint64_t generation, Strat
         error = "no header for generation " + std::to_string(generation);
         return false;
     }
-    start = header_strategy;
-    applied.insert(applied.end(), found.begin(), found.end());
+    logged = std::move(found);
     return true;
 }
 
-bool reproduce(Generation& generation, const StrategySpec& start, std::span<const Record> applied) noexcept
+bool reproduce(Generation& generation, const LoggedGeneration& logged) noexcept
 {
-    generation.strategy.attach(start);
+    generation.strategy.attach(logged.start);
     EventLoop<SessionStrategy>& loop = generation.loop;
     Timestamp next_ts{0};
     std::uint64_t batch = 0;
-    for (const Record& record : applied) {
+    for (const Record& record : logged.applied) {
         while (loop.report().replay.events < record.market_event_seq) {
             if (loop.peek(next_ts) != PeekStatus::Event || !loop.step().ok) {
                 return false;
