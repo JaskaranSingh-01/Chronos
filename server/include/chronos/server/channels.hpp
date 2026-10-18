@@ -51,11 +51,6 @@ public:
         return size_;
     }
 
-    std::size_t capacity() const noexcept
-    {
-        return items_.size();
-    }
-
     bool empty() const noexcept
     {
         return size_ == 0;
@@ -111,7 +106,8 @@ public:
     struct Read
     {
         std::size_t count{0};        // records copied
-        std::uint64_t first_seq{1};  // the oldest still held; a from_seq below it is a gap
+        // The oldest still held; records before it were overwritten, so a gap is max(from, 1) < first_seq.
+        std::uint64_t first_seq{1};
         std::uint64_t last_seq{0};   // the newest; 0 before the first
     };
 

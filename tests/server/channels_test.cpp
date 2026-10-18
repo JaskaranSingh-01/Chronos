@@ -88,6 +88,9 @@ TEST(LatestSlotTest, APublishWhileAReaderHoldsTheSlotIsDropped)
     reader.join();
 
     EXPECT_EQ(seen, 1);
+    seen = 0;
+    ASSERT_TRUE(slot.read([&](const int& value) { seen = value; }));
+    EXPECT_EQ(seen, 1);  // the dropped publish was not stored
     ASSERT_TRUE(slot.try_publish(3));
     ASSERT_TRUE(slot.read([&](const int& value) { seen = value; }));
     EXPECT_EQ(seen, 3);
@@ -102,13 +105,12 @@ struct Pair
 TEST(LatestSlotTest, ConcurrentReadsNeverSeeATornValue)
 {
     LatestSlot<Pair> slot;
+    ASSERT_TRUE(
+        slot.try_publish(Pair{}));  // the final read finds a value even if a held slot drops every publish below
     std::atomic<bool> done{false};
-    std::uint64_t dropped{0};
     std::thread writer{[&] {
         for (std::uint64_t i = 1; i <= 200'000; ++i) {
-            if (!slot.try_publish(Pair{.a = i, .b = 3 * i})) {
-                ++dropped;
-            }
+            slot.try_publish(Pair{.a = i, .b = 3 * i});
         }
         done = true;
     }};
@@ -128,7 +130,6 @@ TEST(LatestSlotTest, ConcurrentReadsNeverSeeATornValue)
     Pair latest;
     ASSERT_TRUE(slot.read([&](const Pair& p) { latest = p; }));
     EXPECT_EQ(latest.b, 3 * latest.a);
-    EXPECT_LE(dropped, 200'000u);
 }
 
 }  // namespace

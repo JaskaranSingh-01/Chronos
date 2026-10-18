@@ -131,6 +131,34 @@ TEST(RestartTest, SeekingBackwardRestartsAndFastForwards)
     EXPECT_EQ(session.state(), SessionState::Paused);
     EXPECT_EQ(session.loop_report().replay.events, 20u);
     EXPECT_EQ(session.clock(), 20 * kMs);
+
+    // A generation 1 command queued across a backward seek of two ticks is stale, in the queue and while Seeking.
+    const std::vector<MarketEvent> longer = spaced_bids(10'000);
+    ReplaySession far{config(), over(longer)};
+    far.control(Control{.type = ControlType::Seek, .seek_ts = 6'000 * kMs});
+    far.tick(kWall);
+    far.tick(kWall);
+    ASSERT_EQ(far.clock(), 6'000 * kMs);
+    ASSERT_EQ(far.submit(cancel(7), 0).error, ErrorCode::None);
+    far.control(Control{.type = ControlType::Seek, .seek_ts = 5'000 * kMs});
+    EXPECT_EQ(far.tick(kWall), kWall);
+    EXPECT_EQ(far.generation(), 2u);
+    EXPECT_EQ(far.state(), SessionState::Seeking);
+    EXPECT_EQ(trace(far), (std::vector<std::string>{"refused cmd1 stale_generation"}));
+    EXPECT_EQ(far.submit(cancel(7), 0).error, ErrorCode::StaleGeneration);
+    Command current = cancel(7);
+    current.generation = 2;
+    EXPECT_EQ(far.submit(current, 0).error, ErrorCode::NotReady);
+    EXPECT_EQ(far.tick(kWall), ReplaySession::never);
+    EXPECT_EQ(far.state(), SessionState::Paused);
+    EXPECT_EQ(far.clock(), 5'000 * kMs);
+
+    // A seek past the end of the stream ends the session.
+    far.control(Control{.type = ControlType::Seek, .seek_ts = 20'000 * kMs});
+    far.tick(kWall);
+    far.tick(kWall);
+    EXPECT_EQ(far.state(), SessionState::Ended);
+    EXPECT_EQ(far.loop_report().replay.events, 10'000u);
 }
 
 TEST(RestartTest, ARestartedItchSessionReplaysTheSameDay)

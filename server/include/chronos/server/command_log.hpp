@@ -28,9 +28,10 @@ public:
     static constexpr std::size_t capacity = 4'096;
 
 private:
-    mutable std::mutex mutex_;
+    std::mutex mutex_;
     std::condition_variable cv_;
     FixedQueue<Record> records_{capacity};
+    std::atomic<std::size_t> depth_{0};  // records_.size(), set under mutex_, so the engine reads it without the lock
     std::size_t reserved_{0};
     bool closed_{false};
     std::atomic<bool> failed_{false};
@@ -48,7 +49,12 @@ public:
     void close();
     void fail() noexcept;
     bool failed() const noexcept;
-    std::size_t size() const;
+    std::size_t size() const noexcept;
+    // True while a healthy log holds more than half its capacity: the engine holds market work for the writer.
+    bool backed_up() const noexcept
+    {
+        return depth_.load(std::memory_order_relaxed) > capacity / 2 && !failed_.load(std::memory_order_relaxed);
+    }
 };
 
 // Appends records to `path` as JSON lines on its own thread, flushing each.
@@ -82,7 +88,7 @@ public:
 bool read_log(const std::filesystem::path& path, std::uint64_t generation, StrategySpec& start,
               std::vector<Record>& applied, std::string& error);
 
-// Attaches `start` to the fresh `generation`, replays `applied` at their boundaries, then to the end; false on a mismatch.
+// Attaches `start` to a fresh `generation`, replays `applied` at their boundaries, then to the end; false on mismatch.
 bool reproduce(Generation& generation, const StrategySpec& start, std::span<const Record> applied) noexcept;
 
 }  // namespace simulator::server

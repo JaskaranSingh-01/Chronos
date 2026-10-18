@@ -11,6 +11,7 @@
 
 #include "chronos/server/command_log.hpp"
 #include "chronos/server/replay_session.hpp"
+#include "chronos/server/session_runner.hpp"
 #include "test_support.hpp"
 
 namespace simulator::server::test {
@@ -327,6 +328,79 @@ TEST(CommandLogTest, AFullLogRefusesNewCommandsAndTheEngineRunsOn)
     EXPECT_TRUE(latest(session).metrics.log_failed);
 }
 
+// A log above half its capacity holds market work however it is asked for, and only that: controls, commands and
+// snapshots go on, and the engine never waits on the writer.
+TEST(CommandLogTest, ABackedUpLogHoldsMarketWorkUntilTheWriterDrainsIt)
+{
+    const std::vector<MarketEvent> events = spaced_bids(10'000);  // no strategy: the events publish no records
+    const auto check = [&](const Control& control, SessionState held, std::uint64_t resumed) {
+        LogQueue queue;  // no writer: the test drains it
+        ReplaySession session{config(), over(events), &queue};
+        while (queue.size() <= LogQueue::capacity / 2) {
+            queue.push(Record{});
+        }
+        ASSERT_TRUE(queue.backed_up());
+        session.control(kFullSpeed);
+        session.control(control);
+        session.submit(cancel(7), 0);
+        EXPECT_EQ(session.tick(kWall), kWall + snapshot_interval);  // it polls for the writer, it does not spin
+        EXPECT_EQ(session.state(), held);
+        EXPECT_EQ(session.loop_report().replay.events, 0u);
+        EXPECT_EQ(trace(session),
+                  (std::vector<std::string>{held == SessionState::Seeking ? "refused cmd1 not_ready"
+                                                                          : "applied cmd1 @999999 ev0"}));
+        if (held != SessionState::Seeking) {  // a seek publishes no snapshots
+            EXPECT_EQ(latest(session).last_command_seq, 1u);
+        }
+        EXPECT_FALSE(queue.failed());
+
+        Record record;
+        while (queue.size() > LogQueue::capacity / 4) {
+            queue.pop(record);
+        }
+        EXPECT_FALSE(queue.backed_up());
+        session.tick(kWall);
+        EXPECT_EQ(session.loop_report().replay.events, resumed);
+        EXPECT_FALSE(queue.failed());
+    };
+    check(kPlay, SessionState::Playing, ReplaySession::events_per_tick);
+    check(step(10), SessionState::Stepping, 10);
+    check(Control{.type = ControlType::Seek, .seek_ts = 5'000 * kMs}, SessionState::Seeking,
+          ReplaySession::events_per_tick);
+}
+
+TEST(CommandLogTest, AMarketMakerAtFullSpeedNeverOverrunsTheLog)
+{
+    const std::vector<MarketEvent> events = random_stream(20'000);
+    const Scratch scratch{"backpressure"};
+    LogQueue queue;
+    const LogWriter writer{queue, scratch.path, config(), false};
+    ReplaySession session{config(), over(events), &queue};
+    session.submit(
+        Command{.generation = 1,
+                .type = CommandType::Attach,
+                .strategy = {.kind = SessionStrategyKind::MarketMaker,
+                             .market_maker = {.quote_size = 10, .max_position = 1'000, .requote_cooldown_ns = 0}}},
+        0);
+    session.tick(kWall);  // attached before the first event
+    {
+        const SessionRunner runner{session};
+        session.control(kFullSpeed);
+        session.control(kPlay);
+        ASSERT_TRUE(eventually([&] { return session.state() == SessionState::Ended; }));
+    }
+    EXPECT_FALSE(queue.failed());
+    EXPECT_EQ(session.loop_report().replay.events, 20'000u);
+    std::uint64_t last_logged = 0;  // an Ack is never logged
+    for (const Record& r : records(session)) {
+        if (r.kind != RecordKind::Ack) {
+            last_logged = r.seq;
+        }
+    }
+    EXPECT_GT(last_logged, LogQueue::capacity);  // more records than the queue holds, and the writer took them all
+    EXPECT_TRUE(eventually([&] { return writer.persisted_seq() == last_logged; }));
+}
+
 TEST(CommandLogTest, ACommandAdmittedBeforeTheLogFilledIsRefusedAtApply)
 {
     const std::vector<MarketEvent> events{add(100, 1, Side::Sell, 1'000'000, 100)};
@@ -393,6 +467,12 @@ TEST(CommandLogTest, ReadLogRefusesATruncatedLine)
     EXPECT_EQ(refusal(path), "line 2: " + unexpected);
     write_log(path, {tampered(0, "\"kind\":\"none\"", "\"kind\":\"mm\"")});
     EXPECT_EQ(refusal(path), "line 1: " + unexpected);
+
+    // A record line whose seq does not follow the previous record line's.
+    write_log(path, {good[0], good[2], good[1], good[3]});
+    EXPECT_EQ(refusal(path), "line 3: seq out of order");
+    write_log(path, {good[0], good[1], good[1]});
+    EXPECT_EQ(refusal(path), "line 3: seq out of order");
 
     // A log without its header, with two, or from another protocol.
     write_log(path, {good[1], good[2], good[3]});

@@ -1,6 +1,8 @@
 #include <gtest/gtest.h>
 
+#include <cmath>
 #include <cstdint>
+#include <limits>
 #include <string>
 #include <vector>
 
@@ -223,6 +225,18 @@ TEST(ReplaySessionTest, AdmissionRefusesBadRequestsStaleGenerationsAFullQueueAnd
     EXPECT_EQ(session.state(), SessionState::Ended);
     EXPECT_EQ(trace(session).back(), "refused cmd1027 not_ready");
     EXPECT_EQ(session.submit(cancel(99), 0).error, ErrorCode::NotReady);
+
+    // An attach's imbalance threshold is at least 1 and finite, checked before the ended session's refusal.
+    const auto attach = [](double threshold) {
+        return Command{
+            .generation = 1,
+            .type = CommandType::Attach,
+            .strategy = {.kind = SessionStrategyKind::ImbalanceTaker, .imbalance = {.threshold = threshold}}};
+    };
+    EXPECT_EQ(session.submit(attach(0.99), 0).error, ErrorCode::BadRequest);
+    EXPECT_EQ(session.submit(attach(std::numeric_limits<double>::infinity()), 0).error, ErrorCode::BadRequest);
+    EXPECT_EQ(session.submit(attach(std::nan("")), 0).error, ErrorCode::BadRequest);
+    EXPECT_EQ(session.submit(attach(1.0), 0).error, ErrorCode::NotReady);  // valid: only the ended session refuses it
 }
 
 TEST(ReplaySessionTest, ApplyRefusesNoLiquidityRiskAndManualOrdersUnderAStrategy)

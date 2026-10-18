@@ -3,6 +3,7 @@
 #include <fcntl.h>
 #include <unistd.h>
 
+#include <cerrno>
 #include <cstdint>
 #include <fstream>
 #include <system_error>
@@ -205,6 +206,9 @@ std::string dump_line(const json& line)
     return line.dump(-1, ' ', false, json::error_handler_t::replace);
 }
 
+// The scan below ends at CancelRejected: an ErrorCode added after it must extend the scan.
+static_assert(to_string(static_cast<ErrorCode>(static_cast<std::uint8_t>(ErrorCode::CancelRejected) + 1)) == "unknown");
+
 // The ErrorCode named `name`; an unknown name is None, which read_log's round trip then refuses.
 ErrorCode error_from(const std::string& name) noexcept
 {
@@ -247,13 +251,19 @@ Record report_record_from(const json& line)
 }
 
 // Flushes `fd` to the device: F_FULLFSYNC where it exists, as macOS fsync leaves the data in the drive's cache.
+// ponytail: F_FULLFSYNC costs about 4 ms per synced line and an order is four lines, so --fsync sustains about
+// 60 commands/s; group commit (one sync per drained run) when that matters.
 bool sync_to_device(int fd) noexcept
 {
 #ifdef F_FULLFSYNC
-    return ::fcntl(fd, F_FULLFSYNC) == 0;
-#else
-    return ::fsync(fd) == 0;
+    if (::fcntl(fd, F_FULLFSYNC) == 0) {
+        return true;
+    }
+    if (errno != ENOTSUP && errno != EINVAL && errno != ENOTTY) {  // a filesystem without it; any other errno fails
+        return false;
+    }
 #endif
+    return ::fsync(fd) == 0;
 }
 
 // Syncs the directory holding `path`, so a file just created there survives a crash.
@@ -280,6 +290,7 @@ bool LogQueue::push(const Record& record) noexcept
             return false;
         }
         records_.push(record);
+        depth_.store(records_.size(), std::memory_order_relaxed);
     }
     cv_.notify_one();
     return true;
@@ -302,6 +313,7 @@ void LogQueue::push_reserved(const Record& record) noexcept
         const std::lock_guard lock{mutex_};
         --reserved_;
         records_.push(record);
+        depth_.store(records_.size(), std::memory_order_relaxed);
     }
     cv_.notify_one();
 }
@@ -310,7 +322,9 @@ bool LogQueue::pop(Record& record)
 {
     std::unique_lock lock{mutex_};
     cv_.wait(lock, [&] { return closed_ || !records_.empty(); });
-    return records_.pop(record);
+    const bool popped = records_.pop(record);
+    depth_.store(records_.size(), std::memory_order_relaxed);
+    return popped;
 }
 
 void LogQueue::close()
@@ -332,10 +346,9 @@ bool LogQueue::failed() const noexcept
     return failed_.load();
 }
 
-std::size_t LogQueue::size() const
+std::size_t LogQueue::size() const noexcept
 {
-    const std::lock_guard lock{mutex_};
-    return records_.size();
+    return depth_.load(std::memory_order_relaxed);
 }
 
 LogWriter::LogWriter(LogQueue& queue, const std::filesystem::path& path, SessionConfig config, bool fsync)
@@ -396,6 +409,7 @@ bool read_log(const std::filesystem::path& path, std::uint64_t generation, Strat
     std::vector<Record> found;
     StrategySpec header_strategy;
     bool has_header = false;
+    std::uint64_t last_seq = 0;  // of the previous record line; headers carry none
     std::string text;
     for (std::size_t number = 1; std::getline(in, text); ++number) {
         const std::string where = "line " + std::to_string(number) + ": ";
@@ -432,6 +446,13 @@ bool read_log(const std::filesystem::path& path, std::uint64_t generation, Strat
             if (dump_line(expected) != text) {
                 error = where + "unexpected field or value";
                 return false;
+            }
+            if (record.kind != RecordKind::GenerationStart) {
+                if (record.seq <= last_seq) {
+                    error = where + "seq out of order";
+                    return false;
+                }
+                last_seq = record.seq;
             }
             if (record.generation != generation) {
                 continue;

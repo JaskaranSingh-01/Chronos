@@ -1,6 +1,7 @@
 #include "chronos/server/replay_session.hpp"
 
 #include <algorithm>
+#include <cmath>
 #include <utility>
 
 #include "chronos/server/command_log.hpp"
@@ -9,14 +10,16 @@
 namespace simulator::server {
 namespace {
 
-// What admission can check without the book: a limit order has a positive price; an attach names a strategy.
+// What admission can check without the book: a limit order has a positive price; an attach names a strategy,
+// and its imbalance threshold is finite and at least 1 (logged for every kind; a non-finite one is not JSON).
 bool valid(const Command& command) noexcept
 {
     switch (command.type) {
     case CommandType::Order:
         return command.order_type == OrderType::Market || command.price.ticks > 0;
     case CommandType::Attach:
-        return command.strategy.kind != SessionStrategyKind::None;
+        return command.strategy.kind != SessionStrategyKind::None &&
+            std::isfinite(command.strategy.imbalance.threshold) && command.strategy.imbalance.threshold >= 1.0;
     case CommandType::Cancel:
     case CommandType::Detach:
         return true;
@@ -152,7 +155,10 @@ Timestamp ReplaySession::tick(Timestamp wall_now) noexcept
     if (dirty_ && state_.load() != SessionState::Seeking && wall_now >= next_snapshot_wall_) {
         publish_snapshot(wall_now);
     }
-    return more ? wall_now : due_wall();
+    if (more) {
+        return log_backed_up() ? wall_now + snapshot_interval : wall_now;  // poll for the writer, never spin
+    }
+    return due_wall();
 }
 
 Timestamp ReplaySession::snapshot_due() const noexcept
@@ -186,6 +192,15 @@ const LoopReport& ReplaySession::loop_report() const noexcept
     return engine_->loop.report();
 }
 
+// True while the writer is behind: market work waits for it, and the engine itself never does.
+// ponytail: replay slows to the writer's rate when reports outpace it; the high-water mark is half the queue, so one
+// market event (in Play, one timestamp's events) must publish fewer than half the queue's records, which
+// max_open_orders bounds; a faster writer or a larger queue if that rate is too slow.
+bool ReplaySession::log_backed_up() const noexcept
+{
+    return log_ != nullptr && log_->backed_up();
+}
+
 // Admission's refusal of `command`, or None; the engine checks again when it applies the command.
 ErrorCode ReplaySession::admission(const Command& command, std::uint64_t generation) const noexcept
 {
@@ -195,12 +210,12 @@ ErrorCode ReplaySession::admission(const Command& command, std::uint64_t generat
     if (log_ != nullptr && log_->failed()) {
         return ErrorCode::LogUnavailable;
     }
+    if (command.generation != generation) {
+        return ErrorCode::StaleGeneration;
+    }
     const SessionState state = state_.load();
     if (state == SessionState::Ended || state == SessionState::Seeking) {
         return ErrorCode::NotReady;
-    }
-    if (command.generation != generation) {
-        return ErrorCode::StaleGeneration;
     }
     return ErrorCode::None;
 }
@@ -208,12 +223,12 @@ ErrorCode ReplaySession::admission(const Command& command, std::uint64_t generat
 // The engine's refusal of a drained command, or None.
 ErrorCode ReplaySession::refusal(const Command& command) const noexcept
 {
+    if (command.generation != generation_.load()) {
+        return ErrorCode::StaleGeneration;
+    }
     const SessionState state = state_.load();
     if (state == SessionState::Ended || state == SessionState::Seeking) {
         return ErrorCode::NotReady;
-    }
-    if (command.generation != generation_.load()) {
-        return ErrorCode::StaleGeneration;
     }
     if (awaits_verdict(command) && awaiting_.size() == command_capacity) {
         return ErrorCode::QueueFull;
@@ -367,6 +382,7 @@ void ReplaySession::apply_control(const Control& control, Timestamp wall_now) no
             restart();
         }
         seek_target_ = control.seek_ts;
+        seek_position_.store(clock());
         if (state_.load() != SessionState::Ended) {  // an empty stream ends at once
             state_.store(SessionState::Seeking);
         }
@@ -389,8 +405,8 @@ bool ReplaySession::play(Timestamp wall_now) noexcept
     Timestamp next_ts{0};
     PeekStatus status = g.loop.peek(next_ts);
     for (std::size_t n = 0; status == PeekStatus::Event && next_ts <= target; ++n) {
-        if (n >= events_per_tick && next_ts != clock()) {
-            break;  // the budget is spent, and never inside one timestamp
+        if ((n >= events_per_tick || log_backed_up()) && next_ts != clock()) {
+            break;  // the budget is spent or the log is backed up, and never inside one timestamp
         }
         step_market();
         status = g.loop.peek(next_ts);
@@ -405,11 +421,12 @@ bool ReplaySession::play(Timestamp wall_now) noexcept
 }
 
 // Applies up to events_per_tick of the market events a Step asked for; true if some are left.
-// A Step may stop inside a timestamp; a batch there applies before its remaining events, and only its own events wait.
+// A Step may stop inside a timestamp; a batch there applies before the timestamp's remaining events, and only the
+// batch's own events wait.
 bool ReplaySession::step_some() noexcept
 {
     Timestamp next_ts{0};
-    for (std::size_t n = 0; steps_left_ > 0 && n < events_per_tick; ++n, --steps_left_) {
+    for (std::size_t n = 0; steps_left_ > 0 && n < events_per_tick && !log_backed_up(); ++n, --steps_left_) {
         if (engine_->loop.peek(next_ts) != PeekStatus::Event) {
             break;
         }
@@ -432,7 +449,8 @@ bool ReplaySession::seek_some() noexcept
     Generation& g = *engine_;
     Timestamp next_ts{0};
     PeekStatus status = g.loop.peek(next_ts);
-    for (std::size_t n = 0; status == PeekStatus::Event && next_ts <= seek_target_ && n < events_per_tick; ++n) {
+    for (std::size_t n = 0;
+         status == PeekStatus::Event && next_ts <= seek_target_ && n < events_per_tick && !log_backed_up(); ++n) {
         step_market();
         status = g.loop.peek(next_ts);
     }

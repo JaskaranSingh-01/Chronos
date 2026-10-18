@@ -171,7 +171,8 @@ public:
     static constexpr std::size_t command_capacity = 1'024;
     static constexpr std::size_t control_capacity = 64;
     static constexpr std::size_t ring_capacity = 65'536;
-    // A tick yields after this many market events, at the next new timestamp, so controls are seen at full speed.
+    // The most market events a tick applies, so controls are seen at full speed: Playing yields at the next new
+    // timestamp, but Step and Seek stop at the budget, possibly mid-timestamp.
     static constexpr std::size_t events_per_tick = 4'096;
     // The largest Speed a client may ask for (0 = as fast as possible); keeps the pacing product within int64.
     static constexpr std::uint32_t max_speed = 1'000;
@@ -247,11 +248,12 @@ private:
     void step_market() noexcept;
     void apply_batch() noexcept;
     Timestamp due_wall() const noexcept;
+    bool log_backed_up() const noexcept;
     void publish_snapshot(Timestamp wall_now) noexcept;
 
     friend class SessionRunner;
 
-    // The runner waits on inbox_cv() under inbox_mutex() until has_input() or its deadline; no one else may hold it.
+    // The runner waits on inbox_cv() under inbox_mutex() until has_input() or its wake time.
     std::mutex& inbox_mutex() noexcept
     {
         return inbox_mutex_;
@@ -278,7 +280,8 @@ public:
     Admission submit(Command command, Timestamp received_wall_ts) noexcept;
     // Any thread. Queues a control; the engine applies it at its next tick and acks it on the ring.
     Admission control(Control control) noexcept;
-    // Any thread. Records from max(from_seq, first_seq) on; a from_seq below first_seq is a gap.
+    // Any thread. Records from max(from_seq, first_seq) on; records before first_seq were overwritten, so a gap is
+    // max(from_seq, 1) < first_seq.
     RecordRing<Record>::Read reports_since(std::uint64_t from_seq, std::span<Record> out) const noexcept;
     SessionState state() const noexcept;
     std::uint64_t generation() const noexcept;
@@ -292,7 +295,7 @@ public:
         return snapshots_.read(std::forward<F>(f));
     }
 
-    // Engine thread: controls, replay to `wall_now`, the batch; returns the next due wall time (never = wait for input).
+    // Engine thread: controls, replay to `wall_now`, the batch; returns the next due wall time or never.
     Timestamp tick(Timestamp wall_now) noexcept;
     // Engine thread. When the next snapshot is due: every frame while Playing, else only once something is new.
     Timestamp snapshot_due() const noexcept;

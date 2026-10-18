@@ -79,6 +79,7 @@ enum class OrderType : std::uint8_t {
 };
 
 // The market-order protection band, in percent of the best opposite price.
+// ponytail: a fixed 1% band; make it a SessionConfig field and log it in the header when it must change.
 inline constexpr std::int64_t market_band_percent = 1;
 
 // A trading command from the client.
