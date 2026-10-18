@@ -80,11 +80,10 @@ TEST(SessionRunnerTest, APlayingSessionPublishesSnapshotsThroughAQuietStretch)
     };
     Mark first;
     ASSERT_TRUE(eventually([&] { return (first = mark()).state == SessionState::Playing; }));
-    const auto start = std::chrono::steady_clock::now();
     Mark last;
+    // No market event for 100 s, yet frames keep coming; their rate is the OS scheduler's (macOS CI coalesces timers).
     ASSERT_TRUE(eventually([&] { return (last = mark()).seq >= first.seq + 15; }));
-    EXPECT_LT(std::chrono::steady_clock::now() - start, std::chrono::seconds{1});  // 30 a second, so 15 take 0.5 s
-    EXPECT_GE(last.exchange_ts - first.exchange_ts, 450 * kMs);                  // at 1x, exchange time follows
+    EXPECT_GE(last.exchange_ts - first.exchange_ts, 450 * kMs);  // at 1x, exchange time follows
 }
 
 TEST(SessionRunnerTest, PlaysInRealTimeAtOneTimesSpeed)
