@@ -125,6 +125,7 @@ struct SnapshotMetrics
     std::uint64_t events_per_second{0};  // market events per wall second since the last snapshot
     std::uint64_t dropped_snapshots{0};
     std::size_t command_queue_depth{0};  // commands the last tick drained
+    bool log_failed{false};              // the UI shows the log status
 };
 
 // The session at one boundary, built by the engine between steps. Entries past each count are unspecified.
@@ -159,6 +160,8 @@ struct Snapshot
     bool my_orders_truncated{false};
     SnapshotMetrics metrics{};
 };
+
+class LogQueue;
 
 // One interactive replay: any thread admits input; the engine thread drives it through tick(wall_now), never a clock.
 class ReplaySession
@@ -196,7 +199,9 @@ private:
     std::atomic<SessionState> state_{SessionState::Paused};
     std::atomic<std::uint64_t> generation_{1};
     std::atomic<Timestamp> seek_position_{0};
+    std::mutex publish_mutex_;  // makes a record's ring seq and its place in the log one step
     RecordRing<Record> ring_{ring_capacity};
+    LogQueue* log_{nullptr};  // nullptr: this session keeps no log
     LatestSlot<Snapshot> snapshots_;
 
     // The engine thread only.
@@ -225,8 +230,9 @@ private:
 
     ErrorCode admission(const Command& command, std::uint64_t generation) const noexcept;
     ErrorCode refusal(const Command& command) const noexcept;
-    void publish(const Record& record) noexcept;
-    void lifecycle(Lifecycle step, const Command& command, ErrorCode reason, OrderId order_id) noexcept;
+    void publish(Record record, bool reserved = false) noexcept;
+    void lifecycle(Lifecycle step, const Command& command, ErrorCode reason, OrderId order_id,
+                   bool reserved = false) noexcept;
     void publish_delivered() noexcept;
     void publish_start() noexcept;
     void load() noexcept;
@@ -243,7 +249,7 @@ private:
     void publish_snapshot(Timestamp wall_now) noexcept;
 
 public:
-    ReplaySession(SessionConfig config, SourceFactory factory);
+    ReplaySession(SessionConfig config, SourceFactory factory, LogQueue* log = nullptr);
 
     ReplaySession(const ReplaySession&) = delete;
     ReplaySession& operator=(const ReplaySession&) = delete;

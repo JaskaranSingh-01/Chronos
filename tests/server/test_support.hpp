@@ -2,9 +2,11 @@
 
 #include <gtest/gtest.h>
 
+#include <chrono>
 #include <cstdint>
 #include <random>
 #include <string>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -210,6 +212,19 @@ inline Snapshot latest(const ReplaySession& session)
     Snapshot snapshot;
     EXPECT_TRUE(session.read_snapshot([&](const Snapshot& published) { snapshot = published; }));
     return snapshot;
+}
+
+// Polls `done` every 100 us for up to 10 s; for work on another thread.
+template <class F>
+bool eventually(F&& done)
+{
+    for (int i = 0; i < 100'000; ++i) {
+        if (done()) {
+            return true;
+        }
+        std::this_thread::sleep_for(std::chrono::microseconds{100});
+    }
+    return done();
 }
 
 }  // namespace simulator::server::test

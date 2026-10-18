@@ -117,9 +117,19 @@ target_link_libraries(simulator
 
 find_package(Threads REQUIRED)
 
+include(FetchContent)
+
+FetchContent_Declare(
+    json
+    URL https://github.com/nlohmann/json/releases/download/v3.11.3/json.tar.xz
+)
+
+FetchContent_MakeAvailable(json)
+
 add_library(chronos_server
 
     server/src/candles.cpp
+    server/src/command_log.cpp
     server/src/generation.cpp
     server/src/replay_session.cpp
 )
@@ -137,12 +147,16 @@ target_link_libraries(chronos_server
         Threads::Threads
 )
 
+target_link_libraries(chronos_server PRIVATE nlohmann_json::nlohmann_json)
+
+# The command log's header records the commit (generated/build_info.hpp).
+add_dependencies(chronos_server build_info)
+target_include_directories(chronos_server PRIVATE ${PROJECT_BINARY_DIR}/generated)
+
 
 # -------------------------
 # Tests
 # -------------------------
-
-include(FetchContent)
 
 FetchContent_Declare(
     googletest
@@ -219,6 +233,7 @@ add_executable(chronos_server_tests
 
     tests/server/candles_test.cpp
     tests/server/channels_test.cpp
+    tests/server/command_log_test.cpp
     tests/server/generation_test.cpp
     tests/server/replay_session_test.cpp
     tests/server/restart_test.cpp

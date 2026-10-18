@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <utility>
 
+#include "chronos/server/command_log.hpp"
 #include "simulator/orders/order.hpp"
 
 namespace simulator::server {
@@ -51,8 +52,8 @@ ErrorCode verdict(const ExecutionReport& report) noexcept
 
 }  // namespace
 
-ReplaySession::ReplaySession(SessionConfig config, SourceFactory factory)
-    : config_(std::move(config)), factory_(std::move(factory))
+ReplaySession::ReplaySession(SessionConfig config, SourceFactory factory, LogQueue* log)
+    : config_(std::move(config)), factory_(std::move(factory)), log_(log)
 {
     batch_.reserve(command_capacity);
     controls_batch_.reserve(control_capacity);
@@ -190,6 +191,9 @@ ErrorCode ReplaySession::admission(const Command& command, std::uint64_t generat
     if (!valid(command)) {
         return ErrorCode::BadRequest;
     }
+    if (log_ != nullptr && log_->failed()) {
+        return ErrorCode::LogUnavailable;
+    }
     const SessionState state = state_.load();
     if (state == SessionState::Ended || state == SessionState::Seeking) {
         return ErrorCode::NotReady;
@@ -216,12 +220,23 @@ ErrorCode ReplaySession::refusal(const Command& command) const noexcept
     return ErrorCode::None;
 }
 
-void ReplaySession::publish(const Record& record) noexcept
+// Puts `record` on the ring and, except an Ack, in the log; `reserved` uses the slot LogQueue::reserve() held.
+void ReplaySession::publish(Record record, bool reserved) noexcept
 {
-    ring_.publish(record);
+    const std::lock_guard lock{publish_mutex_};
+    record.seq = ring_.publish(record);
+    if (log_ == nullptr || record.kind == RecordKind::Ack) {
+        return;
+    }
+    if (reserved) {
+        log_->push_reserved(record);
+    } else {
+        log_->push(record);
+    }
 }
 
-void ReplaySession::lifecycle(Lifecycle step, const Command& command, ErrorCode reason, OrderId order_id) noexcept
+void ReplaySession::lifecycle(Lifecycle step, const Command& command, ErrorCode reason, OrderId order_id,
+                              bool reserved) noexcept
 {
     publish(Record{.generation = generation_.load(),
                    .step = step,
@@ -230,7 +245,8 @@ void ReplaySession::lifecycle(Lifecycle step, const Command& command, ErrorCode 
                    .batch_seq = batch_seq_,
                    .exchange_ts = clock(),
                    .market_event_seq = engine_->loop.report().replay.events,
-                   .order_id = order_id});
+                   .order_id = order_id},
+            reserved);
 }
 
 // Publishes the reports the strategy was delivered, and the simulator's verdict on our orders and cancels.
@@ -461,13 +477,18 @@ void ReplaySession::apply_batch() noexcept
     for (const Command& command : batch_) {
         last_command_seq_ = command.command_seq;
         ErrorCode error = refusal(command);
+        bool reserved = false;  // a command is never applied without its record's place in the log
+        if (error == ErrorCode::None && log_ != nullptr) {
+            reserved = log_->reserve();
+            error = reserved ? ErrorCode::None : ErrorCode::LogUnavailable;
+        }
         Applied applied;
         if (error == ErrorCode::None) {
             applied = apply_command(*engine_, command);
             error = applied.error;
         }
         lifecycle(error == ErrorCode::None ? Lifecycle::Applied : Lifecycle::RejectedAtApply, command, error,
-                  applied.order_id);
+                  applied.order_id, reserved);
         if (error == ErrorCode::None && awaits_verdict(command)) {
             awaiting_.push_back(Awaiting{
                 .order_id = applied.order_id, .cancel = command.type == CommandType::Cancel, .command = command});
@@ -566,8 +587,10 @@ void ReplaySession::publish_snapshot(Timestamp wall_now) noexcept
     const std::uint64_t rate = snapshot_seq_ != 0 && elapsed > 0
         ? (s.event_seq - last_snapshot_events_) * 1'000'000'000 / static_cast<std::uint64_t>(elapsed)
         : 0;
-    s.metrics = SnapshotMetrics{
-        .events_per_second = rate, .dropped_snapshots = dropped_snapshots_, .command_queue_depth = last_drained_};
+    s.metrics = SnapshotMetrics{.events_per_second = rate,
+                                .dropped_snapshots = dropped_snapshots_,
+                                .command_queue_depth = last_drained_,
+                                .log_failed = log_ != nullptr && log_->failed()};
 
     next_snapshot_wall_ = wall_now + snapshot_interval;
     if (!snapshots_.try_publish(s)) {
