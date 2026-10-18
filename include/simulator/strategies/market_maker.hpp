@@ -14,6 +14,8 @@ struct MarketMakerParams
     std::int64_t max_position{500};               // |position| a fill of the next quote may not exceed
     Timestamp requote_cooldown_ns{100'000'000};   // minimum quote age before a requote
     std::int64_t improve_ticks{0};  // ticks inside the touch; used only while the spread is wider than twice this
+
+    bool operator==(const MarketMakerParams&) const = default;
 };
 
 struct MarketMakerStats

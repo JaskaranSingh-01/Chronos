@@ -120,6 +120,7 @@ find_package(Threads REQUIRED)
 add_library(chronos_server
 
     server/src/candles.cpp
+    server/src/generation.cpp
 )
 
 target_include_directories(chronos_server
@@ -217,6 +218,7 @@ add_executable(chronos_server_tests
 
     tests/server/candles_test.cpp
     tests/server/channels_test.cpp
+    tests/server/generation_test.cpp
 )
 
 target_compile_options(chronos_server_tests PRIVATE ${CHRONOS_WARNINGS})

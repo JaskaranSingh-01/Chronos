@@ -12,6 +12,8 @@ struct ImbalanceTakerParams
     std::uint64_t clip{100};             // shares per order
     std::int64_t max_position{500};      // |position| the strategy itself will not exceed
     Timestamp cooldown_ns{100'000'000};  // after each send attempt, accepted or not
+
+    bool operator==(const ImbalanceTakerParams&) const = default;
 };
 
 struct ImbalanceTakerStats
