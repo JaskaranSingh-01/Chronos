@@ -58,6 +58,7 @@ ReplaySession::ReplaySession(SessionConfig config, SourceFactory factory)
     controls_batch_.reserve(control_capacity);
     awaiting_.reserve(command_capacity);
     engine_.emplace(config_, factory_(), StrategySpec{});
+    publish_start();
     load();
 }
 
@@ -113,6 +114,11 @@ std::uint64_t ReplaySession::generation() const noexcept
     return generation_.load();
 }
 
+Timestamp ReplaySession::seek_position() const noexcept
+{
+    return seek_position_.load();
+}
+
 Timestamp ReplaySession::tick(Timestamp wall_now) noexcept
 {
     drain_inbox();
@@ -132,6 +138,9 @@ Timestamp ReplaySession::tick(Timestamp wall_now) noexcept
     case SessionState::Stepping:
         more = step_some();
         break;
+    case SessionState::Seeking:
+        more = seek_some();
+        break;
     case SessionState::Paused:
     case SessionState::Ended:
         break;
@@ -139,7 +148,7 @@ Timestamp ReplaySession::tick(Timestamp wall_now) noexcept
     apply_batch();
 
     dirty_ = dirty_ || input || (state != SessionState::Paused && state != SessionState::Ended);
-    if (dirty_ && wall_now >= next_snapshot_wall_) {
+    if (dirty_ && state_.load() != SessionState::Seeking && wall_now >= next_snapshot_wall_) {
         publish_snapshot(wall_now);
     }
     return more ? wall_now : due_wall();
@@ -147,7 +156,7 @@ Timestamp ReplaySession::tick(Timestamp wall_now) noexcept
 
 Timestamp ReplaySession::snapshot_due() const noexcept
 {
-    return dirty_ ? next_snapshot_wall_ : never;
+    return dirty_ && state_.load() != SessionState::Seeking ? next_snapshot_wall_ : never;
 }
 
 Timestamp ReplaySession::clock() noexcept
@@ -181,7 +190,8 @@ ErrorCode ReplaySession::admission(const Command& command, std::uint64_t generat
     if (!valid(command)) {
         return ErrorCode::BadRequest;
     }
-    if (state_.load() == SessionState::Ended) {
+    const SessionState state = state_.load();
+    if (state == SessionState::Ended || state == SessionState::Seeking) {
         return ErrorCode::NotReady;
     }
     if (command.generation != generation) {
@@ -193,7 +203,8 @@ ErrorCode ReplaySession::admission(const Command& command, std::uint64_t generat
 // The engine's refusal of a drained command, or None.
 ErrorCode ReplaySession::refusal(const Command& command) const noexcept
 {
-    if (state_.load() == SessionState::Ended) {
+    const SessionState state = state_.load();
+    if (state == SessionState::Ended || state == SessionState::Seeking) {
         return ErrorCode::NotReady;
     }
     if (command.generation != generation_.load()) {
@@ -246,6 +257,13 @@ void ReplaySession::publish_delivered() noexcept
     delivered.clear();
 }
 
+void ReplaySession::publish_start() noexcept
+{
+    publish(Record{.generation = generation_.load(),
+                   .kind = RecordKind::GenerationStart,
+                   .command = {.strategy = engine_->strategy.spec()}});
+}
+
 // Puts the clock just before the first market event, or ends an empty or failed stream.
 void ReplaySession::load() noexcept
 {
@@ -255,6 +273,23 @@ void ReplaySession::load() noexcept
     } else {
         end();
     }
+}
+
+// Builds the next generation from a fresh source, keeping the attached strategy, and pauses before its first event.
+void ReplaySession::restart() noexcept
+{
+    const StrategySpec spec = engine_->strategy.spec();
+    engine_.reset();
+    engine_.emplace(config_, factory_(), spec);
+    generation_.fetch_add(1);
+    awaiting_.clear();
+    candles_ = CandleBuilder{};
+    candles_published_ = 0;
+    trades_seen_ = 0;
+    last_snapshot_events_ = 0;
+    state_.store(SessionState::Paused);
+    publish_start();
+    load();
 }
 
 void ReplaySession::end() noexcept
@@ -307,6 +342,23 @@ void ReplaySession::apply_control(const Control& control, Timestamp wall_now) no
         anchor_wall_ = wall_now;
         anchor_exchange_ = clock();
         break;
+    case ControlType::Restart:
+        restart();
+        break;
+    case ControlType::Seek:
+        if (ended || control.seek_ts < clock()) {
+            restart();
+        }
+        seek_target_ = control.seek_ts;
+        if (state_.load() != SessionState::Ended) {  // an empty stream ends at once
+            state_.store(SessionState::Seeking);
+        }
+        break;
+    case ControlType::CancelSeek:
+        if (state_.load() == SessionState::Seeking) {
+            state_.store(SessionState::Paused);
+        }
+        break;
     }
     publish(
         Record{.generation = generation_.load(), .kind = RecordKind::Ack, .control = control, .state = state_.load()});
@@ -353,6 +405,32 @@ bool ReplaySession::step_some() noexcept
     if (steps_left_ > 0) {
         return true;
     }
+    state_.store(SessionState::Paused);
+    return false;
+}
+
+// Applies up to events_per_tick market events at or before the target; there, sets the clock to it and pauses.
+bool ReplaySession::seek_some() noexcept
+{
+    Generation& g = *engine_;
+    Timestamp next_ts{0};
+    PeekStatus status = g.loop.peek(next_ts);
+    for (std::size_t n = 0; status == PeekStatus::Event && next_ts <= seek_target_ && n < events_per_tick; ++n) {
+        step_market();
+        status = g.loop.peek(next_ts);
+    }
+    if (status != PeekStatus::Event) {
+        seek_position_.store(clock());
+        end();
+        return false;
+    }
+    if (next_ts <= seek_target_) {
+        seek_position_.store(clock());
+        return true;
+    }
+    g.loop.advance_to(seek_target_);
+    publish_delivered();
+    seek_position_.store(clock());
     state_.store(SessionState::Paused);
     return false;
 }

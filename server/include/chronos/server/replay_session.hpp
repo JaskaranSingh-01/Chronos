@@ -23,6 +23,7 @@ enum class SessionState : std::uint8_t {
     Paused,
     Playing,
     Stepping,
+    Seeking,
     Ended
 };
 
@@ -30,7 +31,10 @@ enum class ControlType : std::uint8_t {
     Play,
     Pause,
     Step,
-    Speed
+    Speed,
+    Seek,
+    Restart,
+    CancelSeek
 };
 
 // A replay control from the client.
@@ -40,12 +44,14 @@ struct Control
     ControlType type{ControlType::Pause};
     std::uint64_t steps{0};  // Step: market events to apply
     std::uint32_t speed{1};  // Speed: exchange ns per wall ns; 0 = as fast as possible
+    Timestamp seek_ts{0};    // Seek: the exchange time to stop at
 };
 
 enum class RecordKind : std::uint8_t {
     Lifecycle,  // one step of a command
     Report,     // an execution report delivered to the session's strategy
-    Ack         // a control, applied
+    Ack,             // a control, applied
+    GenerationStart  // a new generation and the strategy it starts with
 };
 
 // A command's steps; Applied means it reached the gateway, and an order's or cancel's verdict follows.
@@ -59,7 +65,7 @@ enum class Lifecycle : std::uint8_t {
     SimulatorRejected
 };
 
-// One entry of the report ring: a command's step, a delivered report or a control's ack.
+// One entry of the report ring: a command's step, a delivered report, a control's ack or a generation's start.
 // Engine-step fields are the boundary at which the record was published; a verdict follows the step that delivered it.
 struct Record
 {
@@ -68,7 +74,7 @@ struct Record
     RecordKind kind{RecordKind::Lifecycle};
     Lifecycle step{Lifecycle::Received};  // Lifecycle
     ErrorCode reason{ErrorCode::None};    // the Rejected* steps
-    Command command{};                    // Lifecycle
+    Command command{};                    // Lifecycle; GenerationStart: command.strategy is the starting strategy
     std::uint64_t batch_seq{0};           // engine steps: the batch being applied
     Timestamp exchange_ts{0};             // engine steps: the clock; for Applied, the applied exchange time
     std::uint64_t market_event_seq{0};    // engine steps: market events applied so far
@@ -189,6 +195,7 @@ private:
 
     std::atomic<SessionState> state_{SessionState::Paused};
     std::atomic<std::uint64_t> generation_{1};
+    std::atomic<Timestamp> seek_position_{0};
     RecordRing<Record> ring_{ring_capacity};
     LatestSlot<Snapshot> snapshots_;
 
@@ -199,6 +206,7 @@ private:
     std::uint64_t batch_seq_{0};
     std::uint64_t last_command_seq_{0};
     std::uint64_t steps_left_{0};
+    Timestamp seek_target_{0};
     std::uint32_t speed_{1};
     Timestamp anchor_wall_{0};  // pacing: the exchange clock was anchor_exchange_ at wall time anchor_wall_
     Timestamp anchor_exchange_{0};
@@ -220,12 +228,15 @@ private:
     void publish(const Record& record) noexcept;
     void lifecycle(Lifecycle step, const Command& command, ErrorCode reason, OrderId order_id) noexcept;
     void publish_delivered() noexcept;
+    void publish_start() noexcept;
     void load() noexcept;
+    void restart() noexcept;
     void end() noexcept;
     void drain_inbox() noexcept;
     void apply_control(const Control& control, Timestamp wall_now) noexcept;
     bool play(Timestamp wall_now) noexcept;
     bool step_some() noexcept;
+    bool seek_some() noexcept;
     void step_market() noexcept;
     void apply_batch() noexcept;
     Timestamp due_wall() const noexcept;
@@ -245,6 +256,8 @@ public:
     RecordRing<Record>::Read reports_since(std::uint64_t from_seq, std::span<Record> out) const noexcept;
     SessionState state() const noexcept;
     std::uint64_t generation() const noexcept;
+    // Any thread. The exchange time a seek has reached; the server reports it as progress.
+    Timestamp seek_position() const noexcept;
 
     // Any thread. Calls f(const Snapshot&) with the latest snapshot held; the engine drops snapshots meanwhile.
     template <class F>

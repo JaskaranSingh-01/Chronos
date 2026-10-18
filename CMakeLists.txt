@@ -221,10 +221,14 @@ add_executable(chronos_server_tests
     tests/server/channels_test.cpp
     tests/server/generation_test.cpp
     tests/server/replay_session_test.cpp
+    tests/server/restart_test.cpp
     tests/server/snapshot_test.cpp
 )
 
 target_compile_options(chronos_server_tests PRIVATE ${CHRONOS_WARNINGS})
+
+# itch/itch_test_builder.hpp builds ITCH input.
+target_include_directories(chronos_server_tests PRIVATE ${PROJECT_SOURCE_DIR}/tests)
 
 target_link_libraries(chronos_server_tests
     PRIVATE

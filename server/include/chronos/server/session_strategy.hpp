@@ -30,6 +30,7 @@ class SessionStrategy
 {
 private:
     std::variant<NullStrategy, MarketMaker, ImbalanceTaker> active_;
+    StrategySpec spec_{};
 
 public:
     std::vector<ExecutionReport> delivered;  // the session drains it after each loop call
@@ -42,6 +43,7 @@ public:
 
     void attach(const StrategySpec& spec) noexcept
     {
+        spec_ = spec;
         switch (spec.kind) {
         case SessionStrategyKind::None:
             active_.emplace<NullStrategy>();
@@ -53,6 +55,11 @@ public:
             active_.emplace<ImbalanceTaker>(spec.imbalance);
             return;
         }
+    }
+
+    const StrategySpec& spec() const noexcept
+    {
+        return spec_;
     }
 
     bool attached() const noexcept
