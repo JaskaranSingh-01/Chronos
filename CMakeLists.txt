@@ -184,6 +184,16 @@ target_link_libraries(chronos_server PRIVATE nlohmann_json::nlohmann_json crow_h
 add_dependencies(chronos_server build_info)
 target_include_directories(chronos_server PRIVATE ${PROJECT_BINARY_DIR}/generated)
 
+# The interactive server; its main lives under server/, never app/ (scripts/check-isolation.sh).
+add_executable(chronos-serve
+
+    server/src/main.cpp
+)
+
+target_compile_options(chronos-serve PRIVATE ${CHRONOS_WARNINGS})
+
+target_link_libraries(chronos-serve PRIVATE chronos_server)
+
 
 # -------------------------
 # Tests
@@ -320,6 +330,18 @@ chronos_cli_test(VersionExitsZero 0 --version)
 chronos_cli_test(BadOptionExitsTwo 2 replay day.bin --symbol AAPL --date 2019-12-30 --frobnicate)
 chronos_cli_test(MissingFileExitsTwo 2 replay /nonexistent/chronos-missing.itch --symbol AAPL --date 2019-12-30)
 chronos_cli_test(FailedRunExitsOne 1 replay /dev/null --symbol AAPL --date 2019-12-30)
+
+# chronos-serve's usage exit codes; serving itself is ServerTest's.
+function(chronos_serve_test name exit_code)
+    add_test(NAME ChronosServeCliTest.${name}
+             COMMAND sh -c "\"$0\" \"$@\"; test $? -eq ${exit_code}" $<TARGET_FILE:chronos-serve> ${ARGN})
+endfunction()
+
+chronos_serve_test(HelpExitsZero 0 --help)
+chronos_serve_test(BadOptionExitsTwo 2 --data . --date 2019-12-30 --frobnicate)
+chronos_serve_test(MissingDateExitsTwo 2 --data .)
+chronos_serve_test(BadPortExitsTwo 2 --data . --date 2019-12-30 --port 70000)
+chronos_serve_test(MissingFileExitsTwo 2 --data /nonexistent/chronos-data --date 2019-12-30)
 
 
 # -------------------------
