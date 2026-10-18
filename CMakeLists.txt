@@ -132,6 +132,7 @@ add_library(chronos_server
     server/src/command_log.cpp
     server/src/generation.cpp
     server/src/itch_input.cpp
+    server/src/protocol.cpp
     server/src/replay_session.cpp
     server/src/session_runner.cpp
 )
@@ -238,6 +239,7 @@ add_executable(chronos_server_tests
     tests/server/command_log_test.cpp
     tests/server/generation_test.cpp
     tests/server/itch_input_test.cpp
+    tests/server/protocol_test.cpp
     tests/server/replay_session_test.cpp
     tests/server/restart_test.cpp
     tests/server/session_runner_test.cpp
@@ -252,6 +254,7 @@ target_include_directories(chronos_server_tests PRIVATE ${PROJECT_SOURCE_DIR}/te
 target_link_libraries(chronos_server_tests
     PRIVATE
         chronos_server
+        nlohmann_json::nlohmann_json
         GTest::gtest_main
 )
 

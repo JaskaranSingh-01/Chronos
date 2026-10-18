@@ -13,48 +13,9 @@
 #include <nlohmann/json.hpp>
 
 #include "build_info.hpp"  // generated: build_commit, build_dirty
-
-namespace simulator {
-
-NLOHMANN_JSON_SERIALIZE_ENUM(Side, {{Side::Buy, "buy"}, {Side::Sell, "sell"}})
-NLOHMANN_JSON_SERIALIZE_ENUM(ReportType,
-                             {{ReportType::Accepted, "accepted"},
-                              {ReportType::Rejected, "rejected"},
-                              {ReportType::Fill, "fill"},
-                              {ReportType::Cancelled, "cancelled"},
-                              {ReportType::CancelRejected, "cancel_rejected"},
-                              {ReportType::Expired, "expired"}})
-NLOHMANN_JSON_SERIALIZE_ENUM(RejectReason,
-                             {{RejectReason::None, "none"},
-                              {RejectReason::WouldCross, "would_cross"},
-                              {RejectReason::InvalidOrder, "invalid_order"},
-                              {RejectReason::NotTrading, "not_trading"}})
-NLOHMANN_JSON_SERIALIZE_ENUM(Liquidity,
-                             {{Liquidity::None, "none"}, {Liquidity::Maker, "maker"}, {Liquidity::Taker, "taker"}})
-
-}  // namespace simulator
+#include "json_enums.hpp"
 
 namespace simulator::server {
-
-NLOHMANN_JSON_SERIALIZE_ENUM(CommandType,
-                             {{CommandType::Order, "order"},
-                              {CommandType::Cancel, "cancel"},
-                              {CommandType::Attach, "attach"},
-                              {CommandType::Detach, "detach"}})
-NLOHMANN_JSON_SERIALIZE_ENUM(
-    OrderType, {{OrderType::PostOnly, "post_only"}, {OrderType::Ioc, "ioc"}, {OrderType::Market, "market"}})
-NLOHMANN_JSON_SERIALIZE_ENUM(SessionStrategyKind,
-                             {{SessionStrategyKind::None, "none"},
-                              {SessionStrategyKind::MarketMaker, "market_maker"},
-                              {SessionStrategyKind::ImbalanceTaker, "imbalance"}})
-NLOHMANN_JSON_SERIALIZE_ENUM(Lifecycle,
-                             {{Lifecycle::Received, "received"},
-                              {Lifecycle::Admitted, "admitted"},
-                              {Lifecycle::RejectedAtAdmission, "rejected_at_admission"},
-                              {Lifecycle::Applied, "applied"},
-                              {Lifecycle::RejectedAtApply, "rejected_at_apply"},
-                              {Lifecycle::SimulatorAccepted, "simulator_accepted"},
-                              {Lifecycle::SimulatorRejected, "simulator_rejected"}})
 
 namespace {
 

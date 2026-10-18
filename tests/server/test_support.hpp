@@ -87,6 +87,13 @@ inline SourceFactory over(const std::vector<MarketEvent>& events)
     return [&events](std::string_view) { return std::make_unique<VectorSource>(events); };
 }
 
+// A client message of `type` to the session config() names, at `generation`, with `fields` (each with its leading
+// comma).
+inline std::string client_message(const std::string& type, const std::string& fields = "", std::uint64_t generation = 1)
+{
+    return R"({"type":")" + type + R"(","session_id":"test","generation":)" + std::to_string(generation) + fields + "}";
+}
+
 inline Ticker ticker(std::string_view text)
 {
     Ticker t{};
