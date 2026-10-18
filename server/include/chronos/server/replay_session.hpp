@@ -162,6 +162,7 @@ struct Snapshot
 };
 
 class LogQueue;
+class SessionRunner;
 
 // One interactive replay: any thread admits input; the engine thread drives it through tick(wall_now), never a clock.
 class ReplaySession
@@ -248,6 +249,25 @@ private:
     Timestamp due_wall() const noexcept;
     void publish_snapshot(Timestamp wall_now) noexcept;
 
+    friend class SessionRunner;
+
+    // The runner waits on inbox_cv() under inbox_mutex() until has_input() or its deadline; no one else may hold it.
+    std::mutex& inbox_mutex() noexcept
+    {
+        return inbox_mutex_;
+    }
+
+    std::condition_variable& inbox_cv() noexcept
+    {
+        return inbox_cv_;
+    }
+
+    // Call with inbox_mutex() held.
+    bool has_input() const noexcept
+    {
+        return !commands_.empty() || !controls_.empty();
+    }
+
 public:
     ReplaySession(SessionConfig config, SourceFactory factory, LogQueue* log = nullptr);
 
@@ -274,7 +294,7 @@ public:
 
     // Engine thread: controls, replay to `wall_now`, the batch; returns the next due wall time (never = wait for input).
     Timestamp tick(Timestamp wall_now) noexcept;
-    // Engine thread. When the next snapshot is due; never while nothing is new.
+    // Engine thread. When the next snapshot is due: every frame while Playing, else only once something is new.
     Timestamp snapshot_due() const noexcept;
     // Engine thread: the exchange clock and the current generation's state.
     Timestamp clock() noexcept;

@@ -216,5 +216,28 @@ TEST(SnapshotTest, APausedSessionPublishesAChangeAtTheNextFrameOnly)
     EXPECT_EQ(s.metrics.command_queue_depth, 0u);  // this tick drained nothing: the last burst does not linger
 }
 
+TEST(SnapshotTest, APlayingSessionIsDueAFrameLaterEvenWhenNothingHappens)
+{
+    const std::vector<MarketEvent> events{add(kMs, 1, Side::Buy, 999'900, 100),
+                                          add(100 * kSecond, 2, Side::Buy, 999'800, 100)};
+    ReplaySession session{config(), over(events)};
+    session.control(kPlay);
+    session.tick(kWall);
+    session.tick(kWall + snapshot_interval);  // applies the first event; the second is 100 s off
+    EXPECT_EQ(session.snapshot_due(), kWall + 2 * snapshot_interval);
+
+    const Snapshot before = latest(session);
+    session.tick(kWall + 2 * snapshot_interval);
+    const Snapshot after = latest(session);
+    EXPECT_EQ(after.snapshot_seq, before.snapshot_seq + 1);
+    EXPECT_EQ(after.event_seq, 1u);
+    EXPECT_GT(after.exchange_ts, before.exchange_ts);
+    EXPECT_EQ(session.snapshot_due(), kWall + 3 * snapshot_interval);
+
+    session.control(kPause);
+    session.tick(kWall + 3 * snapshot_interval);
+    EXPECT_EQ(session.snapshot_due(), ReplaySession::never);  // paused and published: the runner parks
+}
+
 }  // namespace
 }  // namespace simulator::server::test

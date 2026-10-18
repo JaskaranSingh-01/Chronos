@@ -132,6 +132,7 @@ add_library(chronos_server
     server/src/command_log.cpp
     server/src/generation.cpp
     server/src/replay_session.cpp
+    server/src/session_runner.cpp
 )
 
 target_include_directories(chronos_server
@@ -237,6 +238,7 @@ add_executable(chronos_server_tests
     tests/server/generation_test.cpp
     tests/server/replay_session_test.cpp
     tests/server/restart_test.cpp
+    tests/server/session_runner_test.cpp
     tests/server/snapshot_test.cpp
 )
 

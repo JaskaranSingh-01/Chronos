@@ -157,7 +157,8 @@ Timestamp ReplaySession::tick(Timestamp wall_now) noexcept
 
 Timestamp ReplaySession::snapshot_due() const noexcept
 {
-    return dirty_ && state_.load() != SessionState::Seeking ? next_snapshot_wall_ : never;
+    const SessionState state = state_.load();
+    return (dirty_ || state == SessionState::Playing) && state != SessionState::Seeking ? next_snapshot_wall_ : never;
 }
 
 Timestamp ReplaySession::clock() noexcept
