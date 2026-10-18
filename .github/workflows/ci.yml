@@ -7,6 +7,8 @@
 #   startup on the developer's macOS 27 and is untried with that operator new.
 # - The real-data tests skip: CHRONOS_ITCH_FILE is not set.
 # - format: every C++ file must match .clang-format (clang-format 20.1.8).
+# - isolation: the engine (include/, src/, app/) never includes server or web code, and
+#   simulator_lib links only the standard library.
 name: CI
 
 on: [push, pull_request]
@@ -54,3 +56,11 @@ jobs:
       - run: pipx install clang-format==20.1.8
       - name: clang-format
         run: bash scripts/check-format.sh
+
+  isolation:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v5
+      - name: Engine isolation
+        run: bash scripts/check-isolation.sh

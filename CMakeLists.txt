@@ -112,6 +112,28 @@ target_link_libraries(simulator
 
 
 # -------------------------
+# Server library: the interactive session. The engine never depends on it (scripts/check-isolation.sh).
+# -------------------------
+
+add_library(chronos_server
+
+    server/src/candles.cpp
+)
+
+target_include_directories(chronos_server
+    PUBLIC
+        ${PROJECT_SOURCE_DIR}/server/include
+)
+
+target_compile_options(chronos_server PRIVATE ${CHRONOS_WARNINGS})
+
+target_link_libraries(chronos_server
+    PUBLIC
+        simulator_lib
+)
+
+
+# -------------------------
 # Tests
 # -------------------------
 
@@ -186,6 +208,22 @@ target_include_directories(simulator_tests
 include(GoogleTest)
 
 gtest_discover_tests(simulator_tests)
+
+# Its own executable, so simulator_tests never links server code.
+add_executable(chronos_server_tests
+
+    tests/server/candles_test.cpp
+)
+
+target_compile_options(chronos_server_tests PRIVATE ${CHRONOS_WARNINGS})
+
+target_link_libraries(chronos_server_tests
+    PRIVATE
+        chronos_server
+        GTest::gtest_main
+)
+
+gtest_discover_tests(chronos_server_tests)
 
 # Its own executable: the counting operator new must stay out of simulator_tests.
 if(CHRONOS_COUNT_ALLOCATIONS)
