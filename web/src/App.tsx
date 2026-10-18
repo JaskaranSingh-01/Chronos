@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { Chart } from './Chart';
 import { store, useStore } from './store';
 
 // Asks for the token a non-loopback server wants, or says why the terminal cannot connect.
@@ -29,6 +30,11 @@ export function App() {
   return (
     <div className="terminal">
       <header className="bar">Chronos · {status}</header>
+      <main>
+        <section className="col">
+          <Chart />
+        </section>
+      </main>
       <Gate />
     </div>
   );

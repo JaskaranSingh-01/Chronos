@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { Candle, Execution, Hello, ServerMessage, SessionState, Snapshot } from './protocol';
+import type { Candle, Execution, Hello, ServerMessage, SessionState, Snapshot, Trade } from './protocol';
 import { apply, createStore, initial, mergeBars, selectCanTrade, selectOrders, withHistory, type Env } from './store';
 
 const T = 1_577_716_200_000_000_000; // 2019-12-30 09:30:00 ET, epoch ns
@@ -233,6 +233,21 @@ describe('apply', () => {
     expect(rejected.notice).toBe('order 8 simulator_rejected: would_cross');
   });
 
+  it('ignores a stale_generation error that names no command: it answers a resync sent with an old session', () => {
+    const s = run(hello(), snapshot({ type: 'state' }));
+    const stale = (named: { client_id?: number; command_seq?: number } = {}): ServerMessage => ({
+      type: 'error',
+      session_id: 's1',
+      generation: 2,
+      code: 'stale_generation',
+      message: 'old session',
+      ...named,
+    });
+    expect(apply(s, stale())).toBe(s);
+    expect(apply(s, stale({ client_id: 7 })).notice).toBe('order 7: stale_generation: old session');
+    expect(apply(s, stale({ command_seq: 4 })).notice).toBe('stale_generation: old session');
+  });
+
   it('merges bars by start, and history wins up to its last bar and trade', () => {
     expect(mergeBars([bar(0, 1), bar(1, 1)], [bar(1, 2), bar(2, 3)])).toEqual([bar(0, 1), bar(1, 2), bar(2, 3)]);
     const live = run(
@@ -348,6 +363,13 @@ describe('createStore', () => {
   }
 
   const json = (m: ServerMessage) => JSON.stringify(m);
+  // The from_ts of each history fetch so far.
+  const asked = (f: ReturnType<typeof fake>) =>
+    f.fetched
+      .filter((path) => path.startsWith('/api/history'))
+      .map((path) => Number(new URL(path, 'http://x').searchParams.get('from_ts')));
+  const history = (candles: Candle[], trades: Trade[] = []) =>
+    Response.json({ session_id: 's1', generation: 2, candles, trades });
   const settle = () => vi.advanceTimersByTimeAsync(0);
 
   // A started store with an open socket, fed `messages`.
@@ -567,5 +589,158 @@ describe('createStore', () => {
     feed(11);
     await vi.waitFor(() => expect(store.get().bars).toEqual([bar(0, 1), bar(1, 2)]));
     expect(f.histories()).toBe(6);
+  });
+
+  it('refetches only from the last closed bar after a skipped snapshot, merges, and rebuilds the chart only if it must', async () => {
+    let reply = history([]);
+    const f = fake({ history: () => reply });
+    const store = await connected(
+      f,
+      hello(),
+      snapshot({
+        type: 'state',
+        closed_candles: [bar(0, 1), bar(1, 1)],
+        candle: bar(2, 1),
+        trades: [
+          [T, 1, 5, 'buy'],
+          [T + S, 1, 10, 'buy'],
+        ],
+      }),
+    );
+    const refetched = async (n: number) => {
+      await vi.waitFor(() => expect(f.histories()).toBe(n));
+      await settle();
+    };
+    await refetched(1);
+
+    // 2 was published and missed: bar 2 closed with other prices, bar 3 came and went, and a trade went by.
+    reply = history(
+      [bar(1, 1), bar(2, 9), bar(3, 9), bar(4, 1)],
+      [
+        [T + S, 1, 10, 'buy'],
+        [T + 3 * S, 2, 30, 'sell'],
+        [T + 4 * S, 3, 40, 'buy'],
+      ],
+    );
+    let version = store.get().barsVersion;
+    const missed = snapshot({
+      snapshot_seq: 3,
+      closed_candles: [bar(4, 1)],
+      candle: bar(5, 1),
+      trades: [[T + 4 * S, 3, 40, 'buy']],
+    });
+    f.socket().message(json(missed));
+    await refetched(2);
+    expect(asked(f)).toEqual([0, T + S]);
+    expect(store.get().bars).toEqual([bar(0, 1), bar(1, 1), bar(2, 9), bar(3, 9), bar(4, 1), bar(5, 1)]);
+    expect(store.get().tape.map((t) => t[2])).toEqual([5, 10, 30, 40]); // 5 is older than the history asked for
+    expect(store.get().barsVersion).toBe(version + 1); // bars 2 and 3 lie before the chart's last
+
+    // 4 was missed, but nothing before the open bar differs: the chart appends.
+    reply = history([bar(4, 1)]);
+    version = store.get().barsVersion;
+    f.socket().message(json(snapshot({ snapshot_seq: 5, candle: bar(5, 1) })));
+    await refetched(3);
+    expect(asked(f)).toEqual([0, T + S, T + 4 * S]);
+    expect(store.get().barsVersion).toBe(version);
+  });
+
+  it('refetches the whole generation after a state or a truncation, replacing the bars', async () => {
+    let reply = history([bar(1, 2)]);
+    const f = fake({ history: () => reply });
+    const store = await connected(f, hello(), snapshot({ type: 'state', closed_candles: [bar(0, 1)] }));
+    await vi.waitFor(() => expect(store.get().bars).toEqual([bar(1, 2)])); // bar 0 is not in the history
+
+    reply = history([bar(2, 3)]);
+    f.socket().message(json(snapshot({ snapshot_seq: 2, candles_truncated: true })));
+    await vi.waitFor(() => expect(store.get().bars).toEqual([bar(2, 3)]));
+    expect(asked(f)).toEqual([0, 0]);
+  });
+
+  it('keeps the range a failed history fetch owed, so the next skip repairs from the older start', async () => {
+    let offline = false;
+    const f = fake({
+      history: (path) => {
+        if (offline) throw new Error('offline');
+        return echo(path);
+      },
+    });
+    await connected(f, hello(), snapshot({ type: 'state', closed_candles: [bar(0, 1)], candle: bar(1, 1) }));
+    await vi.waitFor(() => expect(f.histories()).toBe(1));
+    await settle();
+
+    offline = true;
+    f.socket().message(json(snapshot({ snapshot_seq: 3, closed_candles: [bar(1, 1)], candle: bar(2, 1) })));
+    await vi.waitFor(() => expect(f.histories()).toBe(2));
+    await settle();
+    offline = false;
+    f.socket().message(json(snapshot({ snapshot_seq: 5, closed_candles: [bar(3, 1)], candle: bar(4, 1) })));
+    await vi.waitFor(() => expect(f.histories()).toBe(3));
+    expect(asked(f)).toEqual([0, T, T]); // not T + S, where the last closed bar now is
+  });
+
+  it('lets a pending full refetch absorb the skips that come while one is in flight', async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    const f = fake({
+      history: async (path) => {
+        await gate;
+        return echo(path);
+      },
+    });
+    await connected(f, hello(), snapshot({ type: 'state', closed_candles: [bar(0, 1)], candle: bar(1, 1) }));
+    const feed = (over: Partial<Snapshot>) => f.socket().message(json(snapshot(over)));
+    feed({ snapshot_seq: 3 }); // a skip: asks from T
+    feed({ snapshot_seq: 4, trades_truncated: true }); // asks for everything
+    feed({ snapshot_seq: 6 }); // another skip: still everything
+    release();
+    await vi.waitFor(() => expect(f.histories()).toBe(2));
+    await settle();
+    expect(asked(f)).toEqual([0, 0]);
+  });
+
+  it('rebuilds the chart when a skip finalises the open bar and nothing else, so no stale partial stays', async () => {
+    let reply = history([]);
+    const f = fake({ history: () => reply });
+    const store = await connected(
+      f,
+      hello(),
+      snapshot({ type: 'state', closed_candles: [bar(0, 1)], candle: bar(1, 1) }),
+    );
+    await vi.waitFor(() => expect(f.histories()).toBe(1));
+    await settle();
+
+    // 1 closed in a missed snapshot with other prices and volume; the history inserts no bar.
+    reply = history([bar(0, 1), bar(1, 9, 700)]);
+    const version = store.get().barsVersion;
+    f.socket().message(json(snapshot({ snapshot_seq: 3, candle: bar(2, 1) })));
+    await vi.waitFor(() => expect(f.histories()).toBe(2));
+    await settle();
+    expect(store.get().bars).toEqual([bar(0, 1), bar(1, 9, 700), bar(2, 1)]);
+    expect(store.get().barsVersion).toBe(version + 1);
+  });
+
+  it('keeps a tape trade older than the fetch once when the history brings no trades', async () => {
+    let reply = history([]);
+    const f = fake({ history: () => reply });
+    const store = await connected(
+      f,
+      hello(),
+      snapshot({
+        type: 'state',
+        closed_candles: [bar(0, 1), bar(1, 1)],
+        candle: bar(2, 1),
+        trades: [[T, 1, 5, 'buy']], // after historyTs, before the skip's from_ts
+      }),
+    );
+    await vi.waitFor(() => expect(f.histories()).toBe(1));
+    await settle();
+
+    reply = history([bar(1, 1)]); // no trades
+    f.socket().message(json(snapshot({ snapshot_seq: 3, candle: bar(2, 1), trades: [[T + 4 * S, 3, 7, 'sell']] })));
+    await vi.waitFor(() => expect(f.histories()).toBe(2));
+    await settle();
+    expect(asked(f)).toEqual([0, T + S]);
+    expect(store.get().tape.map((t) => t[2])).toEqual([5, 7]);
   });
 });

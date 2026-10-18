@@ -76,18 +76,35 @@ export function mergeBars(bars: Candle[], incoming: readonly Candle[]): Candle[]
   return out;
 }
 
-// History wins up to its last bar and trade; what snapshots brought after those stays.
-export function withHistory(s: State, h: History): State {
+// Whether merging `incoming` into `bars` inserts or changes a bar before the last one: the chart cannot append those.
+// ponytail: indexes every bar on each partial merge (about 23k for a day, under a millisecond); bound it by the first
+// incoming start if that ever shows up.
+function reachesBack(bars: readonly Candle[], incoming: readonly Candle[]): boolean {
+  const last = bars.at(-1)?.[0] ?? -1;
+  const known = new Map(bars.map((b) => [b[0], b]));
+  return incoming.some((c) => c[0] < last && !known.get(c[0])?.every((x, i) => x === c[i]));
+}
+
+// History from `from` on (the whole generation when 0) wins up to its last bar and trade; what snapshots brought after
+// those stays. A partial history merges into the bars, and bumps barsVersion only if the chart cannot append it.
+export function withHistory(s: State, h: History, from = 0): State {
   const lastBar = h.candles.at(-1)?.[0] ?? -1;
   const lastTrade = h.trades.at(-1)?.[0] ?? s.historyTs;
   return {
     ...s,
-    bars: [...h.candles, ...s.bars.filter((b) => b[0] > lastBar)],
-    barsVersion: s.barsVersion + 1,
-    tape: [...h.trades, ...s.tape.filter((t) => t[0] > lastTrade)].slice(-tapeSize),
+    bars: from === 0 ? [...h.candles, ...s.bars.filter((b) => b[0] > lastBar)] : mergeBars(s.bars, h.candles),
+    barsVersion: from === 0 || reachesBack(s.bars, h.candles) ? s.barsVersion + 1 : s.barsVersion,
+    tape: [
+      ...s.tape.filter((t) => t[0] < from),
+      ...h.trades,
+      ...s.tape.filter((t) => t[0] >= from && t[0] > lastTrade),
+    ].slice(-tapeSize),
     historyTs: Math.max(s.historyTs, lastTrade),
   };
 }
+
+// The start of the last bar known closed in `s`, or 0: a skipped snapshot loses the bars after it.
+const lastClosed = (s: State) => s.bars.findLast((b) => b[0] !== s.snap?.candle?.[0])?.[0] ?? 0;
 
 // A new generation starts with an empty book, account, chart and tape.
 function newGeneration(s: State, generation: number): State {
@@ -151,6 +168,8 @@ export function apply(s: State, m: ServerMessage): State {
     case 'progress':
       return { ...s, seekAt: m.seek };
     case 'error':
+      // The answer to a resync sent with an old session after a restart: nothing of ours failed.
+      if (m.code === 'stale_generation' && m.client_id === undefined && m.command_seq === undefined) return s;
       return { ...s, notice: `${m.client_id !== undefined ? `order ${m.client_id}: ` : ''}${m.code}: ${m.message}` };
     case 'ack':
       if (!('control' in m)) return s; // a command ack: logged; its verdict follows as lifecycle reports
@@ -199,33 +218,42 @@ export function createStore(env: Env) {
   };
   const api = (path: string) => env.fetch(path, token ? { headers: { Authorization: `Bearer ${token}` } } : undefined);
 
-  // ponytail: the whole generation each time (about 6 MB for a busy day); fetch from the last bar if that gets slow.
-  async function fetchHistory() {
+  // False if the fetch failed and its range is still owed.
+  // ponytail: a state, a new generation or a truncation fetches the whole generation (about 6 MB for a busy day);
+  // a better cut would need the server to say what changed.
+  async function fetchHistory(from: number): Promise<boolean> {
     try {
       const { hello, generation } = state;
-      if (!hello) return;
+      if (!hello) return true;
       const res = await api(
-        `/api/history?session_id=${encodeURIComponent(hello.session_id)}&generation=${generation}&from_ts=0`,
+        `/api/history?session_id=${encodeURIComponent(hello.session_id)}&generation=${generation}&from_ts=${from}`,
       );
-      if (!res.ok) return; // 409: a newer generation, whose own state fetches again
+      if (!res.ok) return res.status === 409; // 409: a newer generation, whose own state fetches again
       const h = (await res.json()) as History;
-      if (h.session_id === state.hello?.session_id && h.generation === state.generation) set(withHistory(state, h));
+      if (h.session_id === state.hello?.session_id && h.generation === state.generation) {
+        set(withHistory(state, h, from));
+      }
+      return true;
     } catch {
-      // A network or parse error marks nothing; the next trigger fetches again.
+      return false;
     }
   }
 
-  // One fetch in flight, and one more if a trigger came meanwhile: it reads the newest generation when it starts.
+  // One fetch in flight, one pending; `owed` is the earliest bar start still to fetch (0: all), kept if a fetch fails.
   let loading = false;
   let again = false;
-  async function loadHistory() {
+  let owed: number | null = null;
+  async function loadHistory(from: number) {
+    owed = Math.min(owed ?? from, from);
     again = true;
     if (loading) return;
     loading = true;
     try {
       while (again) {
         again = false;
-        await fetchHistory();
+        const asked = owed!;
+        owed = null;
+        if (!(await fetchHistory(asked))) owed = Math.min(owed ?? asked, asked);
       }
     } finally {
       loading = false;
@@ -234,13 +262,14 @@ export function createStore(env: Env) {
 
   function receive(text: string) {
     const m = JSON.parse(text) as ServerMessage;
-    const prev = state.snap;
+    const before = state;
     set(apply(state, m));
-    // After a state, and whenever a snapshot left trades or bars out, by a truncation flag or a skipped snapshot_seq
-    // (a slow poll misses published snapshots); only if it was applied.
+    // A state or a truncation flag refetches all of it; a skipped snapshot_seq, from the last closed bar known before.
     if ((m.type === 'state' || m.type === 'snapshot') && state.snap === m) {
+      const prev = before.snap;
       const skipped = prev !== null && prev.generation === m.generation && m.snapshot_seq > prev.snapshot_seq + 1;
-      if (m.type === 'state' || m.trades_truncated || m.candles_truncated || skipped) void loadHistory();
+      if (m.type === 'state' || m.trades_truncated || m.candles_truncated) void loadHistory(0);
+      else if (skipped) void loadHistory(lastClosed(before));
     }
   }
 
