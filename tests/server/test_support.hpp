@@ -2,11 +2,15 @@
 
 #include <gtest/gtest.h>
 
+#include <unistd.h>
+
 #include <chrono>
 #include <cstdint>
+#include <filesystem>
 #include <random>
 #include <string>
 #include <string_view>
+#include <system_error>
 #include <thread>
 #include <utility>
 #include <vector>
@@ -220,6 +224,28 @@ inline std::vector<MarketEvent> random_stream(std::size_t n)
     }
     return events;
 }
+
+// A fresh file path in the system temp directory, unique to this process; the file is removed with the object.
+struct Scratch
+{
+    std::filesystem::path path;
+
+    explicit Scratch(const std::string& name)
+        : path(std::filesystem::temp_directory_path() /
+               ("chronos_server_tests-" + std::to_string(::getpid()) + "-" + name + ".jsonl"))
+    {
+        std::filesystem::remove(path);
+    }
+
+    ~Scratch()
+    {
+        std::error_code ignored;
+        std::filesystem::remove(path, ignored);
+    }
+
+    Scratch(const Scratch&) = delete;
+    Scratch& operator=(const Scratch&) = delete;
+};
 
 // The session's latest snapshot; a test failure if none was published.
 inline Snapshot latest(const ReplaySession& session)

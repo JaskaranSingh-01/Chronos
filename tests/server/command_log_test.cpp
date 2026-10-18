@@ -1,14 +1,11 @@
 #include <gtest/gtest.h>
 
-#include <unistd.h>
-
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
 #include <memory>
 #include <string>
 #include <string_view>
-#include <system_error>
 #include <vector>
 
 #include "chronos/server/command_log.hpp"
@@ -18,28 +15,6 @@
 
 namespace simulator::server::test {
 namespace {
-
-// A fresh file path in the system temp directory, unique to this process; the file is removed with the object.
-struct Scratch
-{
-    std::filesystem::path path;
-
-    explicit Scratch(const std::string& name)
-        : path(std::filesystem::temp_directory_path() /
-               ("chronos_server_tests-" + std::to_string(::getpid()) + "-" + name + ".jsonl"))
-    {
-        std::filesystem::remove(path);
-    }
-
-    ~Scratch()
-    {
-        std::error_code ignored;
-        std::filesystem::remove(path, ignored);
-    }
-
-    Scratch(const Scratch&) = delete;
-    Scratch& operator=(const Scratch&) = delete;
-};
 
 std::vector<std::string> read_lines(const std::filesystem::path& path)
 {
