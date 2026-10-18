@@ -1,3 +1,5 @@
+import type { FillRule } from './protocol';
+
 const newYork = { timeZone: 'America/New_York', hourCycle: 'h23' } as const;
 const wallClock = new Intl.DateTimeFormat('en-US', {
   ...newYork,
@@ -35,6 +37,17 @@ export const signed = (value: number, digits: number) => usdSigned.format(value 
 // A share count with its sign shown: '+100', '-100', '0'; and its class, buy for a long and sell for a short.
 export const shares = (n: number) => (n > 0 ? `+${n}` : String(n));
 export const tone = (n: number) => (n > 0 ? 'buy' : n < 0 ? 'sell' : '');
+
+// A maker fill's rule as the headless attribution table names it; a dash for a taker fill.
+const ruleLabels: Record<FillRule, string> = {
+  a_e: '(a) E',
+  a_c: '(a) C',
+  d_e: '(d) E',
+  d_c: '(d) C',
+  c_add: '(c) Add',
+  c_replace: '(c) Replace',
+};
+export const ruleLabel = (rule?: FillRule) => (rule ? ruleLabels[rule] : '—');
 
 // An exchange time (epoch ns) as New York wall-clock time to the millisecond.
 export const clock = (ns: number) => wallClock.format(ns / 1e6);

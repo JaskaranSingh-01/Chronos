@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { clock, px, shares, signed, tone } from './format';
+import { clock, px, ruleLabel, shares, signed, tone } from './format';
 import { selectOrders, store, useStore } from './store';
 
 const names = ['Positions', 'Open orders', 'Fills', 'Queue'] as const;
@@ -91,6 +91,8 @@ export function Tabs() {
               <td>Qty</td>
               <td>Price</td>
               <td>Liquidity</td>
+              <td>Rule</td>
+              <td>Ahead at entry</td>
             </tr>
             {fills.slice(-fillRows).reverse().map((f) => (
               <tr key={f.seq}>
@@ -100,6 +102,8 @@ export function Tabs() {
                 <td>{f.quantity}</td>
                 <td>{px(f.price, digits)}</td>
                 <td>{f.liquidity}</td>
+                <td>{ruleLabel(f.rule)}</td>
+                <td>{f.ahead_at_entry ?? '—'}</td>
               </tr>
             ))}
           </tbody>

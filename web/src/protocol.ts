@@ -7,6 +7,8 @@ export type TradingState = 'trading' | 'halted' | 'paused' | 'quotation_only';
 export type Level = [price: number, quantity: number, orders: number];
 export type Trade = [ts: number, price: number, quantity: number, resting: Side];
 export type Candle = [start: number, open: number, high: number, low: number, close: number, volume: number];
+// A maker fill's rule, (a), (c) or (d), and the ITCH message behind it: E, C, an Add or a Replace.
+export type FillRule = 'a_e' | 'a_c' | 'd_e' | 'd_c' | 'c_add' | 'c_replace';
 
 interface Envelope {
   session_id: string;
@@ -86,6 +88,8 @@ export interface Execution extends Ring {
   reject_reason: string;
   liquidity: 'none' | 'maker' | 'taker';
   exchange_ts: number;
+  rule?: FillRule; // maker fills only
+  ahead_at_entry?: number; // maker fills only: historical shares ahead of the order when it arrived
 }
 
 export interface Lifecycle extends Ring {

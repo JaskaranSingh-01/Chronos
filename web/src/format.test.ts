@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { chartDigits, clock, etOffset, money, px, seekTs, shares, signed, tone } from './format';
+import { chartDigits, clock, etOffset, money, px, ruleLabel, seekTs, shares, signed, tone } from './format';
 
 const open = 1_577_716_200; // 2019-12-30 09:30:00 ET, epoch seconds
 
@@ -70,5 +70,11 @@ describe('format', () => {
   it('shows a share count signed, and colours a long buy and a short sell', () => {
     expect([shares(100), shares(-100), shares(0)]).toEqual(['+100', '-100', '0']);
     expect([tone(100), tone(-100), tone(0)]).toEqual(['buy', 'sell', '']);
+  });
+
+  it("names a maker fill's rule as the headless attribution table does, and shows a dash for a taker fill", () => {
+    const rules = ['a_e', 'a_c', 'd_e', 'd_c', 'c_add', 'c_replace'] as const;
+    expect(rules.map(ruleLabel)).toEqual(['(a) E', '(a) C', '(d) E', '(d) C', '(c) Add', '(c) Replace']);
+    expect(ruleLabel(undefined)).toBe('—');
   });
 });

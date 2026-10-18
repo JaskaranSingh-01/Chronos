@@ -70,7 +70,7 @@ test('an order placed in the terminal fills and shows in Fills and the account',
   // As in stepUntilResting, a step that beat the order to the server is repeated.
   await expect(async () => {
     await page.getByRole('button', { name: 'Step ⏭' }).click();
-    await expect(page.locator('.tabs tbody tr:not(.muted)')).toHaveText(/1buy10010\.01taker$/, { timeout: 500 });
+    await expect(page.locator('.tabs tbody tr:not(.muted)')).toHaveText(/1buy10010\.01taker——$/, { timeout: 500 });
   }).toPass();
   await expect(page.getByTestId('Position')).toHaveText('+100');
 });
