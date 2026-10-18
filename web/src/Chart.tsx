@@ -24,6 +24,8 @@ const color = {
   order: '#58a6ff',
   position: '#e6edf3',
 };
+// Prices carry sub-penny digits when a tick is under a cent (10^price_scale > 100); otherwise cents.
+const decimals = (scale: number) => (scale > 100 ? 4 : 2);
 const label = (seconds: number) =>
   seconds < 60 ? `${seconds}s` : seconds < 3_600 ? `${seconds / 60}m` : `${seconds / 3_600}h`;
 
@@ -101,6 +103,9 @@ export function Chart() {
           offset: first === undefined ? 0 : etOffset(first / 1e9),
         };
         drawn = points(s.bars, s.halts, frame);
+        const d = decimals(frame.scale);
+        const priceFormat = { type: 'price', precision: d, minMove: 10 ** -d } as const;
+        for (const series of [candles, vwap, ema]) series.applyOptions({ priceFormat });
         version = s.barsVersion;
         const all = drawn.map((p, i) => rows(p, i === drawn.length - 1));
         candles.setData(all.map((r) => r.candle));
@@ -194,8 +199,9 @@ export function Chart() {
     let hovered: Time | undefined;
     const showLegend = () => {
       const bar = (hovered === undefined ? drawn.findLast((p) => p.bar) : drawn.find((p) => p.time === hovered))?.bar;
+      const p = (price: number) => price.toFixed(decimals(frame.scale));
       legend.current!.textContent = bar
-        ? `O ${bar.open.toFixed(2)} H ${bar.high.toFixed(2)} L ${bar.low.toFixed(2)} C ${bar.close.toFixed(2)} V ${bar.volume}`
+        ? `O ${p(bar.open)} H ${p(bar.high)} L ${p(bar.low)} C ${p(bar.close)} V ${bar.volume}`
         : '';
     };
     chart.subscribeCrosshairMove((param) => {

@@ -13,7 +13,14 @@ export default defineConfig({
         target,
         ws: true,
         changeOrigin: true,
-        configure: (proxy) => proxy.on('proxyReqWs', (request) => request.setHeader('Origin', target)),
+        // Only the dev page's own loopback origin is rewritten; any other keeps its Origin and is refused.
+        configure: (proxy) =>
+          proxy.on('proxyReqWs', (request, incoming) => {
+            const { origin, host } = incoming.headers;
+            if (origin === `http://${host}` && /^(localhost|127\.0\.0\.1):\d+$/.test(host ?? '')) {
+              request.setHeader('Origin', target);
+            }
+          }),
       },
     },
   },

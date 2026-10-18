@@ -1,5 +1,4 @@
-// chronos-serve's messages (server/src/protocol.cpp). Prices are integer ticks, quantities shares, money tick-shares,
-// times epoch ns: JavaScript reads those to about 256 ns, so they are for display and ordering, not exact equality.
+// chronos-serve's messages (server/src/protocol.cpp): prices in ticks, times in epoch ns (a double reads ~256 ns).
 
 export type Side = 'buy' | 'sell';
 export type OrderType = 'post_only' | 'ioc' | 'market';

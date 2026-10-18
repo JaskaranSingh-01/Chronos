@@ -80,16 +80,14 @@ export function mergeBars(bars: Candle[], incoming: readonly Candle[]): Candle[]
 }
 
 // Whether merging `incoming` into `bars` inserts or changes a bar before the last one: the chart cannot append those.
-// ponytail: indexes every bar on each partial merge (about 23k for a day, under a millisecond); bound it by the first
-// incoming start if that ever shows up.
+// ponytail: indexes every bar per partial merge (~23k a day, under 1 ms); bound it by the first incoming start.
 function reachesBack(bars: readonly Candle[], incoming: readonly Candle[]): boolean {
   const last = bars.at(-1)?.[0] ?? -1;
   const known = new Map(bars.map((b) => [b[0], b]));
   return incoming.some((c) => c[0] < last && !known.get(c[0])?.every((x, i) => x === c[i]));
 }
 
-// History from `from` on (the whole generation when 0) wins up to its last bar and trade; what snapshots brought after
-// those stays. A partial history merges into the bars, and bumps barsVersion only if the chart cannot append it.
+// History from `from` on (the whole generation when 0) wins up to its last bar and trade; later snapshot data stays.
 export function withHistory(s: State, h: History, from = 0): State {
   const lastBar = h.candles.at(-1)?.[0] ?? -1;
   const lastTrade = h.trades.at(-1)?.[0] ?? s.historyTs;
@@ -141,8 +139,7 @@ function halts(s: State, m: Snapshot): [number, number][] {
 function onSnapshot(s: State, m: Snapshot): State {
   if (m.generation < s.generation) return s;
   const fresh = !s.snap || m.snapshot_seq > s.snap.snapshot_seq; // a reconnect's state may repeat the last snapshot
-  // ponytail: trade times are epoch ns read as doubles (about 256 ns apart above 2^53), so two trades closer than that
-  // compare equal and this cut-off can drop one; parse them as BigInt or strings if exactness matters.
+  // ponytail: trade times are epoch ns doubles (~256 ns apart); this cut-off can drop a close pair, BigInt if exact.
   const trades = fresh ? m.trades.filter((t) => t[0] > s.historyTs) : [];
   return {
     ...s,
@@ -173,7 +170,7 @@ export function apply(s: State, m: ServerMessage): State {
     case 'gap':
       return { ...s, seq: Math.max(s.seq, m.to), historyIncomplete: true };
     case 'progress':
-      return { ...s, seekAt: m.seek };
+      return { ...s, seekAt: m.seek, state: 'seeking' }; // sent only while seeking: fixes a stale state on reconnect
     case 'error':
       // The answer to a resync sent with an old session after a restart: nothing of ours failed.
       if (m.code === 'stale_generation' && m.client_id === undefined && m.command_seq === undefined) return s;
@@ -227,13 +224,12 @@ export function selectOrders(s: State): MyOrder[] {
 export function selectTradeBlock(s: State): string {
   if (!s.hello || s.status !== 'open') return 'Not connected';
   if (s.hello.role !== 'controller') return 'Viewers cannot trade';
+  if (s.state === 'seeking') return 'Seeking';
   if (!s.snap || s.snap.symbol === '') return 'No symbol loaded';
   if (s.snap.trading_state !== 'trading') return `Not trading: ${s.snap.trading_state}`;
-  if (s.state === 'seeking') return 'Seeking';
   if (s.state === 'ended') return 'Session ended';
   return '';
 }
-export const selectCanTrade = (s: State) => selectTradeBlock(s) === '';
 
 export function createStore(env: Env) {
   let state = initial;
@@ -249,8 +245,7 @@ export function createStore(env: Env) {
   const api = (path: string) => env.fetch(path, token ? { headers: { Authorization: `Bearer ${token}` } } : undefined);
 
   // False if the fetch failed and its range is still owed.
-  // ponytail: a state, a new generation or a truncation fetches the whole generation (about 6 MB for a busy day);
-  // a better cut would need the server to say what changed.
+  // ponytail: a state or new generation refetches it all (~6 MB a busy day); a finer cut needs the server.
   async function fetchHistory(from: number): Promise<boolean> {
     try {
       const { hello, generation } = state;
@@ -294,12 +289,14 @@ export function createStore(env: Env) {
     const m = JSON.parse(text) as ServerMessage;
     const before = state;
     set(apply(state, m));
-    // A state or a truncation flag refetches all of it; a skipped snapshot_seq, from the last closed bar known before.
+    // A state or a new generation refetches all; a truncation or a skipped snapshot_seq, from the last closed bar.
     if ((m.type === 'state' || m.type === 'snapshot') && state.snap === m) {
       const prev = before.snap;
-      const skipped = prev !== null && prev.generation === m.generation && m.snapshot_seq > prev.snapshot_seq + 1;
-      if (m.type === 'state' || m.trades_truncated || m.candles_truncated) void loadHistory(0);
-      else if (skipped) void loadHistory(lastClosed(before));
+      const sameGeneration = prev !== null && prev.generation === m.generation;
+      const truncated = m.trades_truncated || m.candles_truncated;
+      const skipped = sameGeneration && m.snapshot_seq > prev.snapshot_seq + 1;
+      if (m.type === 'state' || (truncated && !sameGeneration)) void loadHistory(0);
+      else if (truncated || skipped) void loadHistory(lastClosed(before));
     }
   }
 
@@ -333,8 +330,7 @@ export function createStore(env: Env) {
     socket = ws;
   }
 
-  // Finds out whether the server wants a token, loads the symbols, then opens the WebSocket; one at a time, since an
-  // orphaned socket would keep the controller seat.
+  // Checks for a token, loads the symbols, then opens the socket; one at a time, as an orphaned socket keeps the seat.
   let starting = false;
   async function start() {
     if (starting || socket) return;
@@ -373,7 +369,6 @@ export function createStore(env: Env) {
       return () => listeners.delete(f);
     },
     start,
-    receive,
     setToken(value: string) {
       env.save(tokenKey, value);
       void start();

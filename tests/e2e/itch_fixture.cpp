@@ -33,5 +33,6 @@ int main(int argc, char** argv)
     std::ofstream out{dir / "12302019.NASDAQ_ITCH50.bin", std::ios::binary};
     const auto bytes = itch.bytes();
     out.write(reinterpret_cast<const char*>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
+    out.close();
     return out ? 0 : 1;
 }

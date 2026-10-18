@@ -5,7 +5,6 @@ import {
   createStore,
   initial,
   mergeBars,
-  selectCanTrade,
   selectOrders,
   selectTradeBlock,
   withHistory,
@@ -213,6 +212,23 @@ describe('apply', () => {
     expect(s.seekAt).toBe(T + 5 * S);
   });
 
+  it('is seeking after a reconnect mid-seek: the stale pre-seek state is corrected by the next progress', () => {
+    const progress: ServerMessage = { type: 'progress', session_id: 's1', generation: 2, seek: T + 5 * S };
+    const seeking = run(hello(), snapshot({ type: 'state', last_report_seq: 5 }), controlAck(6, 'seek', 'seeking'));
+    expect(seeking.state).toBe('seeking');
+    const reconnected = run(
+      hello(),
+      snapshot({ type: 'state', last_report_seq: 5 }),
+      controlAck(6, 'seek', 'seeking'),
+      hello(),
+      snapshot({ type: 'state', snapshot_seq: 2, state: 'paused', last_report_seq: 5 }), // none since the seek began
+    );
+    expect(reconnected.state).toBe('paused');
+    const s = apply(reconnected, progress);
+    expect([s.state, s.seekAt]).toEqual(['seeking', T + 5 * S]);
+    expect(selectTradeBlock({ ...s, status: 'open' })).toBe('Seeking');
+  });
+
   it('knows the symbol from generation_start alone, as after a seek that made a generation and no snapshot', () => {
     const s = run(hello(), snapshot({ type: 'state' }));
     expect(s.symbol).toBe('ACME');
@@ -382,13 +398,13 @@ describe('selectors', () => {
 
   it('allow trading only to a connected controller on a trading symbol that is neither seeking nor ended', () => {
     const s = { ...run(hello(), snapshot({ type: 'state' })), status: 'open' as const };
-    expect(selectCanTrade(s)).toBe(true);
-    expect(selectCanTrade({ ...s, hello: hello({ role: 'viewer' }) })).toBe(false);
-    expect(selectCanTrade({ ...s, status: 'closed' })).toBe(false);
-    expect(selectCanTrade({ ...s, state: 'seeking' })).toBe(false);
-    expect(selectCanTrade({ ...s, state: 'ended' })).toBe(false);
-    expect(selectCanTrade({ ...s, snap: snapshot({ trading_state: 'halted' }) })).toBe(false);
-    expect(selectCanTrade({ ...s, snap: snapshot({ symbol: '' }) })).toBe(false);
+    expect(selectTradeBlock(s)).toBe('');
+    expect(selectTradeBlock({ ...s, hello: hello({ role: 'viewer' }) })).not.toBe('');
+    expect(selectTradeBlock({ ...s, status: 'closed' })).not.toBe('');
+    expect(selectTradeBlock({ ...s, state: 'seeking' })).not.toBe('');
+    expect(selectTradeBlock({ ...s, state: 'ended' })).not.toBe('');
+    expect(selectTradeBlock({ ...s, snap: snapshot({ trading_state: 'halted' }) })).not.toBe('');
+    expect(selectTradeBlock({ ...s, snap: snapshot({ symbol: '' }) })).not.toBe('');
   });
 
   it('say why trading is unavailable, for the ticket to show', () => {
@@ -401,6 +417,7 @@ describe('selectors', () => {
     expect(selectTradeBlock({ ...s, snap: snapshot({ symbol: '' }) })).toBe('No symbol loaded');
     expect(selectTradeBlock({ ...s, snap: snapshot({ trading_state: 'halted' }) })).toBe('Not trading: halted');
     expect(selectTradeBlock({ ...s, state: 'seeking' })).toBe('Seeking');
+    expect(selectTradeBlock({ ...s, snap: null, state: 'seeking' })).toBe('Seeking'); // a backward seek: no snapshot
     expect(selectTradeBlock({ ...s, state: 'ended' })).toBe('Session ended');
   });
 });
@@ -736,15 +753,49 @@ describe('createStore', () => {
     expect(store.get().barsVersion).toBe(version);
   });
 
-  it('refetches the whole generation after a state or a truncation, replacing the bars', async () => {
+  it('refetches the whole generation after a state, replacing the bars', async () => {
     let reply = history([bar(1, 2)]);
     const f = fake({ history: () => reply });
     const store = await connected(f, hello(), snapshot({ type: 'state', closed_candles: [bar(0, 1)] }));
     await vi.waitFor(() => expect(store.get().bars).toEqual([bar(1, 2)])); // bar 0 is not in the history
 
     reply = history([bar(2, 3)]);
-    f.socket().message(json(snapshot({ snapshot_seq: 2, candles_truncated: true })));
+    f.socket().message(json(snapshot({ type: 'state', snapshot_seq: 2 })));
     await vi.waitFor(() => expect(store.get().bars).toEqual([bar(2, 3)]));
+    expect(asked(f)).toEqual([0, 0]);
+  });
+
+  it('refetches from the last closed bar after a truncated snapshot, merging into the bars', async () => {
+    let reply = history([]);
+    const f = fake({ history: () => reply });
+    const store = await connected(
+      f,
+      hello(),
+      snapshot({ type: 'state', closed_candles: [bar(0, 1), bar(1, 1)], candle: bar(2, 1) }),
+    );
+    await vi.waitFor(() => expect(f.histories()).toBe(1));
+    await settle();
+
+    for (const [seq, over] of [
+      [2, { candles_truncated: true }],
+      [3, { trades_truncated: true }],
+    ] as const) {
+      reply = history([bar(1, 1), bar(2, 5)]);
+      f.socket().message(json(snapshot({ snapshot_seq: seq, candle: bar(3, 1), ...over })));
+      await vi.waitFor(() => expect(f.histories()).toBe(seq));
+      await settle();
+    }
+    expect(asked(f)).toEqual([0, T + S, T + 2 * S]); // each time from the newest bar known closed
+    expect(store.get().bars).toEqual([bar(0, 1), bar(1, 1), bar(2, 5), bar(3, 1)]);
+  });
+
+  it('refetches the whole generation after a truncated snapshot that begins a new generation', async () => {
+    const f = fake({ history: echo });
+    await connected(f, hello(), snapshot({ type: 'state', closed_candles: [bar(0, 1)], candle: bar(1, 1) }));
+    await vi.waitFor(() => expect(f.histories()).toBe(1));
+    await settle();
+    f.socket().message(json(snapshot({ generation: 3, snapshot_seq: 2, trades_truncated: true })));
+    await vi.waitFor(() => expect(f.histories()).toBe(2));
     expect(asked(f)).toEqual([0, 0]);
   });
 
@@ -782,7 +833,7 @@ describe('createStore', () => {
     await connected(f, hello(), snapshot({ type: 'state', closed_candles: [bar(0, 1)], candle: bar(1, 1) }));
     const feed = (over: Partial<Snapshot>) => f.socket().message(json(snapshot(over)));
     feed({ snapshot_seq: 3 }); // a skip: asks from T
-    feed({ snapshot_seq: 4, trades_truncated: true }); // asks for everything
+    feed({ type: 'state', snapshot_seq: 4 }); // asks for everything
     feed({ snapshot_seq: 6 }); // another skip: still everything
     release();
     await vi.waitFor(() => expect(f.histories()).toBe(2));

@@ -7,10 +7,16 @@ const test = base.extend<{ serverArgs: string[]; url: string }>({
   serverArgs: [[], { option: true }],
   url: async ({ serverArgs }, use) => {
     const data = fixture();
-    const server = await serve(['--data', data, '--date', '2019-12-30', ...serverArgs]);
-    await use(server.url);
-    await server.stop();
-    rmSync(data, { recursive: true });
+    try {
+      const server = await serve(['--data', data, '--date', '2019-12-30', ...serverArgs]);
+      try {
+        await use(server.url);
+      } finally {
+        await server.stop();
+      }
+    } finally {
+      rmSync(data, { recursive: true, force: true });
+    }
   },
 });
 
@@ -31,6 +37,14 @@ async function stepTheBook(page: Page) {
   await expect(page.locator('.level.sell')).toHaveText(/10\.01\s*200/);
 }
 
+// A step sent before the order reaches the server delivers nothing, so step again until the order rests.
+async function stepUntilResting(page: Page) {
+  await expect(async () => {
+    await page.getByRole('button', { name: 'Step ⏭' }).click();
+    await expect(page.getByRole('button', { name: 'Open orders (1)' })).toBeVisible({ timeout: 500 });
+  }).toPass();
+}
+
 test('an order placed in the terminal fills and shows in Fills and the account', async ({ page, url }) => {
   await page.goto(url);
   await pickAcme(page);
@@ -39,10 +53,13 @@ test('an order placed in the terminal fills and shows in Fills and the account',
   await expect(page.getByLabel('Price')).toHaveValue('10.01');
   await page.getByRole('button', { name: 'IOC' }).click();
   await page.getByRole('button', { name: 'Place buy 100 @ 10.01' }).click();
-  // Paused, the order waits; the next step delivers it 50 µs later, before the next market event, against the offer.
-  await page.getByRole('button', { name: 'Step ⏭' }).click();
   await page.getByRole('button', { name: 'Fills' }).click();
-  await expect(page.locator('.tabs tbody tr').nth(1)).toHaveText(/1buy10010\.01taker$/);
+  // Paused, the order waits; the next step delivers it 50 µs later, before the next market event, against the offer.
+  // As in stepUntilResting, a step that beat the order to the server is repeated.
+  await expect(async () => {
+    await page.getByRole('button', { name: 'Step ⏭' }).click();
+    await expect(page.locator('.tabs tbody tr:not(.muted)')).toHaveText(/1buy10010\.01taker$/, { timeout: 500 });
+  }).toPass();
   await expect(page.getByTestId('Position')).toHaveText('+100');
 });
 
@@ -72,8 +89,7 @@ test('a reconnect during a restart ends on the new generation with no stale comm
   await stepTheBook(page);
   await page.locator('.level.buy').click();
   await page.getByRole('button', { name: 'Place buy 100 @ 10.00' }).click();
-  await page.getByRole('button', { name: 'Step ⏭' }).click();
-  await expect(page.getByRole('button', { name: 'Open orders (1)' })).toBeVisible();
+  await stepUntilResting(page);
 
   await page.getByRole('button', { name: '⟲ Restart' }).click();
   await expect(page.getByTestId('session')).toContainText('ACME · gen 3 · paused');
@@ -84,8 +100,7 @@ test('a reconnect during a restart ends on the new generation with no stale comm
   await stepTheBook(page);
   await page.locator('.level.buy').click();
   await page.getByRole('button', { name: 'Place buy 100 @ 10.00' }).click();
-  await page.getByRole('button', { name: 'Step ⏭' }).click();
-  await expect(page.getByRole('button', { name: 'Open orders (1)' })).toBeVisible();
+  await stepUntilResting(page);
   expect(sent).toHaveLength(2);
   const commands = sent[1].map((text) => JSON.parse(text)).filter((m) => m.type === 'order' || m.type === 'control');
   expect(commands.map((m) => m.generation)).toEqual(commands.map(() => 3));
@@ -114,5 +129,9 @@ test.describe('with a token', () => {
     await pickAcme(page);
     expect(await page.evaluate(() => sessionStorage.getItem('chronos-token'))).toBe('t0k3n');
     expect(page.url()).not.toContain('t0k3n');
+    // The role is not asserted: the old socket may still hold the controller seat.
+    await page.reload();
+    await expect(page.getByTestId('session')).toContainText('ACME');
+    await expect(page.getByLabel('Token')).toHaveCount(0);
   });
 });

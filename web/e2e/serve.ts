@@ -22,21 +22,29 @@ export async function serve(args: string[]): Promise<{ url: string; stop(): Prom
     stdio: ['ignore', 'pipe', 'inherit'],
   });
   const exited = new Promise<number | null>((done) => child.once('exit', done));
+  const clean = () => rmSync(cwd, { recursive: true, force: true });
   // Line 1: "chronos-serve: http://127.0.0.1:<port>/ with ..."
   const line = await Promise.race([
     new Promise<string>((done) => createInterface({ input: child.stdout! }).once('line', done)),
     exited.then((code): string => {
+      clean();
       throw new Error(`chronos-serve exited ${code}`);
     }),
   ]);
   const url = /http:\/\/\S+?\//.exec(line)?.[0];
-  if (!url) throw new Error(`chronos-serve printed: ${line}`);
+  if (!url) {
+    child.kill();
+    await exited;
+    clean();
+    throw new Error(`chronos-serve printed: ${line}`);
+  }
   return {
     url,
     async stop() {
       child.kill('SIGTERM');
-      await exited;
-      rmSync(cwd, { recursive: true, force: true });
+      const code = await exited;
+      clean();
+      if (code !== 0) throw new Error(`chronos-serve exited ${code}`);
     },
   };
 }

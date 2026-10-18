@@ -349,8 +349,9 @@ URL and that log; errors go to stderr.
   terminal asks for it once per browser tab.
 
 **Developing the UI.** Vite serves `web/src` with hot reload. It proxies `/api` and `/ws` to `chronos-serve` and
-rewrites `Host`, and the WebSocket's `Origin`, to `127.0.0.1:<port>`: without a token, that is all `chronos-serve`
-accepts.
+rewrites `Host` to `127.0.0.1:<port>`, and the WebSocket's `Origin` too when the page itself is on `localhost` or
+`127.0.0.1`: without a token, that is all `chronos-serve` accepts. Any other site's `Origin` goes through unchanged and
+is refused.
 
 ```bash
 ./build/chronos-serve --data data/itch --date 2019-12-30 --port 8080
@@ -362,7 +363,7 @@ accepts.
 ```bash
 npm run typecheck && npm test                  # Vitest: the store, candles, order checks and formatting
 npx playwright install chromium                # once
-npm run e2e                                    # Playwright: needs web/dist and the build's two binaries
+npm run e2e                                    # builds web/dist, then Playwright; needs the build's two binaries
 ```
 
 Each end-to-end test starts its own `chronos-serve` on a small generated day, which `chronos-e2e-fixture` writes to a
@@ -377,11 +378,16 @@ directory `CHRONOS_BUILD` names.
 CHRONOS_BENCH_FILE=../data/itch/12302019.NASDAQ_ITCH50.bin CHRONOS_BENCH_SYMBOL=AAPL npx playwright test bench
 ```
 
+`CHRONOS_BENCH_FILE` names the ITCH file; a cut slice works. `CHRONOS_BENCH_SYMBOL` (default `AAPL`) is the stock to
+replay. `CHRONOS_BENCH_DATE` (default `2019-12-30`) is the file's day, which `chronos-serve` needs for its name.
+`CHRONOS_BENCH_OUT` names a file to write the JSON summary to; it is always printed.
+
 One run on 2026-10-17, on the development machine (Apple M4, `RelWithDebInfo`): AAPL's full day at Max, with the
 terminal attached and sending 39 one-share market orders, replayed 1,519,358 AAPL events in 16.3 s, about 93,000 a
 second; the source still reads all 268,744,780 messages of the day to find them. The page received 18 snapshots a
-second, none were dropped, the command queue was at most 1 deep, and the page drew 60 frames a second, its slowest
-frame 17 ms. The snapshot metrics carry no per-event latency, so there is no p50 or p99 per event yet.
+second and the server dropped none (`dropped_snapshots`), the command queue was at most 1 deep, and the page drew 60
+frames a second, its slowest frame 17 ms. The snapshot metrics carry no per-event latency, so there is no p50 or p99
+per event yet.
 
 ## How it works
 

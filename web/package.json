@@ -7,7 +7,7 @@
     "typecheck": "tsc --noEmit",
     "build": "vite build",
     "test": "vitest run",
-    "e2e": "playwright test"
+    "e2e": "vite build && playwright test"
   },
   "dependencies": {
     "lightweight-charts": "5.2.1",

@@ -110,3 +110,6 @@ jobs:
       - run: npm test
       - run: npx playwright install --with-deps chromium
       - run: npx playwright test
+      - uses: actions/upload-artifact@v5
+        if: failure()
+        with: { name: playwright-traces, path: web/test-results, retention-days: 7 }
