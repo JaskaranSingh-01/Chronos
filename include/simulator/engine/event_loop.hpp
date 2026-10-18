@@ -266,6 +266,22 @@ public:
         return report_;
     }
 
+    // When the next SimEvent is due; false if none is queued.
+    bool next_sim_time(Timestamp& ts) const noexcept
+    {
+        if (queue_.empty()) {
+            return false;
+        }
+        ts = queue_.top().timestamp;
+        return true;
+    }
+
+    // The market event peek() read and step() applies next; nullptr if none is pending.
+    const MarketEvent* pending() const noexcept
+    {
+        return has_pending_ ? &pending_ : nullptr;
+    }
+
     OrderGateway& gateway() noexcept
     {
         return gateway_;

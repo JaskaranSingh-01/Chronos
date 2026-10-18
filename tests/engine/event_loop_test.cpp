@@ -918,5 +918,52 @@ TEST(EventLoopTest, AdvanceToRunsNothingWhenItsPeekFindsAFatalFailure)
     EXPECT_EQ(loop.report().discarded_sim_events, 1u);
 }
 
+TEST(EventLoopTest, NextSimTimeIsTheEarliestQueuedSimEvent)
+{
+    const std::vector<MarketEvent> events = two_far_events();
+    Harness h{events};
+    buy_on_first_event(h, 50);
+    EventLoop<Recorder> loop{h.source,    h.book,     h.execution,
+                             h.portfolio, h.strategy, {.order_latency = 100, .report_latency = 100}};
+    Timestamp ts{0};
+    EXPECT_FALSE(loop.next_sim_time(ts));
+
+    ASSERT_EQ(loop.peek(ts), PeekStatus::Event);
+    ASSERT_TRUE(loop.step().ok);
+    Timestamp sim_ts{0};
+    ASSERT_TRUE(loop.next_sim_time(sim_ts));
+    EXPECT_EQ(sim_ts, 110);  // the IOC sent at 10 arrives at 110
+
+    loop.advance_to(150);  // the arrival runs; its fill is delivered at 210
+    ASSERT_TRUE(loop.next_sim_time(sim_ts));
+    EXPECT_EQ(sim_ts, 210);
+
+    loop.advance_to(500);
+    EXPECT_FALSE(loop.next_sim_time(sim_ts));
+}
+
+TEST(EventLoopTest, PendingIsThePeekedEventUntilStepAppliesIt)
+{
+    const std::vector<MarketEvent> events = two_far_events();
+    Harness h{events};
+    EventLoop<Recorder> loop{h.source, h.book, h.execution, h.portfolio, h.strategy, LatencyConfig{}};
+    EXPECT_EQ(loop.pending(), nullptr);
+
+    Timestamp ts{0};
+    ASSERT_EQ(loop.peek(ts), PeekStatus::Event);
+    ASSERT_NE(loop.pending(), nullptr);
+    EXPECT_EQ(loop.pending()->order_id, 1u);
+    EXPECT_EQ(loop.pending()->timestamp, 10);
+
+    ASSERT_TRUE(loop.step().ok);
+    EXPECT_EQ(loop.pending(), nullptr);
+
+    ASSERT_EQ(loop.peek(ts), PeekStatus::Event);
+    EXPECT_EQ(loop.pending()->order_id, 2u);
+    ASSERT_TRUE(loop.step().ok);
+    EXPECT_EQ(loop.peek(ts), PeekStatus::EndOfStream);
+    EXPECT_EQ(loop.pending(), nullptr);
+}
+
 }  // namespace
 }  // namespace simulator
