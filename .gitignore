@@ -6,3 +6,6 @@ compile_commands.json
 .DS_Store
 /data/
 /sessions/
+/web/node_modules/
+/web/dist/
+/web/test-results/
