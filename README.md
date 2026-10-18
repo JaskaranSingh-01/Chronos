@@ -320,6 +320,69 @@ runs `simulator_bench` 5 times, profiles one more full-day replay with `sample` 
 `bench/results/<date>-<commit>[-dirty][-label]/`. It needs both data files and takes about 13 minutes.
 `bench/summary.py <folder>...` prints and compares the tables.
 
+### Trading Terminal
+
+`chronos-serve` replays one day interactively, one symbol at a time, and serves the Trading Terminal, a React UI in
+[`web/`](web/). Building the UI needs Node 24 and npm; the C++ build does not.
+
+```bash
+cmake --build build -j --target chronos-serve
+(cd web && npm ci && npm run build)            # writes web/dist
+./build/chronos-serve --data data/itch --date 2019-12-30
+```
+
+Open the URL it prints, `http://127.0.0.1:8080/`. Type a symbol such as `AAPL` in the top bar and press Enter: the
+replay waits, paused, before the symbol's first event. Play at 1×, 10×, 100× or Max, step one event at a time, or
+seek to a New York time. Click a book level to price the ticket, then trade post-only, IOC or market. Orders go
+through the backtests' `ExecutionSimulator`: 50 µs to arrive, 50 µs for each report, a place in the L3 queue, no
+fees, and limits of 10,000 shares of position, 1,000 shares an order and 16 open orders. Each command is logged to
+`sessions/<id>.jsonl` in the working directory, so the session can be reproduced. The first line on stdout names the
+URL and that log; errors go to stderr.
+
+- Run it from the repository root, as `--web` defaults to `web/dist`.
+- Options: `--host`, `--port` (default 8080), `--web`, `--token`, `--fsync` and `--allow-truncated-tail`;
+  `./build/chronos-serve --help` lists them.
+- The slice needs a day's file name, so link it into a directory of its own:
+  `mkdir -p data/slice && ln -s ../itch/12302019.NASDAQ_ITCH50.first-256MiB.bin data/slice/12302019.NASDAQ_ITCH50.bin`,
+  then pass `--data data/slice --allow-truncated-tail`.
+- Any `--host` other than `127.0.0.1` needs a token. `chronos-serve` prints one if `--token` is not given, and the
+  terminal asks for it once per browser tab.
+
+**Developing the UI.** Vite serves `web/src` with hot reload. It proxies `/api` and `/ws` to `chronos-serve` and
+rewrites `Host`, and the WebSocket's `Origin`, to `127.0.0.1:<port>`: without a token, that is all `chronos-serve`
+accepts.
+
+```bash
+./build/chronos-serve --data data/itch --date 2019-12-30 --port 8080
+(cd web && CHRONOS_PORT=8080 npm run dev)      # http://localhost:5173/
+```
+
+**Tests.** From `web/`:
+
+```bash
+npm run typecheck && npm test                  # Vitest: the store, candles, order checks and formatting
+npx playwright install chromium                # once
+npm run e2e                                    # Playwright: needs web/dist and the build's two binaries
+```
+
+Each end-to-end test starts its own `chronos-serve` on a small generated day, which `chronos-e2e-fixture` writes to a
+temp directory. The tests place an order and see it fill; drop the WebSocket in the middle of a restart and check
+that the terminal ends on the new generation and sends nothing stale; seek to a New York time; and connect to a
+server that wants a token. The binaries are `chronos-serve` and `chronos-e2e-fixture`, from `build/` or the
+directory `CHRONOS_BUILD` names.
+
+**Interactive benchmark** (`chronos-serve` at max speed, with the terminal attached and trading):
+
+```bash
+CHRONOS_BENCH_FILE=../data/itch/12302019.NASDAQ_ITCH50.bin CHRONOS_BENCH_SYMBOL=AAPL npx playwright test bench
+```
+
+One run on 2026-10-17, on the development machine (Apple M4, `RelWithDebInfo`): AAPL's full day at Max, with the
+terminal attached and sending 39 one-share market orders, replayed 1,519,358 AAPL events in 16.3 s, about 93,000 a
+second; the source still reads all 268,744,780 messages of the day to find them. The page received 18 snapshots a
+second, none were dropped, the command queue was at most 1 deep, and the page drew 60 frames a second, its slowest
+frame 17 ms. The snapshot metrics carry no per-event latency, so there is no p50 or p99 per event yet.
+
 ## How it works
 
 ```text
@@ -544,6 +607,8 @@ A bad argument prints a two-line error on stderr and exits 2. `--json PATH` writ
 - The benchmark harness, a profile, and two profile-driven optimisations (above).
 - The strategy layer: event loop, latency, fill model, portfolio with risk limits and fees, two toy strategies.
 - The CLI with `--help`, `--version`, documented exit codes and `--json`.
+- The Trading Terminal: `chronos-serve` (HTTP and WebSocket, a command log, reconnect and resync) and a React UI with
+  a TradingView-style chart, L3 queue positions and Playwright end-to-end tests.
 - A GitHub Actions workflow and `.clang-format` / `.clang-tidy` configuration.
 
 **Not yet:**
