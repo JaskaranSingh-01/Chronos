@@ -24,6 +24,14 @@ NLOHMANN_JSON_SERIALIZE_ENUM(RejectReason,
                               {RejectReason::NotTrading, "not_trading"}})
 NLOHMANN_JSON_SERIALIZE_ENUM(Liquidity,
                              {{Liquidity::None, "none"}, {Liquidity::Maker, "maker"}, {Liquidity::Taker, "taker"}})
+NLOHMANN_JSON_SERIALIZE_ENUM(FillCause,
+                             {{FillCause::None, "none"},
+                              {FillCause::RuleAExecute, "a_e"},
+                              {FillCause::RuleAExecuteWithPrice, "a_c"},
+                              {FillCause::RuleDExecute, "d_e"},
+                              {FillCause::RuleDExecuteWithPrice, "d_c"},
+                              {FillCause::RuleCAdd, "c_add"},
+                              {FillCause::RuleCReplace, "c_replace"}})
 NLOHMANN_JSON_SERIALIZE_ENUM(TradingState,
                              {{TradingState::Trading, "trading"},
                               {TradingState::Halted, "halted"},

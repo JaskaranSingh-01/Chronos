@@ -374,6 +374,10 @@ std::string encode_record(std::string_view session_id, const Record& r)
         j["reject_reason"] = r.report.reason;
         j["liquidity"] = r.report.liquidity;
         j["exchange_ts"] = r.report.exchange_time;
+        if (r.report.liquidity == Liquidity::Maker) {
+            j["rule"] = r.report.cause;
+            j["ahead_at_entry"] = r.report.entry_ahead_quantity;
+        }
         break;
     case RecordKind::GenerationStart:
         j["kind"] = "generation_start";

@@ -402,11 +402,18 @@ TEST(ProtocolTest, EncodesSnapshotsRecordsAndReplies)
                                                                   .leaves = Quantity{5},
                                                                   .type = ReportType::Fill,
                                                                   .liquidity = Liquidity::Maker,
-                                                                  .side = Side::Sell}}));
+                                                                  .side = Side::Sell,
+                                                                  .cause = FillCause::RuleCReplace,
+                                                                  .entry_ahead_quantity = 290}}));
     EXPECT_EQ(fill,
               json::parse(R"({"type":"report","session_id":"s1","generation":3,"seq":6,"kind":"execution",)"
                           R"("order_id":4,"report_type":"fill","side":"sell","price":2905500,"quantity":10,)"
-                          R"("leaves":5,"reject_reason":"none","liquidity":"maker","exchange_ts":9})"));
+                          R"("leaves":5,"reject_reason":"none","liquidity":"maker","exchange_ts":9,)"
+                          R"("rule":"c_replace","ahead_at_entry":290})"));
+    const json taker = json::parse(encode_record(
+        "s1", Record{.kind = RecordKind::Report, .report = {.type = ReportType::Fill, .liquidity = Liquidity::Taker}}));
+    EXPECT_FALSE(taker.contains("rule"));
+    EXPECT_FALSE(taker.contains("ahead_at_entry"));
     const json rejected = json::parse(encode_record(
         "s1",
         Record{.seq = 10,
@@ -418,6 +425,7 @@ TEST(ProtocolTest, EncodesSnapshotsRecordsAndReplies)
     EXPECT_EQ(rejected["side"], "buy");
     EXPECT_EQ(rejected["price"], 0);
     EXPECT_EQ(rejected["leaves"], 0);
+    EXPECT_FALSE(rejected.contains("rule"));
     const json ack = json::parse(encode_record("s1",
                                                Record{.seq = 7,
                                                       .generation = 3,
