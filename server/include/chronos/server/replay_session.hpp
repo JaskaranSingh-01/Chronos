@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include <atomic>
 #include <condition_variable>
 #include <cstddef>
@@ -8,8 +9,10 @@
 #include <mutex>
 #include <optional>
 #include <span>
+#include <utility>
 #include <vector>
 
+#include "chronos/server/candles.hpp"
 #include "chronos/server/channels.hpp"
 #include "chronos/server/command.hpp"
 #include "chronos/server/generation.hpp"
@@ -82,6 +85,75 @@ struct Admission
     ErrorCode error{ErrorCode::None};
 };
 
+inline constexpr std::size_t snapshot_levels = 20;
+inline constexpr std::size_t snapshot_trades = 512;
+inline constexpr std::size_t snapshot_candles = 64;
+inline constexpr std::size_t snapshot_orders = 64;
+// Wall ns between snapshots: 30 a second.
+inline constexpr Timestamp snapshot_interval = 1'000'000'000 / 30;
+
+// One of our resting orders and its place in the queue.
+struct MyOrder
+{
+    OrderId id{0};
+    Side side{Side::Buy};
+    Price price{};
+    std::uint64_t remaining{0};
+    std::uint64_t ahead_quantity{0};
+    std::uint32_t ahead_orders{0};  // historical orders ahead of ours: the queue rank
+};
+
+struct Account
+{
+    std::int64_t position{0};
+    std::int64_t cash{0};
+    std::int64_t realised{0};
+    std::int64_t unrealised{0};
+    std::int64_t fees{0};
+    std::int64_t pnl{0};
+    std::int64_t max_drawdown{0};
+};
+
+struct SnapshotMetrics
+{
+    std::uint64_t events_per_second{0};  // market events per wall second since the last snapshot
+    std::uint64_t dropped_snapshots{0};
+    std::size_t command_queue_depth{0};  // commands the last tick drained
+};
+
+// The session at one boundary, built by the engine between steps. Entries past each count are unspecified.
+struct Snapshot
+{
+    std::uint64_t generation{0};
+    std::uint64_t snapshot_seq{0};
+    Timestamp exchange_ts{0};
+    std::uint64_t event_seq{0};  // market events applied
+    std::uint64_t last_report_seq{0};
+    std::uint64_t last_command_seq{0};  // the last command the engine applied or refused
+    SessionState state{SessionState::Paused};
+    std::uint32_t speed{1};
+    double progress{0};  // the source's position over SessionConfig::source_size; 0 if that is unknown
+    ReplayFailure failure{ReplayFailure::None};
+    SourceError source_error{SourceError::None};
+    std::array<LevelInfo, snapshot_levels> bids{};  // best first
+    std::array<LevelInfo, snapshot_levels> asks{};
+    std::size_t bid_levels{0};
+    std::size_t ask_levels{0};
+    std::array<Trade, snapshot_trades> trades{};  // market trades since the last snapshot, oldest first
+    std::size_t trade_count{0};
+    bool trades_truncated{false};  // more than snapshot_trades: the oldest are left out
+    Candle candle{};               // the current 1 s bar
+    bool has_candle{false};
+    std::array<Candle, snapshot_candles> closed_candles{};  // bars closed since the last snapshot, oldest first
+    std::size_t closed_count{0};
+    bool candles_truncated{false};
+    Account account{};
+    std::array<MyOrder, snapshot_orders> my_orders{};  // per side, in priority order
+    std::size_t my_order_count{0};
+    bool my_orders_truncated{false};
+    SnapshotMetrics metrics{};
+};
+
 // One interactive replay: any thread admits input; the engine thread drives it through tick(wall_now), never a clock.
 class ReplaySession
 {
@@ -118,6 +190,7 @@ private:
     std::atomic<SessionState> state_{SessionState::Paused};
     std::atomic<std::uint64_t> generation_{1};
     RecordRing<Record> ring_{ring_capacity};
+    LatestSlot<Snapshot> snapshots_;
 
     // The engine thread only.
     std::vector<Command> batch_;
@@ -129,6 +202,18 @@ private:
     std::uint32_t speed_{1};
     Timestamp anchor_wall_{0};  // pacing: the exchange clock was anchor_exchange_ at wall time anchor_wall_
     Timestamp anchor_exchange_{0};
+    Snapshot snapshot_;  // built here, then copied into snapshots_
+    CandleBuilder candles_;
+    std::array<Trade, snapshot_trades> trades_{};  // market trades since the last snapshot, a ring
+    std::uint64_t trades_seen_{0};
+    std::size_t candles_published_{0};
+    std::uint64_t snapshot_seq_{0};
+    std::uint64_t dropped_snapshots_{0};
+    std::uint64_t last_snapshot_events_{0};
+    Timestamp last_snapshot_wall_{0};
+    Timestamp next_snapshot_wall_{0};
+    std::size_t last_drained_{0};
+    bool dirty_{true};  // something changed since the last published snapshot
 
     ErrorCode admission(const Command& command, std::uint64_t generation) const noexcept;
     ErrorCode refusal(const Command& command) const noexcept;
@@ -144,6 +229,7 @@ private:
     void step_market() noexcept;
     void apply_batch() noexcept;
     Timestamp due_wall() const noexcept;
+    void publish_snapshot(Timestamp wall_now) noexcept;
 
 public:
     ReplaySession(SessionConfig config, SourceFactory factory);
@@ -160,8 +246,17 @@ public:
     SessionState state() const noexcept;
     std::uint64_t generation() const noexcept;
 
+    // Any thread. Calls f(const Snapshot&) with the latest snapshot held; the engine drops snapshots meanwhile.
+    template <class F>
+    bool read_snapshot(F&& f) const
+    {
+        return snapshots_.read(std::forward<F>(f));
+    }
+
     // Engine thread: controls, replay to `wall_now`, the batch; returns the next due wall time (never = wait for input).
     Timestamp tick(Timestamp wall_now) noexcept;
+    // Engine thread. When the next snapshot is due; never while nothing is new.
+    Timestamp snapshot_due() const noexcept;
     // Engine thread: the exchange clock and the current generation's state.
     Timestamp clock() noexcept;
     const MarketBook& book() const noexcept;

@@ -3,6 +3,8 @@
 #include <algorithm>
 #include <utility>
 
+#include "simulator/orders/order.hpp"
+
 namespace simulator::server {
 namespace {
 
@@ -114,6 +116,8 @@ std::uint64_t ReplaySession::generation() const noexcept
 Timestamp ReplaySession::tick(Timestamp wall_now) noexcept
 {
     drain_inbox();
+    last_drained_ = batch_.size();
+    const bool input = !batch_.empty() || !controls_batch_.empty();
     for (const Control& control : controls_batch_) {
         apply_control(control, wall_now);
     }
@@ -133,7 +137,17 @@ Timestamp ReplaySession::tick(Timestamp wall_now) noexcept
         break;
     }
     apply_batch();
+
+    dirty_ = dirty_ || input || (state != SessionState::Paused && state != SessionState::Ended);
+    if (dirty_ && wall_now >= next_snapshot_wall_) {
+        publish_snapshot(wall_now);
+    }
     return more ? wall_now : due_wall();
+}
+
+Timestamp ReplaySession::snapshot_due() const noexcept
+{
+    return dirty_ ? next_snapshot_wall_ : never;
 }
 
 Timestamp ReplaySession::clock() noexcept
@@ -343,9 +357,17 @@ bool ReplaySession::step_some() noexcept
     return false;
 }
 
+// Applies the pending market event, first recording the trade it prints for the tape and the candles.
 void ReplaySession::step_market() noexcept
 {
-    engine_->loop.step();
+    Generation& g = *engine_;
+    Trade trade;
+    if (const MarketEvent* event = g.loop.pending(); event != nullptr && market_trade(*event, g.book, trade)) {
+        trades_[trades_seen_ % snapshot_trades] = trade;
+        ++trades_seen_;
+        candles_.add(trade);
+    }
+    g.loop.step();
     publish_delivered();
 }
 
@@ -399,6 +421,87 @@ Timestamp ReplaySession::due_wall() const noexcept
         return anchor_wall_;
     }
     return anchor_wall_ + (ahead + speed_ - 1) / speed_;
+}
+
+// Builds this boundary's snapshot in snapshot_ and offers it to the slot; a held slot drops it, counted.
+void ReplaySession::publish_snapshot(Timestamp wall_now) noexcept
+{
+    Generation& g = *engine_;
+    Snapshot& s = snapshot_;
+    const ReplayReport& replay = g.loop.report().replay;
+    s.generation = generation_.load();
+    s.snapshot_seq = snapshot_seq_ + 1;
+    s.exchange_ts = clock();
+    s.event_seq = replay.events;
+    s.last_report_seq = ring_.last_seq();
+    s.last_command_seq = last_command_seq_;
+    s.state = state_.load();
+    s.speed = speed_;
+    s.progress = config_.source_size == 0
+        ? 0.0
+        : static_cast<double>(g.source->position()) / static_cast<double>(config_.source_size);
+    s.failure = replay.failure;
+    s.source_error = replay.source_error;
+    s.bid_levels = g.book.depth(Side::Buy, s.bids);
+    s.ask_levels = g.book.depth(Side::Sell, s.asks);
+
+    s.trade_count = static_cast<std::size_t>(std::min<std::uint64_t>(trades_seen_, snapshot_trades));
+    s.trades_truncated = trades_seen_ > snapshot_trades;
+    for (std::size_t i = 0; i < s.trade_count; ++i) {
+        s.trades[i] = trades_[(trades_seen_ - s.trade_count + i) % snapshot_trades];
+    }
+    s.has_candle = candles_.current(s.candle);
+    const std::span<const Candle> closed = candles_.closed().subspan(candles_published_);
+    s.closed_count = std::min(closed.size(), snapshot_candles);
+    s.candles_truncated = closed.size() > snapshot_candles;
+    std::copy(closed.end() - static_cast<std::ptrdiff_t>(s.closed_count), closed.end(), s.closed_candles.begin());
+
+    const Portfolio& p = g.portfolio;
+    s.account = Account{.position = p.position(),
+                        .cash = p.cash(),
+                        .realised = p.realised_pnl(),
+                        .unrealised = p.unrealised_pnl(),
+                        .fees = p.fees(),
+                        .pnl = p.pnl(),
+                        .max_drawdown = p.max_drawdown()};
+    const std::span<const ShadowOrder> resting = g.execution.resting_orders();
+    s.my_order_count = std::min(resting.size(), snapshot_orders);
+    s.my_orders_truncated = resting.size() > snapshot_orders;
+    for (std::size_t i = 0; i < s.my_order_count; ++i) {
+        const ShadowOrder& o = resting[i];
+        std::uint32_t ahead = 0;
+        g.book.visit_orders(o.side, o.price, [&](const Order& order) {
+            if (order.sequence() > o.anchor_sequence) {
+                return false;
+            }
+            ++ahead;
+            return true;
+        });
+        s.my_orders[i] = MyOrder{.id = o.id,
+                                 .side = o.side,
+                                 .price = o.price,
+                                 .remaining = o.remaining,
+                                 .ahead_quantity = o.ahead_quantity,
+                                 .ahead_orders = ahead};
+    }
+    const Timestamp elapsed = wall_now - last_snapshot_wall_;
+    const std::uint64_t rate = snapshot_seq_ != 0 && elapsed > 0
+        ? (s.event_seq - last_snapshot_events_) * 1'000'000'000 / static_cast<std::uint64_t>(elapsed)
+        : 0;
+    s.metrics = SnapshotMetrics{
+        .events_per_second = rate, .dropped_snapshots = dropped_snapshots_, .command_queue_depth = last_drained_};
+
+    next_snapshot_wall_ = wall_now + snapshot_interval;
+    if (!snapshots_.try_publish(s)) {
+        ++dropped_snapshots_;
+        return;  // the trades and bars stay for the next snapshot
+    }
+    ++snapshot_seq_;
+    trades_seen_ = 0;
+    candles_published_ = candles_.closed().size();
+    last_snapshot_events_ = s.event_seq;
+    last_snapshot_wall_ = wall_now;
+    dirty_ = false;
 }
 
 }  // namespace simulator::server

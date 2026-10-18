@@ -221,6 +221,7 @@ add_executable(chronos_server_tests
     tests/server/channels_test.cpp
     tests/server/generation_test.cpp
     tests/server/replay_session_test.cpp
+    tests/server/snapshot_test.cpp
 )
 
 target_compile_options(chronos_server_tests PRIVATE ${CHRONOS_WARNINGS})

@@ -1,7 +1,11 @@
 #pragma once
 
+#include <gtest/gtest.h>
+
 #include <cstdint>
+#include <random>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "chronos/server/generation.hpp"
@@ -167,5 +171,45 @@ inline Control step(std::uint64_t n)
 inline constexpr Control kPlay{.type = ControlType::Play};
 inline constexpr Control kPause{.type = ControlType::Pause};
 inline constexpr Control kFullSpeed{.type = ControlType::Speed, .speed = 0};
+
+// n valid events, two per millisecond from 1 ms: 100-share adds within 20 cents of 100.00 (bids below, asks above),
+// partial executes and deletes of live orders. Nothing is rejected and the book never crosses.
+inline std::vector<MarketEvent> random_stream(std::size_t n)
+{
+    std::mt19937_64 rng{7};
+    std::vector<MarketEvent> events;
+    events.reserve(n);
+    std::vector<std::pair<OrderId, std::uint64_t>> live;  // id, shares left
+    OrderId next_id = 1;
+    for (std::size_t i = 0; i < n; ++i) {
+        const Timestamp ts = static_cast<Timestamp>(i / 2 + 1) * kMs;
+        const std::uint64_t roll = rng() % 4;
+        if (live.size() < 8 || roll < 2) {
+            const Side side = rng() % 2 == 0 ? Side::Buy : Side::Sell;
+            const auto offset = static_cast<std::int64_t>(1 + rng() % 20) * 100;
+            events.push_back(add(ts, next_id, side, side == Side::Buy ? 1'000'000 - offset : 1'000'000 + offset, 100));
+            live.emplace_back(next_id++, 100);
+            continue;
+        }
+        const std::size_t k = rng() % live.size();
+        if (roll == 2 && live[k].second > 10) {
+            events.push_back(execute(ts, live[k].first, 10));
+            live[k].second -= 10;
+        } else {
+            events.push_back(erase(ts, live[k].first));
+            live[k] = live.back();
+            live.pop_back();
+        }
+    }
+    return events;
+}
+
+// The session's latest snapshot; a test failure if none was published.
+inline Snapshot latest(const ReplaySession& session)
+{
+    Snapshot snapshot;
+    EXPECT_TRUE(session.read_snapshot([&](const Snapshot& published) { snapshot = published; }));
+    return snapshot;
+}
 
 }  // namespace simulator::server::test
