@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <future>
 #include <thread>
 #include <vector>
@@ -132,6 +133,75 @@ TEST(SnapshotTest, TradesAndClosedBarsBeyondTheirRingsAreTruncatedToTheLatest)
     EXPECT_EQ(next.closed_candles[1].start, 601 * kSecond);
     ASSERT_TRUE(next.has_candle);
     EXPECT_EQ(next.candle.start, 602 * kSecond);
+}
+
+TEST(SnapshotTest, HistoryHoldsEveryClosedBarAndTheLatestTradesOfItsGeneration)
+{
+    std::vector<MarketEvent> events{add(1, 1, Side::Sell, 1'000'000, 1'000)};
+    for (Timestamp second = 1; second <= 602; ++second) {
+        events.push_back(execute(second * kSecond, 1, 1));  // one trade a second
+    }
+    ReplaySession session{config(), over(events)};
+    std::vector<Candle> candles;
+    std::vector<Trade> trades;
+    EXPECT_FALSE(session.read_history(1, 0, candles, trades));  // nothing published yet
+    session.control(step(601));                                 // the add and the trades to 600 s
+    session.tick(kWall);
+
+    ASSERT_TRUE(session.read_history(1, 0, candles, trades));
+    ASSERT_EQ(candles.size(), 599u);  // every closed bar, where a snapshot holds the last 64
+    EXPECT_EQ(candles.front().start, kSecond);
+    EXPECT_EQ(candles.back().start, 599 * kSecond);
+    ASSERT_EQ(trades.size(), snapshot_trades);  // the latest 512: 89 s to 600 s
+    EXPECT_EQ(trades.front().timestamp, 89 * kSecond);
+    EXPECT_EQ(trades.back().timestamp, 600 * kSecond);
+
+    ASSERT_TRUE(session.read_history(1, 500 * kSecond, candles, trades));
+    EXPECT_EQ(candles.size(), 100u);  // 500 s to 599 s
+    EXPECT_EQ(trades.size(), 101u);   // 500 s to 600 s
+
+    session.control(Control{.type = ControlType::Restart});
+    session.tick(kWall + snapshot_interval);
+    EXPECT_FALSE(session.read_history(1, 0, candles, trades));  // the history moved on to generation 2
+    ASSERT_TRUE(session.read_history(2, 0, candles, trades));
+    EXPECT_TRUE(candles.empty());
+    EXPECT_TRUE(trades.empty());
+}
+
+// For ThreadSanitizer: a reader copying the history while the engine offers it at every snapshot.
+TEST(SnapshotTest, HistoryIsReadSafelyWhileTheEnginePublishes)
+{
+    std::vector<MarketEvent> events{add(1, 1, Side::Sell, 1'000'000, 1'000'000)};
+    for (Timestamp ms = 1; ms <= 20'000; ++ms) {
+        events.push_back(execute(ms * kMs, 1, 1));  // a trade every millisecond for 20 s
+    }
+    ReplaySession session{config(), over(events)};
+    session.control(kFullSpeed);
+    session.control(kPlay);
+    std::atomic<bool> done{false};
+    std::thread reader{[&] {
+        std::vector<Candle> candles;
+        std::vector<Trade> trades;
+        while (!done.load()) {
+            if (session.read_history(1, 0, candles, trades)) {
+                EXPECT_TRUE(std::is_sorted(candles.begin(), candles.end(),
+                                           [](const Candle& a, const Candle& b) { return a.start < b.start; }));
+            }
+        }
+    }};
+    Timestamp wall = kWall;
+    for (; session.state() != SessionState::Ended; wall += snapshot_interval) {
+        session.tick(wall);
+    }
+    done.store(true);
+    reader.join();
+    session.tick(wall);  // publishes the last snapshot if the reader held the history at the end
+
+    std::vector<Candle> candles;
+    std::vector<Trade> trades;
+    ASSERT_TRUE(session.read_history(1, 0, candles, trades));
+    EXPECT_EQ(candles.size(), 20u);  // seconds 0 to 19; the bar of 20 s is still open
+    EXPECT_EQ(trades.back().timestamp, 20'000 * kMs);
 }
 
 TEST(SnapshotTest, SnapshotsAreDroppedNotWaitedForWhileAReaderHoldsTheSlot)

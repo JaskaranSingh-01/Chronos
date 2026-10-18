@@ -205,12 +205,20 @@ TEST(ReplaySessionTest, AdmissionRefusesBadRequestsStaleGenerationsAFullQueueAnd
     }
     EXPECT_EQ(acks, ReplaySession::control_capacity);
 
+    Admission admitted;
     for (std::size_t i = 0; i < ReplaySession::command_capacity; ++i) {
-        ASSERT_EQ(session.submit(cancel(99), 0).error, ErrorCode::None);
+        admitted = session.submit(cancel(99), 0);
+        ASSERT_EQ(admitted.error, ErrorCode::None);
     }
     const Admission full = session.submit(cancel(99), 0);
     EXPECT_EQ(full.error, ErrorCode::QueueFull);
     EXPECT_EQ(full.seq, 1'028u);  // every submit gets a command_seq
+    // Each admission names the ring seq of its verdict record: Admitted, or RejectedAtAdmission after its Received.
+    const std::vector<Record> published = records(session);
+    EXPECT_EQ(published.back().seq, full.record_seq);
+    EXPECT_EQ(published.back().step, Lifecycle::RejectedAtAdmission);
+    EXPECT_EQ(admitted.record_seq, full.record_seq - 2);
+    EXPECT_EQ(published[published.size() - 3].step, Lifecycle::Admitted);
 
     bool on_ring = false;  // a refusal at admission is a lifecycle record with its reason
     for (const Record& r : records(session)) {

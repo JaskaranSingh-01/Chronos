@@ -91,6 +91,7 @@ struct Admission
 {
     std::uint64_t seq{0};  // the command_seq or control_seq given
     ErrorCode error{ErrorCode::None};
+    std::uint64_t record_seq{0};  // submit(): the ring seq of its Admitted or RejectedAtAdmission record
 };
 
 inline constexpr std::size_t snapshot_levels = 20;
@@ -223,8 +224,9 @@ private:
     Timestamp anchor_exchange_{0};
     Snapshot snapshot_;  // built here, then copied into snapshots_
     CandleBuilder candles_;
-    std::array<Trade, snapshot_trades> trades_{};  // market trades since the last snapshot, a ring
-    std::uint64_t trades_seen_{0};
+    std::array<Trade, snapshot_trades> trades_{};  // the generation's latest market trades, a ring
+    std::uint64_t trades_total_{0};                // the generation's market trades
+    std::uint64_t trades_published_{0};            // trades_total_ at the last published snapshot
     std::size_t candles_published_{0};
     std::uint64_t snapshot_seq_{0};
     std::uint64_t dropped_snapshots_{0};
@@ -234,9 +236,20 @@ private:
     std::size_t last_drained_{0};
     bool dirty_{true};  // something changed since the last published snapshot
 
+    // For /api/history: the engine copies its bars and trades in at each snapshot without waiting; any thread reads.
+    struct History
+    {
+        std::uint64_t generation{0};
+        std::vector<Candle> candles;  // closed 1 s bars, oldest first
+        std::array<Trade, snapshot_trades> trades{};
+        std::uint64_t trades_total{0};
+    };
+    mutable std::mutex history_mutex_;
+    History history_;
+
     ErrorCode admission(const Command& command, std::uint64_t generation) const noexcept;
     ErrorCode refusal(const Command& command) const noexcept;
-    void publish(Record record, bool reserved = false) noexcept;
+    std::uint64_t publish(Record record, bool reserved = false) noexcept;
     void lifecycle(Lifecycle step, const Command& command, ErrorCode reason, OrderId order_id,
                    bool reserved = false) noexcept;
     void publish_delivered() noexcept;
@@ -253,6 +266,7 @@ private:
     void apply_batch() noexcept;
     Timestamp due_wall() const noexcept;
     bool log_backed_up() const noexcept;
+    bool offer_history() noexcept;
     void publish_snapshot(Timestamp wall_now) noexcept;
 
     friend class SessionRunner;
@@ -298,6 +312,11 @@ public:
     {
         return snapshots_.read(std::forward<F>(f));
     }
+
+    // Any thread. `generation`'s closed 1 s bars from `from_ts` on and its latest trades (at most snapshot_trades) at
+    // or after it, as of the last snapshot published; false if the history holds another generation.
+    bool read_history(std::uint64_t generation, Timestamp from_ts, std::vector<Candle>& candles,
+                      std::vector<Trade>& trades) const;
 
     // Engine thread: controls, replay to `wall_now`, the batch; returns the next due wall time or never.
     Timestamp tick(Timestamp wall_now) noexcept;

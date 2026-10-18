@@ -61,6 +61,7 @@ ReplaySession::ReplaySession(SessionConfig config, SourceFactory factory, LogQue
     batch_.reserve(command_capacity);
     controls_batch_.reserve(control_capacity);
     awaiting_.reserve(command_capacity);
+    history_.candles.reserve(CandleBuilder::day_seconds);
     engine_.emplace(config_, factory_(name(ticker_)), StrategySpec{});
     publish_start();
     load();
@@ -77,14 +78,15 @@ Admission ReplaySession::submit(Command command, Timestamp received_wall_ts) noe
         error = ErrorCode::QueueFull;
     }
     publish(Record{.generation = current, .step = Lifecycle::Received, .command = command});
-    publish(Record{.generation = current,
-                   .step = error == ErrorCode::None ? Lifecycle::Admitted : Lifecycle::RejectedAtAdmission,
-                   .reason = error,
-                   .command = command});
+    const std::uint64_t record_seq =
+        publish(Record{.generation = current,
+                       .step = error == ErrorCode::None ? Lifecycle::Admitted : Lifecycle::RejectedAtAdmission,
+                       .reason = error,
+                       .command = command});
     if (error == ErrorCode::None) {
         inbox_cv_.notify_one();
     }
-    return {.seq = command.command_seq, .error = error};
+    return {.seq = command.command_seq, .error = error, .record_seq = record_seq};
 }
 
 Admission ReplaySession::control(Control control) noexcept
@@ -107,6 +109,26 @@ Admission ReplaySession::control(Control control) noexcept
 RecordRing<Record>::Read ReplaySession::reports_since(std::uint64_t from_seq, std::span<Record> out) const noexcept
 {
     return ring_.read(from_seq, out);
+}
+
+bool ReplaySession::read_history(std::uint64_t generation, Timestamp from_ts, std::vector<Candle>& candles,
+                                 std::vector<Trade>& trades) const
+{
+    const std::lock_guard lock{history_mutex_};
+    if (history_.generation != generation) {
+        return false;
+    }
+    const auto first = std::lower_bound(history_.candles.begin(), history_.candles.end(), from_ts,
+                                        [](const Candle& bar, Timestamp ts) { return bar.start < ts; });
+    candles.assign(first, history_.candles.end());
+    trades.clear();
+    const std::uint64_t held = std::min<std::uint64_t>(history_.trades_total, snapshot_trades);
+    for (std::uint64_t i = history_.trades_total - held; i < history_.trades_total; ++i) {
+        if (const Trade& trade = history_.trades[i % snapshot_trades]; trade.timestamp >= from_ts) {
+            trades.push_back(trade);
+        }
+    }
+    return true;
 }
 
 SessionState ReplaySession::state() const noexcept
@@ -238,18 +260,20 @@ ErrorCode ReplaySession::refusal(const Command& command) const noexcept
 }
 
 // Puts `record` on the ring and, except an Ack, in the log; `reserved` uses the slot LogQueue::reserve() held.
-void ReplaySession::publish(Record record, bool reserved) noexcept
+// Returns the record's seq.
+std::uint64_t ReplaySession::publish(Record record, bool reserved) noexcept
 {
     const std::lock_guard lock{publish_mutex_};
     record.seq = ring_.publish(record);
     if (log_ == nullptr || record.kind == RecordKind::Ack) {
-        return;
+        return record.seq;
     }
     if (reserved) {
         log_->push_reserved(record);
     } else {
         log_->push(record);
     }
+    return record.seq;
 }
 
 void ReplaySession::lifecycle(Lifecycle step, const Command& command, ErrorCode reason, OrderId order_id,
@@ -320,7 +344,8 @@ void ReplaySession::restart() noexcept
     awaiting_.clear();
     candles_ = CandleBuilder{};
     candles_published_ = 0;
-    trades_seen_ = 0;
+    trades_total_ = 0;
+    trades_published_ = 0;
     last_snapshot_events_ = 0;
     state_.store(SessionState::Paused);
     publish_start();
@@ -483,8 +508,8 @@ void ReplaySession::step_market() noexcept
     Generation& g = *engine_;
     Trade trade;
     if (const MarketEvent* event = g.loop.pending(); event != nullptr && market_trade(*event, g.book, trade)) {
-        trades_[trades_seen_ % snapshot_trades] = trade;
-        ++trades_seen_;
+        trades_[trades_total_ % snapshot_trades] = trade;
+        ++trades_total_;
         candles_.add(trade);
     }
     g.loop.step();
@@ -548,6 +573,25 @@ Timestamp ReplaySession::due_wall() const noexcept
     return anchor_wall_ + (ahead + speed_ - 1) / speed_;
 }
 
+// Copies the generation's new closed bars and its latest trades into the history; false while a reader holds it.
+bool ReplaySession::offer_history() noexcept
+{
+    const std::unique_lock lock{history_mutex_, std::try_to_lock};
+    if (!lock.owns_lock()) {
+        return false;
+    }
+    if (history_.generation != generation_.load()) {
+        history_.generation = generation_.load();
+        history_.candles.clear();
+    }
+    const std::span<const Candle> closed = candles_.closed();
+    history_.candles.insert(history_.candles.end(),
+                            closed.begin() + static_cast<std::ptrdiff_t>(history_.candles.size()), closed.end());
+    history_.trades = trades_;
+    history_.trades_total = trades_total_;
+    return true;
+}
+
 // Builds this boundary's snapshot in snapshot_ and offers it to the slot; a held slot drops it, counted.
 void ReplaySession::publish_snapshot(Timestamp wall_now) noexcept
 {
@@ -571,10 +615,11 @@ void ReplaySession::publish_snapshot(Timestamp wall_now) noexcept
     s.bid_levels = g.book.depth(Side::Buy, s.bids);
     s.ask_levels = g.book.depth(Side::Sell, s.asks);
 
-    s.trade_count = static_cast<std::size_t>(std::min<std::uint64_t>(trades_seen_, snapshot_trades));
-    s.trades_truncated = trades_seen_ > snapshot_trades;
+    const std::uint64_t fresh = trades_total_ - trades_published_;
+    s.trade_count = static_cast<std::size_t>(std::min<std::uint64_t>(fresh, snapshot_trades));
+    s.trades_truncated = fresh > snapshot_trades;
     for (std::size_t i = 0; i < s.trade_count; ++i) {
-        s.trades[i] = trades_[(trades_seen_ - s.trade_count + i) % snapshot_trades];
+        s.trades[i] = trades_[(trades_total_ - s.trade_count + i) % snapshot_trades];
     }
     s.has_candle = candles_.current(s.candle);
     const std::span<const Candle> closed = candles_.closed().subspan(candles_published_);
@@ -620,12 +665,13 @@ void ReplaySession::publish_snapshot(Timestamp wall_now) noexcept
                                 .log_failed = log_ != nullptr && log_->failed()};
 
     next_snapshot_wall_ = wall_now + snapshot_interval;
-    if (!snapshots_.try_publish(s)) {
+    // The history first: it never lags a snapshot a client has seen.
+    if (!offer_history() || !snapshots_.try_publish(s)) {
         ++dropped_snapshots_;
         return;  // the trades and bars stay for the next snapshot
     }
     ++snapshot_seq_;
-    trades_seen_ = 0;
+    trades_published_ = trades_total_;
     candles_published_ = candles_.closed().size();
     last_snapshot_events_ = s.event_seq;
     last_snapshot_wall_ = wall_now;
