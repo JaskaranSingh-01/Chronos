@@ -134,6 +134,7 @@ add_library(chronos_server
     server/src/itch_input.cpp
     server/src/protocol.cpp
     server/src/replay_session.cpp
+    server/src/security.cpp
     server/src/session_runner.cpp
 )
 
@@ -242,6 +243,7 @@ add_executable(chronos_server_tests
     tests/server/protocol_test.cpp
     tests/server/replay_session_test.cpp
     tests/server/restart_test.cpp
+    tests/server/security_test.cpp
     tests/server/session_runner_test.cpp
     tests/server/snapshot_test.cpp
 )
