@@ -1,7 +1,9 @@
 #include "chronos/server/protocol.hpp"
 
 #include <algorithm>
+#include <cinttypes>
 #include <cmath>
+#include <cstdio>
 #include <initializer_list>
 #include <limits>
 
@@ -211,6 +213,16 @@ json order_json(const MyOrder& order)
             {"remaining", order.remaining},
             {"ahead_quantity", order.ahead_quantity},
             {"ahead_orders", order.ahead_orders}};
+}
+
+// A day of /api/days; `symbols` counts its stock directory.
+json day_json(const DayHandle& day)
+{
+    char quick_check[17];
+    std::snprintf(quick_check, sizeof quick_check, "%016" PRIx64, day->quick_check);
+    return {{"date", iso_date(day->date)}, {"file", day->file},          {"size", day->size},
+            {"hash", day->hash},           {"quick_check", quick_check}, {"itch50", day->itch50},
+            {"cut_tail", day->cut_tail},   {"session", day->session},    {"symbols", day->symbols.size()}};
 }
 
 template <class T, class F>
@@ -437,6 +449,11 @@ std::string encode_error(std::string_view session_id, std::uint64_t generation, 
 std::string encode_symbols(std::span<const std::string> symbols)
 {
     return text({{"symbols", symbols}});
+}
+
+std::string encode_days(std::chrono::year_month_day start, std::span<const DayHandle> days)
+{
+    return text({{"start", iso_date(start)}, {"days", array_of(days, day_json)}});
 }
 
 std::string encode_history(std::string_view session_id, std::uint64_t generation, std::span<const Candle> candles,

@@ -358,17 +358,24 @@ endfunction()
 
 chronos_serve_test(HelpExitsZero 0 --help)
 chronos_serve_test(BadOptionExitsTwo 2 --data . --date 2019-12-30 --frobnicate)
-chronos_serve_test(MissingDateExitsTwo 2 --data .)
+chronos_serve_test(NoDayFileExitsTwo 2 --data .)
 chronos_serve_test(BadPortExitsTwo 2 --data . --date 2019-12-30 --port 70000)
 chronos_serve_test(MissingFileExitsTwo 2 --data /nonexistent/chronos-data --date 2019-12-30)
 
-# A day file with no stock directory exits 2 and says so; other failures exit 2 too, so the message is checked.
+# Other failures exit 2 too, so these check the message. Without --date the latest day starts, here the only one; its
+# hash goes to runs/ in the fixture directory, the tests' working directory.
 set(serve_fixture ${PROJECT_BINARY_DIR}/chronos-serve-fixture)
 file(WRITE ${serve_fixture}/12302019.NASDAQ_ITCH50.bin "not itch")
-add_test(NAME ChronosServeCliTest.NoStockDirectoryExitsTwo
-         COMMAND sh -c "out=$(\"$0\" \"$@\" 2>&1); test $? -eq 2 && echo \"$out\" | grep -q ': no stock directory'"
-                 $<TARGET_FILE:chronos-serve> --data ${serve_fixture} --date 2019-12-30)
-set_tests_properties(ChronosServeCliTest.NoStockDirectoryExitsTwo PROPERTIES TIMEOUT 20)  # serving would never exit
+function(chronos_serve_message_test name message)
+    add_test(NAME ChronosServeCliTest.${name}
+             COMMAND sh -c "out=$(\"$0\" \"$@\" 2>&1); test $? -eq 2 && echo \"$out\" | grep -q '${message}'"
+                     $<TARGET_FILE:chronos-serve> --data ${serve_fixture} ${ARGN}
+             WORKING_DIRECTORY ${serve_fixture})
+    set_tests_properties(ChronosServeCliTest.${name} PROPERTIES TIMEOUT 20)  # serving would never exit
+endfunction()
+
+chronos_serve_message_test(NoStockDirectoryExitsTwo ": no stock directory")
+chronos_serve_message_test(DateWithoutADayFileExitsTwo "no day file for 2019-12-27" --date 2019-12-27)
 
 
 # -------------------------

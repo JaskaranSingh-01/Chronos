@@ -31,6 +31,9 @@ std::string input_fingerprint(std::string_view name, std::span<const std::byte> 
 // XXH3-128 of every byte, as 32 hex digits: a day's identity.
 std::string day_hash(std::span<const std::byte> bytes);
 
+// YYYY-MM-DD.
+std::string iso_date(std::chrono::year_month_day date);
+
 // One ITCH day's streams: per ticker, an ItchSource with its own one-instrument registry; for the empty ticker, an
 // empty stream. Never throws but for memory. The caller keeps `bytes` alive.
 SourceFactory itch_factory(std::span<const std::byte> bytes, std::chrono::year_month_day date,

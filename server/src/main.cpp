@@ -19,7 +19,6 @@
 #include "chronos/server/security.hpp"
 #include "chronos/server/session_runner.hpp"
 #include "simulator/cli/replay_args.hpp"
-#include "simulator/io/mapped_file.hpp"
 
 namespace {
 
@@ -27,10 +26,12 @@ using namespace simulator;
 using namespace simulator::server;
 
 constexpr std::string_view serve_usage =
-    "usage: chronos-serve --data DIR --date YYYY-MM-DD [--host 127.0.0.1] [--port 8080] [--web web/dist]\n"
+    "usage: chronos-serve --data DIR [--date YYYY-MM-DD] [--host 127.0.0.1] [--port 8080] [--web web/dist]\n"
     "                     [--token T] [--fsync] [--allow-truncated-tail]\n"
     "\n"
-    "Serves an interactive replay of DIR/MMDDYYYY.NASDAQ_ITCH50.bin; the UI picks the symbol.\n"
+    "Serves an interactive replay of the days in DIR, the files named MMDDYYYY.NASDAQ_ITCH50.bin; the UI picks the\n"
+    "symbol. A new file is read once, a few seconds a day, and its hash kept in runs/fingerprints.json.\n"
+    "  --date YYYY-MM-DD       the starting day (default the latest)\n"
     "  --host IP               the address to bind, an IP address (default 127.0.0.1); any other requires a\n"
     "                          token, and one is made and printed once if --token is not given; it guards\n"
     "                          trading, not availability: put a buffering reverse proxy in front\n"
@@ -40,13 +41,13 @@ constexpr std::string_view serve_usage =
     "  --fsync                 sync each command line of the log (sessions/<id>.jsonl) to the device\n"
     "  --allow-truncated-tail  a file cut mid-message ends there instead of failing\n"
     "\n"
-    "exit status: 0 after SIGINT or SIGTERM; 2 bad usage, a data file that cannot be opened or has no stock\n"
-    "directory, a log that cannot be written, or an address that cannot be bound\n";
+    "exit status: 0 after SIGINT or SIGTERM; 2 bad usage, no day file in DIR or none for --date, a starting day with\n"
+    "no stock directory, a log that cannot be written, or an address that cannot be bound\n";
 
 struct ServeArgs
 {
     std::filesystem::path data;
-    std::chrono::year_month_day date{};
+    std::optional<std::chrono::year_month_day> date{};
     std::string host{"127.0.0.1"};
     std::uint16_t port{8080};
     std::filesystem::path web{"web/dist"};
@@ -56,11 +57,10 @@ struct ServeArgs
     bool help{false};
 };
 
-// False, with `error` saying why, on an unknown option, a missing or bad value, or no --data or --date.
+// False, with `error` saying why, on an unknown option, a missing or bad value, or no --data.
 bool parse(std::span<const std::string_view> args, ServeArgs& out, std::string& error)
 {
     bool has_data = false;
-    bool has_date = false;
     for (std::size_t i = 0; i < args.size(); ++i) {
         const std::string_view flag = args[i];
         if (flag == "-h" || flag == "--help") {
@@ -86,11 +86,12 @@ bool parse(std::span<const std::string_view> args, ServeArgs& out, std::string& 
             out.data = value;
             has_data = true;
         } else if (flag == "--date") {
-            has_date = parse_date(value, out.date);
-            if (!has_date) {
+            std::chrono::year_month_day date{};
+            if (!parse_date(value, date)) {
                 error = "--date: not a YYYY-MM-DD date";
                 return false;
             }
+            out.date = date;
         } else if (flag == "--port") {
             const auto [end, failed] = std::from_chars(value.data(), value.data() + value.size(), out.port);
             if (failed != std::errc{} || end != value.data() + value.size()) {
@@ -105,20 +106,11 @@ bool parse(std::span<const std::string_view> args, ServeArgs& out, std::string& 
             out.token = value;
         }
     }
-    if (!has_data || !has_date) {
-        error = "--data and --date are required";
+    if (!has_data) {
+        error = "--data is required";
         return false;
     }
     return true;
-}
-
-// NASDAQ's name for a day's file, e.g. 12302019.NASDAQ_ITCH50.bin.
-std::string day_file(std::chrono::year_month_day date)
-{
-    char name[40];
-    std::snprintf(name, sizeof name, "%02u%02u%04d.NASDAQ_ITCH50.bin", unsigned{date.month()}, unsigned{date.day()},
-                  int{date.year()});
-    return name;
 }
 
 // The start time in UTC and 64 random bits: never an earlier session's id, whose log this one would append to.
@@ -147,18 +139,21 @@ int main(int argc, char** argv)
         std::fwrite(serve_usage.data(), 1, serve_usage.size(), stdout);
         return 0;
     }
-    const std::filesystem::path path = parsed.data / day_file(parsed.date);
-    MappedFile file;
-    if (!file.open(path.c_str())) {
-        std::fprintf(stderr, "error: %s\n", file.error());
+    DayLibrary library{parsed.data, std::filesystem::path{"runs"} / "fingerprints.json"};
+    const std::vector<DayHandle> days = library.scan();  // hashes every new day before serving
+    if (days.empty()) {
+        std::fprintf(stderr, "error: no day file (MMDDYYYY.NASDAQ_ITCH50.bin) in %s\n", parsed.data.c_str());
         return 2;
     }
-    std::vector<std::string> symbols = symbol_directory(file.bytes());
-    if (symbols.empty()) {
-        std::fprintf(stderr, "error: %s: no stock directory\n", path.c_str());
+    const DayHandle start = parsed.date ? library.find(*parsed.date) : days.back();
+    if (start == nullptr) {
+        std::fprintf(stderr, "error: no day file for %s in %s\n", iso_date(*parsed.date).c_str(), parsed.data.c_str());
         return 2;
     }
-    const std::chrono::minutes utc_offset = us_eastern_utc_offset(parsed.date);
+    if (start->symbols.empty()) {
+        std::fprintf(stderr, "error: %s: no stock directory\n", (parsed.data / start->file).c_str());
+        return 2;
+    }
     const std::string token = required_token(parsed.host, parsed.token);
     const std::string session_id = new_session_id();
     const std::filesystem::path sessions{"sessions"};
@@ -169,12 +164,12 @@ int main(int argc, char** argv)
     // header records all of it, with the input's fingerprint.
     const SessionConfig config{
         .session_id = session_id,
-        .input = input_fingerprint(path.filename().string(), file.bytes()),
+        .input = input_fingerprint(start->file, start->mapped.bytes()),
         .instrument = {.price_scale = 4, .quantity_scale = 0},
         .latency = {.order_latency = 50'000, .report_latency = 50'000},
         .limits = {.max_position = 10'000, .max_order_quantity = Quantity{1'000}, .max_open_orders = 16},
-        .options = {.session_midnight = session_midnight_ns(parsed.date, utc_offset)},
-        .source_size = file.bytes().size()};
+        .options = {.session_midnight = start->midnight},
+        .source_size = start->size};
     // Declared in this order, so destroyed writer last: the server, then the engine thread, before the session.
     LogQueue queue;
     const std::filesystem::path log_path = sessions / (session_id + ".jsonl");
@@ -183,7 +178,9 @@ int main(int argc, char** argv)
         std::fprintf(stderr, "error: cannot write the log %s\n", log_path.c_str());
         return 2;
     }
-    ReplaySession session{config, itch_factory(file.bytes(), parsed.date, utc_offset, parsed.allow_truncated_tail),
+    ReplaySession session{config,
+                          itch_factory(start->mapped.bytes(), start->date, us_eastern_utc_offset(start->date),
+                                       parsed.allow_truncated_tail),
                           &queue};
     std::optional<SessionRunner> runner{std::in_place, session};
     Hub hub{.session = session,
@@ -193,7 +190,8 @@ int main(int argc, char** argv)
             .token = token,
             .fsync = parsed.fsync,
             .config = config,
-            .symbols = std::move(symbols)};
+            .library = &library,
+            .start = start->date};
     HttpServer server{hub,
                       ServerOptions{.host = parsed.host, .port = parsed.port, .web = parsed.web, .sessions = sessions}};
     if (!server.start()) {
@@ -202,7 +200,7 @@ int main(int argc, char** argv)
     }
     const std::string shown = parsed.host.find(':') == std::string::npos ? parsed.host : "[" + parsed.host + "]";
     std::printf("chronos-serve: http://%s:%u/ with %zu symbols; session %s, log %s\n", shown.c_str(),
-                unsigned{server.port()}, hub.symbols.size(), session_id.c_str(), log_path.c_str());
+                unsigned{server.port()}, start->symbols.size(), session_id.c_str(), log_path.c_str());
     if (parsed.token.empty() && !token.empty()) {
         std::printf("token (shown once): %s\n", token.c_str());
     }

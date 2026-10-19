@@ -1,5 +1,6 @@
 #pragma once
 
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <optional>
@@ -8,6 +9,7 @@
 #include <string_view>
 
 #include "chronos/server/candles.hpp"
+#include "chronos/server/itch_input.hpp"
 #include "chronos/server/replay_session.hpp"
 
 // The WebSocket protocol (spec §6.3) and the HTTP bodies, as JSON text. Prices are integer ticks, quantities shares,
@@ -69,6 +71,8 @@ std::string encode_error(std::string_view session_id, std::uint64_t generation, 
 
 // GET /api/symbols.
 std::string encode_symbols(std::span<const std::string> symbols);
+// GET /api/days: the days discovered, oldest first, and the starting day.
+std::string encode_days(std::chrono::year_month_day start, std::span<const DayHandle> days);
 // GET /api/history.
 std::string encode_history(std::string_view session_id, std::uint64_t generation, std::span<const Candle> candles,
                            std::span<const Trade> trades);

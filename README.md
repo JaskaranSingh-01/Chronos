@@ -340,6 +340,9 @@ fees, and limits of 10,000 shares of position, 1,000 shares an order and 16 open
 URL and that log; errors go to stderr.
 
 - Run it from the repository root, as `--web` defaults to `web/dist`.
+- `--data` names a directory of days, each file named `MMDDYYYY.NASDAQ_ITCH50.bin`; `--date` picks the starting day,
+  the latest by default. A new file is read once before serving, a few seconds a day, for its XXH3-128 hash and the
+  regular hours its own System Events set; `runs/fingerprints.json` keeps both. `GET /api/days` lists the days.
 - Options: `--host`, `--port` (default 8080), `--web`, `--token`, `--fsync` and `--allow-truncated-tail`;
   `./build/chronos-serve --help` lists them.
 - The slice needs a day's file name, so link it into a directory of its own:

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <optional>
@@ -8,6 +9,7 @@
 #include <vector>
 
 #include "chronos/server/command_log.hpp"
+#include "chronos/server/itch_input.hpp"
 #include "chronos/server/replay_session.hpp"
 
 namespace simulator::server {
@@ -72,8 +74,9 @@ struct Hub
     std::string token{};  // empty: no auth message is needed
     bool fsync{false};
     SessionConfig config{};  // what hello tells a client: its scales, fees and limits
-    std::vector<std::string> symbols{};  // the tickers a symbol switch may name
-    const Peer* controller{nullptr};     // the one connection that may control and trade
+    DayLibrary* library{nullptr};          // the days a load may name; nullptr: none
+    std::chrono::year_month_day start{};  // the starting day
+    const Peer* controller{nullptr};      // the one connection that may control and trade
     std::vector<Record> reports = std::vector<Record>(Peer::reports_per_poll);  // poll()'s ring chunk
     Snapshot snapshot{};                                                         // poll()'s copy of the latest one
 };

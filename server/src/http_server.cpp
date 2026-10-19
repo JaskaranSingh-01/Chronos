@@ -1,5 +1,6 @@
 #include "chronos/server/http_server.hpp"
 
+#include <algorithm>
 #include <atomic>
 #include <charconv>
 #include <chrono>
@@ -22,6 +23,7 @@
 
 #include "chronos/server/protocol.hpp"
 #include "chronos/server/security.hpp"
+#include "simulator/cli/replay_args.hpp"
 
 namespace simulator::server {
 namespace {
@@ -88,6 +90,7 @@ struct HttpServer::Impl
 
     void routes();
     crow::response api(const crow::request& request, const std::function<crow::response()>& serve);
+    crow::response symbols(const crow::request& request);
     crow::response history(const crow::request& request);
     crow::response static_file(std::string path);
     void pump();
@@ -97,9 +100,16 @@ struct HttpServer::Impl
 void HttpServer::Impl::routes()
 {
     app.loglevel(crow::LogLevel::Warning);
-    CROW_ROUTE(app, "/api/symbols")([this](const crow::request& request) {
-        return api(request, [this] { return json_response(200, encode_symbols(hub.symbols)); });
+    // ponytail: a rescan that finds a new file hashes it here, seconds on one of 4 Crow threads; scan in the
+    // background if that stalls the UI.
+    CROW_ROUTE(app, "/api/days")([this](const crow::request& request) {
+        return api(request, [this] {
+            const std::vector<DayHandle> days = hub.library != nullptr ? hub.library->scan() : std::vector<DayHandle>{};
+            return json_response(200, encode_days(hub.start, days));
+        });
     });
+    CROW_ROUTE(app, "/api/symbols")(
+        [this](const crow::request& request) { return api(request, [&] { return symbols(request); }); });
     CROW_ROUTE(app, "/api/history")(
         [this](const crow::request& request) { return api(request, [&] { return history(request); }); });
     CROW_ROUTE(app, "/api/sessions/<string>/log")([this](const crow::request& request, const std::string& id) {
@@ -154,6 +164,39 @@ crow::response HttpServer::Impl::api(const crow::request& request, const std::fu
     const int status =
         api_status(request.get_header_value("Host"), request.get_header_value("Authorization"), hub.token, app.port());
     return status == 0 ? serve() : crow::response{status};
+}
+
+// GET /api/symbols[?days=YYYY-MM-DD,...]: the tickers in the stock directory of every day listed; without the list,
+// the starting day's.
+crow::response HttpServer::Impl::symbols(const crow::request& request)
+{
+    const char* listed = request.url_params.get("days");
+    if (listed == nullptr) {
+        const DayHandle start = hub.library != nullptr ? hub.library->find(hub.start) : nullptr;
+        return json_response(200, encode_symbols(start != nullptr ? start->symbols : std::vector<std::string>{}));
+    }
+    // ponytail: only the 80 KB header limit bounds the list; cap it at max_days if a caller abuses it.
+    const std::string_view days{listed};
+    std::vector<std::string> common;
+    for (std::size_t at = 0; at <= days.size();) {
+        const std::size_t end = std::min(days.find(',', at), days.size());
+        std::chrono::year_month_day date{};
+        const DayHandle day =
+            hub.library != nullptr && parse_date(days.substr(at, end - at), date) ? hub.library->find(date) : nullptr;
+        if (day == nullptr) {
+            return json_response(400, R"({"error":"unknown_day"})");
+        }
+        if (at == 0) {
+            common = day->symbols;
+        } else {
+            std::vector<std::string> both;
+            std::set_intersection(common.begin(), common.end(), day->symbols.begin(), day->symbols.end(),
+                                  std::back_inserter(both));
+            common = std::move(both);
+        }
+        at = end + 1;
+    }
+    return json_response(200, encode_symbols(common));
 }
 
 // GET /api/history?session_id&generation&from_ts: the generation's bars and latest trades, as of its last snapshot.

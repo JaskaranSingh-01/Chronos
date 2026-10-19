@@ -74,9 +74,11 @@ bool Peer::receive(std::string_view text, Timestamp now, std::vector<std::string
         if (message.generation != generation) {
             return refuse("stale_generation", "a control for an earlier generation");
         }
-        if (control.type == ControlType::Symbol &&
-            std::find(hub_.symbols.begin(), hub_.symbols.end(), name(control.symbol)) == hub_.symbols.end()) {
-            return refuse("bad_request", "not in the day's stock directory");
+        if (control.type == ControlType::Symbol) {
+            const DayHandle day = hub_.library != nullptr ? hub_.library->find(hub_.start) : nullptr;
+            if (day == nullptr || !std::binary_search(day->symbols.begin(), day->symbols.end(), name(control.symbol))) {
+                return refuse("bad_request", "not in the day's stock directory");
+            }
         }
         const Admission admission = session.control(control);
         return admission.error == ErrorCode::None ? true : refuse(to_string(admission.error), "control refused");

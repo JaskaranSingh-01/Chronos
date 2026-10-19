@@ -300,6 +300,13 @@ std::string day_hash(std::span<const std::byte> bytes)
     return hex(XXH3_128bits(bytes.data(), bytes.size()));
 }
 
+std::string iso_date(std::chrono::year_month_day date)
+{
+    char text[16];
+    std::snprintf(text, sizeof text, "%04d-%02u-%02u", int{date.year()}, unsigned{date.month()}, unsigned{date.day()});
+    return text;
+}
+
 SourceFactory itch_factory(std::span<const std::byte> bytes, std::chrono::year_month_day date,
                            std::chrono::minutes utc_offset, bool allow_truncated_tail)
 {

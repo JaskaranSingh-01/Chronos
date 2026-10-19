@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 
+#include <chrono>
 #include <cstdint>
 #include <memory>
 #include <string>
@@ -14,6 +15,7 @@
 namespace simulator::server::test {
 namespace {
 
+using namespace std::chrono_literals;
 using nlohmann::json;
 
 // What one call to the peer sent, parsed.
@@ -357,7 +359,11 @@ TEST(PeerTest, MessagesForAnotherSessionOrGenerationAndMalformedOnesAreRefused)
 {
     const std::vector<MarketEvent> events = spaced_bids(10);
     ReplaySession session{config(), over(events)};
-    Hub hub{.session = session, .session_id = "test", .symbols = {"AAPL"}};
+    const ScratchDir data{"peer-days"};
+    write_file(data.path / "12302019.NASDAQ_ITCH50.bin", acme_day().bytes());
+    DayLibrary library{data.path, data.path / "fingerprints.json"};
+    library.scan();
+    Hub hub{.session = session, .session_id = "test", .library = &library, .start = 2019y / 12 / 30};
     Peer peer{hub, kWall};
     poll(peer);
     const auto code = [&](const std::string& text) {
@@ -376,7 +382,7 @@ TEST(PeerTest, MessagesForAnotherSessionOrGenerationAndMalformedOnesAreRefused)
     EXPECT_EQ(code(R"({"type":"control","session_id":"old","generation":1,"action":"play"})"), "stale_generation");
     EXPECT_EQ(code(client_message("control", R"(,"action":"play")", 2)), "stale_generation");
     EXPECT_EQ(code(client_message("control", R"(,"action":"symbol","symbol":"MSFT")")), "bad_request");
-    EXPECT_EQ(code(client_message("control", R"(,"action":"symbol","symbol":"AAPL")")), "");
+    EXPECT_EQ(code(client_message("control", R"(,"action":"symbol","symbol":"ACME")")), "");
     EXPECT_EQ(code(client_message("control", R"(,"action":"speed","speed":1000)")), "");
 }
 

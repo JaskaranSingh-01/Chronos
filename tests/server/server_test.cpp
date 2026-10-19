@@ -233,14 +233,15 @@ struct Served
     SessionRunner runner;
 
     Served(ReplaySession& session, ServerOptions options, std::string token = {}, const LogQueue* log = nullptr,
-           const LogWriter* writer = nullptr)
+           const LogWriter* writer = nullptr, DayLibrary* library = nullptr)
         : hub{.session = session,
               .log = log,
               .writer = writer,
               .session_id = "test",
               .token = std::move(token),
               .config = config(),
-              .symbols = {"AAA", "BBB"}},
+              .library = library,
+              .start = 2019y / 12 / 30},
           server{hub, std::move(options)},
           runner{session}
     {
@@ -291,7 +292,16 @@ TEST(ServerTest, ServesTheSymbolsHistoryLogAndUi)
     const ScratchDir web{"web"};
     const ScratchDir logs{"sessions"};
     std::ofstream{logs.path / "test.jsonl"} << "{\"a\":1}\n{\"b\":2}\n{\"c\":";  // its last line is half written
-    Served served{session, options(web.path / "dist", logs.path)};
+    const ScratchDir data{"data"};
+    itch_test::ItchBuilder day;  // the starting day's stock directory
+    day.system_event(0, kSecond, 'O')
+        .stock_directory(1, kSecond, "AAA")
+        .stock_directory(2, kSecond, "BBB")
+        .system_event(0, 2 * kSecond, 'S');
+    write_file(data.path / "12302019.NASDAQ_ITCH50.bin", day.bytes());
+    DayLibrary library{data.path, data.path / "fingerprints.json"};
+    library.scan();
+    Served served{session, options(web.path / "dist", logs.path), {}, nullptr, nullptr, &library};
     session.control(kFullSpeed);
     session.control(kPlay);
     ASSERT_TRUE(eventually([&] {
@@ -312,6 +322,7 @@ TEST(ServerTest, ServesTheSymbolsHistoryLogAndUi)
     EXPECT_EQ(served.get("/api/sessions/test/log"), (std::pair<int, std::string>{200, "{\"a\":1}\n{\"b\":2}\n"}));
     EXPECT_EQ(served.get("/api/sessions/no.such/log").first, 404);
     EXPECT_EQ(served.get("/api/symbols", "", "evil.example:" + std::to_string(served.server.port())).first, 403);
+    EXPECT_EQ(served.get("/api/days", "", "evil.example:" + std::to_string(served.server.port())).first, 403);
 
     EXPECT_EQ(served.get("/").first, 404);  // no UI built yet
     std::filesystem::create_directories(web.path / "dist");
@@ -319,6 +330,59 @@ TEST(ServerTest, ServesTheSymbolsHistoryLogAndUi)
     EXPECT_EQ(served.get("/"), (std::pair<int, std::string>{200, "<title>Chronos</title>"}));
     EXPECT_EQ(served.get("/index.html").first, 200);
     EXPECT_EQ(served.get("/../dist/index.html").first, 404);  // no way out of the UI's directory
+}
+
+// GET /api/days rescans on every request; /api/symbols lists the starting day's tickers, or those on every day listed.
+TEST(ServerTest, ServesTheDaysAndTheSymbolsOnEveryListedDay)
+{
+    const ScratchDir data{"days"};
+    itch_test::ItchBuilder friday;  // AAA and ACME, and no regular hours of its own
+    friday.system_event(0, kSecond, 'O')
+        .stock_directory(1, kSecond, "AAA")
+        .stock_directory(2, kSecond, "ACME")
+        .system_event(0, 2 * kSecond, 'S');
+    const itch_test::ItchBuilder monday = acme_day();
+    write_file(data.path / "12272019.NASDAQ_ITCH50.bin", friday.bytes());
+    write_file(data.path / "12302019.NASDAQ_ITCH50.bin", monday.bytes());
+    DayLibrary library{data.path, data.path / "fingerprints.json"};
+    library.scan();
+    const std::vector<MarketEvent> events = spaced_bids(10);
+    ReplaySession session{config(), over(events)};
+    Served served{session, options(), {}, nullptr, nullptr, &library};
+
+    const auto [status, body] = served.get("/api/days");
+    ASSERT_EQ(status, 200);
+    const json days = json::parse(body);
+    EXPECT_EQ(days["start"], "2019-12-30");
+    ASSERT_EQ(days["days"].size(), 2u);
+    EXPECT_EQ(days["days"][0]["date"], "2019-12-27");
+    EXPECT_EQ(days["days"][0]["session"]["source"], "fallback");
+    const json& day = days["days"][1];
+    const Timestamp midnight = session_midnight_ns(2019y / 12 / 30, -5h);
+    EXPECT_EQ(day["date"], "2019-12-30");
+    EXPECT_EQ(day["file"], "12302019.NASDAQ_ITCH50.bin");
+    EXPECT_EQ(day["size"], monday.bytes().size());
+    EXPECT_EQ(day["hash"], day_hash(monday.bytes()));
+    EXPECT_EQ(day["quick_check"].get<std::string>().size(), 16u);
+    EXPECT_EQ(day["itch50"], true);
+    EXPECT_EQ(day["cut_tail"], false);
+    EXPECT_EQ(day["session"],
+              (json{{"open", midnight + RTH_OPEN_NS}, {"close", midnight + RTH_CLOSE_NS}, {"source", "feed"}}));
+    EXPECT_EQ(day["symbols"], 1);
+
+    using Reply = std::pair<int, std::string>;
+    EXPECT_EQ(served.get("/api/symbols"), (Reply{200, R"({"symbols":["ACME"]})"}));
+    EXPECT_EQ(served.get("/api/symbols?days=2019-12-27"), (Reply{200, R"({"symbols":["AAA","ACME"]})"}));
+    EXPECT_EQ(served.get("/api/symbols?days=2019-12-27,2019-12-30"), (Reply{200, R"({"symbols":["ACME"]})"}));
+    EXPECT_EQ(served.get("/api/symbols?days=2019-12-27,2019-12-31"), (Reply{400, R"({"error":"unknown_day"})"}));
+    EXPECT_EQ(served.get("/api/symbols?days=2019-12-27,").first, 400);
+    EXPECT_EQ(served.get("/api/symbols?days=30-12-2019").first, 400);
+    EXPECT_EQ(served.get("/api/symbols?days=").first, 400);
+
+    write_file(data.path / "12312019.NASDAQ_ITCH50.bin", monday.bytes());
+    const json rescanned = json::parse(served.get("/api/days").second)["days"];
+    ASSERT_EQ(rescanned.size(), 3u);
+    EXPECT_EQ(rescanned[2]["hash"], day_hash(monday.bytes()));  // hashed in the request that found it
 }
 
 TEST(ServerTest, AWebSocketFromAnotherOriginIsRefused)
@@ -389,6 +453,7 @@ TEST(ServerTest, ATokenGuardsHttpAndTheWebSocketsFirstMessage)
     EXPECT_EQ(served.get("/api/symbols").first, 401);
     EXPECT_EQ(served.get("/api/symbols", "Bearer t0k3m").first, 401);
     EXPECT_EQ(served.get("/api/symbols", "Bearer t0k3n").first, 200);
+    EXPECT_EQ(served.get("/api/days").first, 401);
     EXPECT_EQ(served.get("/").first, 404);  // static files need no token; this server has no UI
 
     for (const std::string& first :
