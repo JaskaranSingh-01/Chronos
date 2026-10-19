@@ -46,14 +46,14 @@ struct Control
     std::uint64_t steps{0};  // Step: market events to apply
     std::uint32_t speed{1};  // Speed: exchange ns per wall ns; 0 = as fast as possible
     Timestamp seek_ts{0};    // Seek: the exchange time to stop at
-    Ticker symbol{};         // Symbol: the ticker the next generation replays
+    RunSpec spec{};          // Symbol: the ticker and days the next generation replays
 };
 
 enum class RecordKind : std::uint8_t {
     Lifecycle,  // one step of a command
     Report,     // an execution report delivered to the session's strategy
     Ack,              // a control, applied
-    GenerationStart,  // a new generation and the strategy it starts with
+    GenerationStart,  // a new generation and the spec it replays
     GenerationEnd     // a generation's last boundary and digests: the log's trailer, at a restart and at close()
 };
 
@@ -77,13 +77,13 @@ struct Record
     RecordKind kind{RecordKind::Lifecycle};
     Lifecycle step{Lifecycle::Received};  // Lifecycle
     ErrorCode reason{ErrorCode::None};    // the Rejected* steps
-    Command command{};                    // Lifecycle; GenerationStart: command.strategy is the starting strategy
+    Command command{};                    // Lifecycle
     std::uint64_t batch_seq{0};           // engine steps: the batch being applied
     Timestamp exchange_ts{0};             // engine steps: the clock; for Applied, the applied exchange time
     std::uint64_t market_event_seq{0};    // engine steps: market events applied so far
     OrderId order_id{0};                  // Applied orders and cancels, their verdicts, and Report
     ExecutionReport report{};             // Report
-    Control control{};                    // Ack; GenerationStart: control.symbol is the generation's ticker
+    Control control{};                    // Ack; GenerationStart: control.spec is the generation's
     SessionState state{SessionState::Paused};  // Ack: the state after the control
     Digests digests{};                         // GenerationEnd
 };
@@ -137,7 +137,7 @@ struct SnapshotMetrics
 struct Snapshot
 {
     std::uint64_t generation{0};
-    Ticker symbol{};  // the generation's ticker
+    RunSpec spec{};  // the generation's
     std::uint64_t snapshot_seq{0};
     Timestamp exchange_ts{0};
     std::uint64_t event_seq{0};  // market events applied
@@ -145,7 +145,7 @@ struct Snapshot
     std::uint64_t last_command_seq{0};  // the last command the engine applied or refused
     SessionState state{SessionState::Paused};
     std::uint32_t speed{1};
-    double progress{0};  // the source's position over SessionConfig::source_size; 0 if that is unknown
+    double progress{0};  // a day chain's position over its size; 0 for any other source
     ReplayFailure failure{ReplayFailure::None};
     SourceError source_error{SourceError::None};
     TradingState trading_state{TradingState::Trading};  // the book's: anything but Trading means no matching
@@ -195,7 +195,6 @@ private:
 
     SessionConfig config_;
     SourceFactory factory_;
-    Ticker ticker_{};                   // the current generation's input; the engine thread's
     std::optional<Generation> engine_;  // the current generation
 
     // The admission point: any thread, under inbox_mutex_.
@@ -258,7 +257,8 @@ private:
     void publish_delivered() noexcept;
     void publish_start() noexcept;
     void load() noexcept;
-    void restart() noexcept;
+    RunSpec carried() const noexcept;
+    void restart(const RunSpec& spec) noexcept;
     void end() noexcept;
     void drain_inbox() noexcept;
     void apply_control(const Control& control, Timestamp wall_now) noexcept;

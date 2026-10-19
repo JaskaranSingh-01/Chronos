@@ -26,19 +26,14 @@ std::vector<std::string> symbol_directory(std::span<const std::byte> bytes);
 // ponytail: an edit between them at the same size goes unseen; day_hash() of the whole file sees it.
 std::uint64_t quick_check(std::span<const std::byte> bytes) noexcept;
 
-// Names the market data in the command log: "<name> <size in bytes> <quick_check(), hex>".
-std::string input_fingerprint(std::string_view name, std::span<const std::byte> bytes);
-
 // XXH3-128 of every byte, as 32 hex digits: a day's identity.
 std::string day_hash(std::span<const std::byte> bytes);
 
+// day_hash() of a fresh read() of the file, as a kept mapping may still show bytes edited in place; "" if it fails.
+std::string file_hash(const std::filesystem::path& path);
+
 // YYYY-MM-DD.
 std::string iso_date(std::chrono::year_month_day date);
-
-// One ITCH day's streams: per ticker, an ItchSource with its own one-instrument registry; for the empty ticker, an
-// empty stream. Never throws but for memory. The caller keeps `bytes` alive.
-SourceFactory itch_factory(std::span<const std::byte> bytes, std::chrono::year_month_day date,
-                           std::chrono::minutes utc_offset, bool allow_truncated_tail);
 
 enum class SessionSource : std::uint8_t {
     Feed,     // the day's System Events 'Q' (start of market hours) and 'M' (end of market hours)
@@ -60,6 +55,7 @@ struct Day
 {
     std::chrono::year_month_day date{};
     std::string file{};  // the name, e.g. 12302019.NASDAQ_ITCH50.bin
+    std::filesystem::path path{};  // what `mapped` was opened from
     std::uint64_t size{0};
     std::int64_t mtime{0};  // the file clock's ns
     std::uint64_t inode{0};
@@ -97,6 +93,11 @@ public:
     // The day the last scan found for `date`; nullptr if none.
     DayHandle find(std::chrono::year_month_day date) const;
 };
+
+// Each generation's stream: a DaySequenceSource of `ticker` over `days` from `library`, or for the empty ticker an
+// empty stream. The engine thread resolves the days only here, as it builds a generation. The library outlives it.
+// ponytail: a day the library no longer holds (removed between admission and the load) replays as an empty stream.
+SourceFactory chain_factory(const DayLibrary& library, const Instrument& instrument, bool allow_truncated_tail);
 
 // One ticker over days in date order, the ticker SymbolId 0 in each day's own ItchSource, with a Clear at each next
 // day's midnight. A day not ITCH 5.0 (InvalidHeader) or with other instrument fields (InstrumentRejected) fails the

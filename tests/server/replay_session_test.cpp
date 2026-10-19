@@ -1,16 +1,20 @@
 #include <gtest/gtest.h>
 
+#include <chrono>
 #include <cmath>
 #include <cstdint>
 #include <limits>
 #include <string>
 #include <vector>
 
+#include "chronos/server/itch_input.hpp"
 #include "chronos/server/replay_session.hpp"
 #include "test_support.hpp"
 
 namespace simulator::server::test {
 namespace {
+
+using namespace std::chrono_literals;
 
 TEST(ReplaySessionTest, PlayAppliesTheEventsPacedTimeReachesAndWakesForTheNext)
 {
@@ -156,10 +160,10 @@ TEST(ReplaySessionTest, EndOfStreamDrainsExactlyLikeTheHeadlessRun)
 
     VectorSource source{events};
     MarketBook book{kSymbol, 64};
-    ExecutionSimulator execution{cfg.options.session_midnight};
-    Portfolio portfolio{cfg.instrument, cfg.limits, cfg.fees};
+    ExecutionSimulator execution;
+    Portfolio portfolio{cfg.instrument, cfg.defaults.limits, cfg.defaults.fees};
     ImbalanceTaker strategy{params};
-    EventLoop<ImbalanceTaker> headless{source, book, execution, portfolio, strategy, cfg.latency, cfg.options};
+    EventLoop<ImbalanceTaker> headless{source, book, execution, portfolio, strategy, cfg.defaults.latency};
     const LoopReport expected = headless.run();
     ASSERT_EQ(expected.drained_sim_events, 2u);
 
@@ -193,6 +197,10 @@ TEST(ReplaySessionTest, AdmissionRefusesBadRequestsStaleGenerationsAFullQueueAnd
     EXPECT_EQ(session.control(Control{.type = ControlType::Speed, .speed = 1'001}).error, ErrorCode::BadRequest);
     EXPECT_EQ(session.control(Control{.type = ControlType::Speed, .speed = UINT32_MAX}).error, ErrorCode::BadRequest);
     EXPECT_EQ(session.control(Control{.type = ControlType::Speed, .speed = 1'000}).error, ErrorCode::None);
+    Control too_many{.type = ControlType::Symbol};
+    too_many.spec.ticker = ticker("ACME");
+    too_many.spec.days.count = static_cast<std::uint8_t>(max_days + 1);
+    EXPECT_EQ(session.control(too_many).error, ErrorCode::BadRequest);
 
     for (std::size_t i = 1; i < ReplaySession::control_capacity; ++i) {
         ASSERT_EQ(session.control(kPause).error, ErrorCode::None);
@@ -377,6 +385,53 @@ TEST(ReplaySessionTest, CommandsQueuedWhenTheStreamEndsAreRefusedNotReady)
     EXPECT_EQ(session.state(), SessionState::Ended);
     EXPECT_EQ(trace(session), (std::vector<std::string>{"refused cmd1 not_ready"}));
     EXPECT_EQ(session.submit(ioc_buy(10), 0).error, ErrorCode::NotReady);
+}
+
+// A two-day chain played by the session, a few steps then at full speed, ends on the digests of stepping it straight
+// through; its last book is Monday's alone, as the Clear resets the book and its sequences.
+TEST(ReplaySessionTest, AChainPlayedByTheSessionEqualsSteppingItAndEndsOnTheLastDaysBook)
+{
+    const ScratchDir dir{"session-chain"};
+    write_file(dir.path / "12272019.NASDAQ_ITCH50.bin", acme_day(4).bytes());
+    write_file(dir.path / "12302019.NASDAQ_ITCH50.bin", acme_day(6, 1'000).bytes());
+    DayLibrary library{dir.path, dir.path / "fingerprints.json"};
+    library.scan();
+    SessionConfig cfg = config({.order_latency = 1'000, .report_latency = 1'000});
+    cfg.defaults.ticker = ticker("ACME");
+    cfg.defaults.days = {.day = {2019y / 12 / 27, 2019y / 12 / 30}, .count = 2};
+    cfg.defaults.strategy = {.kind = SessionStrategyKind::MarketMaker, .market_maker = {.quote_size = 10}};
+    const SourceFactory factory = chain_factory(library, kEquity, false);
+
+    ReplaySession session{cfg, factory};
+    session.control(step(3));
+    session.tick(kWall);
+    session.control(kFullSpeed);
+    session.control(kPlay);
+    for (Timestamp wall = kWall + snapshot_interval; session.state() != SessionState::Ended;
+         wall += snapshot_interval) {
+        session.tick(wall);
+    }
+    EXPECT_EQ(latest(session).progress, 1.0);
+    session.close();
+    const Record end = records(session).back();
+    ASSERT_EQ(end.kind, RecordKind::GenerationEnd);
+
+    Generation straight{cfg, cfg.defaults, factory(cfg.defaults.ticker, cfg.defaults.days)};
+    Timestamp ts{0};
+    while (straight.loop.peek(ts) == PeekStatus::Event && server::step(straight.loop).ok) {
+    }
+    straight.loop.finish();
+    EXPECT_EQ(end.digests, digests(straight));
+    EXPECT_EQ(straight.loop.report().replay.events, 7u + 1u + 9u);  // Friday, the Clear, Monday
+    EXPECT_GT(straight.execution.statistics().accepted_quantity, 0u);  // the market maker quoted
+
+    RunSpec monday = cfg.defaults;
+    monday.days = {.day = {2019y / 12 / 30}, .count = 1};
+    Generation alone{cfg, monday, factory(monday.ticker, monday.days)};
+    while (alone.loop.peek(ts) == PeekStatus::Event && server::step(alone.loop).ok) {
+    }
+    EXPECT_EQ(alone.book.digest(), straight.book.digest());
+    EXPECT_NE(straight.book.digest(), MarketBook(kSymbol, 16).digest());
 }
 
 }  // namespace

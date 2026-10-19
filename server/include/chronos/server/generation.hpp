@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <functional>
@@ -36,27 +37,54 @@ inline bool to_ticker(std::string_view text, Ticker& ticker) noexcept
     return true;
 }
 
-// Builds a fresh market stream of `ticker` for each generation of a session.
-using SourceFactory = std::function<std::unique_ptr<MarketEventSource>(std::string_view ticker)>;
+inline constexpr std::size_t max_days = 32;  // ponytail: 32 days per generation or run (~8 min of backtest)
+
+// A generation's or a run's days, oldest first.
+struct DayList
+{
+    std::array<std::chrono::year_month_day, max_days> day{};
+    std::uint8_t count{0};
+
+    bool operator==(const DayList&) const = default;
+};
+
+enum class TradingWindow : std::uint8_t {
+    Regular,  // each day's feed session: a run's default
+    FullDay
+};
+
+// What one generation, or one Lab run, replays and how. Never changed once it starts.
+struct RunSpec
+{
+    Ticker ticker{};
+    DayList days{};
+    LatencyConfig latency{};
+    FeeSchedule fees{};
+    RiskLimits limits{};
+    TradingWindow window{TradingWindow::FullDay};
+    StrategySpec strategy{};  // attached from the first event
+};
+
+// Builds a fresh market stream of `ticker` over `days` for each generation of a session.
+using SourceFactory = std::function<std::unique_ptr<MarketEventSource>(const Ticker& ticker, const DayList& days)>;
 
 // What every generation of a session shares.
 struct SessionConfig
 {
     std::string session_id{};
-    std::string input{};  // identifies the market data in the command log's header
     Instrument instrument{};
     SymbolId symbol{0};
     std::size_t book_capacity{std::size_t{1} << 20};
-    LatencyConfig latency{};
-    RiskLimits limits{};
-    FeeSchedule fees{};
-    ReplayOptions options{};
-    std::uint64_t source_size{0};  // the source's position() at the end of its stream; 0 if unknown
+    std::uint64_t check_invariants_every{0};
+    bool allow_truncated_tail{false};  // a day cut mid-message ends there instead of failing
+    RunSpec defaults{};                // the first generation's: the terminal's latencies, fees and limits
 };
 
-// One generation of a session: a fresh source, book, simulator, portfolio and strategy under one EventLoop.
+// One generation of a session: a fresh source, book, simulator, portfolio and strategy under one EventLoop. Its first
+// day's midnight seeds the loop and the simulator.
 struct Generation
 {
+    RunSpec spec;
     std::unique_ptr<MarketEventSource> source;
     MarketBook book;
     ExecutionSimulator execution;
@@ -64,7 +92,7 @@ struct Generation
     SessionStrategy strategy;
     EventLoop<SessionStrategy> loop;
 
-    Generation(const SessionConfig& config, std::unique_ptr<MarketEventSource> market, const StrategySpec& spec);
+    Generation(const SessionConfig& config, const RunSpec& run, std::unique_ptr<MarketEventSource> market);
 };
 
 struct Applied

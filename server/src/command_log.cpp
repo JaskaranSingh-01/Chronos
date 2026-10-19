@@ -12,8 +12,9 @@
 
 #include <nlohmann/json.hpp>
 
-#include "build_info.hpp"  // generated: build_commit, build_dirty
+#include "build_info.hpp"  // generated: build_commit, build_dirty, build_source_digest
 #include "json_enums.hpp"
+#include "simulator/cli/replay_args.hpp"
 
 namespace simulator::server {
 
@@ -82,55 +83,108 @@ Command command_from(const json& line)
                    .strategy = strategy_from(payload.at("strategy"))};
 }
 
-// The header line of the generation `start` (a GenerationStart record) begins.
-json header_json(const SessionConfig& config, const Record& start, const std::string& commit, bool dirty)
+// The header line of the generation `start` (a GenerationStart record) begins, with its days as they were.
+json header_json(const SessionConfig& config, const Record& start, std::span<const LoggedDay> days,
+                 const std::string& commit, bool dirty, const std::string& source_digest)
 {
-    return {
-        {"type", "header"},
-        {"protocol", log_protocol},
-        {"session_id", config.session_id},
-        {"generation", start.generation},
-        {"commit", commit},
-        {"dirty", dirty},
-        {"input", config.input},
-        {"ticker", std::string{name(start.control.symbol)}},
-        {"symbol", config.symbol},
-        {"book_capacity", config.book_capacity},
-        {"instrument",
-         {{"price_scale", config.instrument.price_scale}, {"quantity_scale", config.instrument.quantity_scale}}},
-        {"latency", {{"order_ns", config.latency.order_latency}, {"report_ns", config.latency.report_latency}}},
-        {"fees",
-         {{"maker_per_share", config.fees.maker_fee_per_share}, {"taker_per_share", config.fees.taker_fee_per_share}}},
-        {"risk",
-         {{"max_position", config.limits.max_position},
-          {"max_order_quantity", config.limits.max_order_quantity.value()},
-          {"max_open_orders", config.limits.max_open_orders}}},
-        {"session_midnight", config.options.session_midnight},
-        {"check_invariants_every", config.options.check_invariants_every},
-        {"strategy", strategy_json(start.command.strategy)}};
+    const RunSpec& spec = start.control.spec;
+    json logged = json::array();
+    for (std::size_t i = 0; i < days.size(); ++i) {
+        logged.push_back({{"date", iso_date(spec.days.day[i])},
+                          {"file", days[i].file},
+                          {"size", days[i].size},
+                          {"hash", days[i].hash},
+                          {"session", days[i].session},
+                          {"session_midnight", days[i].session_midnight}});
+    }
+    return {{"type", "header"},
+            {"protocol", log_protocol},
+            {"session_id", config.session_id},
+            {"generation", start.generation},
+            {"commit", commit},
+            {"dirty", dirty},
+            {"source_digest", source_digest},
+            {"ticker", std::string{name(spec.ticker)}},
+            {"days", logged},
+            {"allow_truncated_tail", config.allow_truncated_tail},
+            {"symbol", config.symbol},
+            {"book_capacity", config.book_capacity},
+            {"instrument",
+             {{"price_scale", config.instrument.price_scale}, {"quantity_scale", config.instrument.quantity_scale}}},
+            {"latency", {{"order_ns", spec.latency.order_latency}, {"report_ns", spec.latency.report_latency}}},
+            {"fees",
+             {{"maker_per_share", spec.fees.maker_fee_per_share}, {"taker_per_share", spec.fees.taker_fee_per_share}}},
+            {"risk",
+             {{"max_position", spec.limits.max_position},
+              {"max_order_quantity", spec.limits.max_order_quantity.value()},
+              {"max_open_orders", spec.limits.max_open_orders}}},
+            {"window", spec.window},
+            {"check_invariants_every", config.check_invariants_every},
+            {"strategy", strategy_json(spec.strategy)},
+            {"run_id", ""}};
 }
 
 SessionConfig config_from(const json& header)
 {
     const json& instrument = header.at("instrument");
-    const json& latency = header.at("latency");
-    const json& fees = header.at("fees");
-    const json& risk = header.at("risk");
     return SessionConfig{.session_id = header.at("session_id").get<std::string>(),
-                         .input = header.at("input").get<std::string>(),
                          .instrument = {.price_scale = instrument.at("price_scale").get<std::uint8_t>(),
                                         .quantity_scale = instrument.at("quantity_scale").get<std::uint8_t>()},
                          .symbol = header.at("symbol").get<SymbolId>(),
                          .book_capacity = header.at("book_capacity").get<std::size_t>(),
-                         .latency = {.order_latency = latency.at("order_ns").get<Timestamp>(),
-                                     .report_latency = latency.at("report_ns").get<Timestamp>()},
-                         .limits = {.max_position = risk.at("max_position").get<std::int64_t>(),
-                                    .max_order_quantity = Quantity{risk.at("max_order_quantity").get<std::uint64_t>()},
-                                    .max_open_orders = risk.at("max_open_orders").get<std::size_t>()},
-                         .fees = {.maker_fee_per_share = fees.at("maker_per_share").get<std::int64_t>(),
-                                  .taker_fee_per_share = fees.at("taker_per_share").get<std::int64_t>()},
-                         .options = {.check_invariants_every = header.at("check_invariants_every").get<std::uint64_t>(),
-                                     .session_midnight = header.at("session_midnight").get<Timestamp>()}};
+                         .check_invariants_every = header.at("check_invariants_every").get<std::uint64_t>(),
+                         .allow_truncated_tail = header.at("allow_truncated_tail").get<bool>()};
+}
+
+// The header's RunSpec and days; false on a ticker, a date or a day count the writer would never write.
+bool spec_from(const json& header, RunSpec& spec, std::vector<LoggedDay>& days)
+{
+    const json& latency = header.at("latency");
+    const json& fees = header.at("fees");
+    const json& risk = header.at("risk");
+    spec = RunSpec{.latency = {.order_latency = latency.at("order_ns").get<Timestamp>(),
+                               .report_latency = latency.at("report_ns").get<Timestamp>()},
+                   .fees = {.maker_fee_per_share = fees.at("maker_per_share").get<std::int64_t>(),
+                            .taker_fee_per_share = fees.at("taker_per_share").get<std::int64_t>()},
+                   .limits = {.max_position = risk.at("max_position").get<std::int64_t>(),
+                              .max_order_quantity = Quantity{risk.at("max_order_quantity").get<std::uint64_t>()},
+                              .max_open_orders = risk.at("max_open_orders").get<std::size_t>()},
+                   .window = header.at("window").get<TradingWindow>(),
+                   .strategy = strategy_from(header.at("strategy"))};
+    const json& logged = header.at("days");
+    if (!to_ticker(header.at("ticker").get<std::string>(), spec.ticker) || logged.size() > max_days) {
+        return false;
+    }
+    days.clear();
+    for (const json& day : logged) {
+        if (!parse_date(day.at("date").get<std::string>(), spec.days.day[spec.days.count++])) {
+            return false;
+        }
+        days.push_back({.file = day.at("file").get<std::string>(),
+                        .size = day.at("size").get<std::uint64_t>(),
+                        .hash = day.at("hash").get<std::string>(),
+                        .session = day.at("session").get<FeedSession>(),
+                        .session_midnight = day.at("session_midnight").get<Timestamp>()});
+    }
+    return true;
+}
+
+// The library's record of each of `days`; one it no longer holds is logged empty, so it never reproduces.
+// ponytail: read when the header is written, so a file replaced and rescanned between a load and its header logs the
+// new version; carry the generation's day handles to the writer if that window matters.
+std::vector<LoggedDay> logged_days(const DayLibrary* library, const DayList& days)
+{
+    std::vector<LoggedDay> logged;
+    for (std::size_t i = 0; i < days.count; ++i) {
+        const DayHandle day = library != nullptr ? library->find(days.day[i]) : nullptr;
+        logged.push_back(day == nullptr ? LoggedDay{}
+                                        : LoggedDay{.file = day->file,
+                                                    .size = day->size,
+                                                    .hash = day->hash,
+                                                    .session = day->session,
+                                                    .session_midnight = day->midnight});
+    }
+    return logged;
 }
 
 // The line for a command step, a report or a trailer; a GenerationStart is a header, which needs the config.
@@ -336,8 +390,9 @@ std::size_t LogQueue::size() const noexcept
     return depth_.load(std::memory_order_relaxed);
 }
 
-LogWriter::LogWriter(LogQueue& queue, const std::filesystem::path& path, SessionConfig config, bool fsync)
-    : queue_(queue), config_(std::move(config)), file_(nullptr), fsync_(fsync)
+LogWriter::LogWriter(LogQueue& queue, const std::filesystem::path& path, SessionConfig config, const DayLibrary* days,
+                     bool fsync)
+    : queue_(queue), config_(std::move(config)), days_(days), file_(nullptr), fsync_(fsync)
 {
     std::error_code ignored;
     const bool creating = fsync_ && !std::filesystem::exists(path, ignored);
@@ -370,7 +425,8 @@ void LogWriter::run()
     Record record;
     while (queue_.pop(record)) {
         const json line = record.kind == RecordKind::GenerationStart
-            ? header_json(config_, record, build_commit, build_dirty)
+            ? header_json(config_, record, logged_days(days_, record.control.spec.days), build_commit, build_dirty,
+                          build_source_digest)
             : record_json(record);
         const std::string text = dump_line(line) + '\n';
         const bool command = record.kind == RecordKind::Lifecycle;
@@ -403,22 +459,23 @@ bool read_log(const std::filesystem::path& path, std::uint64_t generation, Logge
         }
         try {
             Record record;
+            std::vector<LoggedDay> days;
             json expected;  // what the writer would have written for the record just read
             const std::string type = line.at("type").get<std::string>();
             if (type == "header") {
-                if (line.at("protocol").get<int>() != log_protocol) {
-                    error = where + "unsupported log protocol";
+                if (const int protocol = line.at("protocol").get<int>(); protocol != log_protocol) {
+                    error = where + "log protocol " + std::to_string(protocol) + ", written by commit " +
+                        line.value("commit", "unknown") + ": reproduce it with that commit's build";
                     return false;
                 }
                 record = Record{.generation = line.at("generation").get<std::uint64_t>(),
-                                .kind = RecordKind::GenerationStart,
-                                .command = {.strategy = strategy_from(line.at("strategy"))}};
-                if (!to_ticker(line.at("ticker").get<std::string>(), record.control.symbol)) {
+                                .kind = RecordKind::GenerationStart};
+                if (!spec_from(line, record.control.spec, days)) {
                     error = where + "unexpected field or value";
                     return false;
                 }
-                expected = header_json(config_from(line), record, line.at("commit").get<std::string>(),
-                                       line.at("dirty").get<bool>());
+                expected = header_json(config_from(line), record, days, line.at("commit").get<std::string>(),
+                                       line.at("dirty").get<bool>(), line.at("source_digest").get<std::string>());
             } else if (type == "command") {
                 record = command_record_from(line);
                 expected = record_json(record);
@@ -453,8 +510,8 @@ bool read_log(const std::filesystem::path& path, std::uint64_t generation, Logge
                     return false;
                 }
                 has_header = true;
-                found.ticker = record.control.symbol;
-                found.start = record.command.strategy;
+                found.spec = record.control.spec;
+                found.days = days;
             } else if (record.kind == RecordKind::GenerationEnd) {
                 if (found.end) {
                     error = where + "a second trailer for generation " + std::to_string(generation);
@@ -477,9 +534,17 @@ bool read_log(const std::filesystem::path& path, std::uint64_t generation, Logge
     return true;
 }
 
-bool reproduce(Generation& generation, const LoggedGeneration& logged) noexcept
+bool reproduce(Generation& generation, const LoggedGeneration& logged, std::span<const DayHandle> days) noexcept
 {
-    generation.strategy.attach(logged.start);
+    if (days.size() != logged.days.size()) {
+        return false;
+    }
+    for (std::size_t i = 0; i < days.size(); ++i) {
+        const std::string hash = file_hash(days[i]->path);  // a kept mapping may show bytes edited since
+        if (hash.empty() || hash != logged.days[i].hash) {  // a day logged empty, or unreadable, never reproduces
+            return false;
+        }
+    }
     EventLoop<SessionStrategy>& loop = generation.loop;
     Timestamp next_ts{0};
     std::uint64_t batch = 0;

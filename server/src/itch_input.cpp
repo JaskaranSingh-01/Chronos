@@ -160,6 +160,7 @@ bool identify(const std::filesystem::path& path, Day& day)
 bool open_version(const std::filesystem::path& path, Day& day)
 {
     day.file = path.filename().string();
+    day.path = path;
     struct stat status{};
     if (!day_date(day.file, day.date) || ::stat(path.c_str(), &status) != 0) {
         return false;
@@ -295,14 +296,22 @@ std::uint64_t quick_check(std::span<const std::byte> bytes) noexcept
     return hash;
 }
 
-std::string input_fingerprint(std::string_view name, std::span<const std::byte> bytes)
-{
-    return std::string{name} + " " + std::to_string(bytes.size()) + " " + hex(quick_check(bytes));
-}
-
 std::string day_hash(std::span<const std::byte> bytes)
 {
     return hex(XXH3_128bits(bytes.data(), bytes.size()));
+}
+
+std::string file_hash(const std::filesystem::path& path)
+{
+    std::vector<std::byte> buffer(std::size_t{1} << 20);
+    XXH3_state_t state;
+    XXH3_128bits_reset(&state);
+    std::ifstream in{path, std::ios::binary};
+    while (in) {
+        in.read(reinterpret_cast<char*>(buffer.data()), static_cast<std::streamsize>(buffer.size()));
+        XXH3_128bits_update(&state, buffer.data(), static_cast<std::size_t>(in.gcount()));
+    }
+    return in.bad() || !in.eof() ? std::string{} : hex(XXH3_128bits_digest(&state));
 }
 
 std::string iso_date(std::chrono::year_month_day date)
@@ -312,18 +321,19 @@ std::string iso_date(std::chrono::year_month_day date)
     return text;
 }
 
-SourceFactory itch_factory(std::span<const std::byte> bytes, std::chrono::year_month_day date,
-                           std::chrono::minutes utc_offset, bool allow_truncated_tail)
+SourceFactory chain_factory(const DayLibrary& library, const Instrument& instrument, bool allow_truncated_tail)
 {
-    return [=](std::string_view ticker) -> std::unique_ptr<MarketEventSource> {
-        if (ticker.empty()) {
+    return [&library, instrument, allow_truncated_tail](const Ticker& ticker,
+                                                        const DayList& days) -> std::unique_ptr<MarketEventSource> {
+        std::vector<DayHandle> handles;
+        for (std::size_t i = 0; i < days.count; ++i) {
+            handles.push_back(library.find(days.day[i]));
+        }
+        if (name(ticker).empty() || std::find(handles.begin(), handles.end(), nullptr) != handles.end()) {
             return std::make_unique<VectorSource>(std::span<const MarketEvent>{});
         }
-        return std::make_unique<TickerSource>(bytes,
-                                              ItchSourceConfig{.ticker = ticker,
-                                                               .session_date = date,
-                                                               .utc_offset = utc_offset,
-                                                               .allow_truncated_tail = allow_truncated_tail});
+        return std::make_unique<DaySequenceSource>(std::move(handles), name(ticker), instrument, allow_truncated_tail,
+                                                   false);
     };
 }
 

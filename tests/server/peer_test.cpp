@@ -279,7 +279,7 @@ TEST(PeerTest, ACommandIsAckedOnceLoggedAndSubmitsAreRateLimited)
     const std::vector<MarketEvent> events = spaced_bids(10);
     const Scratch scratch{"peer-ack"};
     LogQueue queue;
-    const LogWriter writer{queue, scratch.path, config(), false};
+    const LogWriter writer{queue, scratch.path, config(), nullptr, false};
     ReplaySession session{config(), over(events), &queue};
     Hub hub{.session = session, .log = &queue, .writer = &writer, .session_id = "test"};
     Peer peer{hub, kWall};
@@ -318,7 +318,7 @@ TEST(PeerTest, ACommandWhoseRecordNeverReachesTheLogGetsLogUnavailable)
     const Scratch scratch{"peer-unavailable"};
     LogQueue queue;  // the session's: no writer drains it
     LogQueue idle;
-    const LogWriter writer{idle, scratch.path, config(), false};  // persists nothing of this session's
+    const LogWriter writer{idle, scratch.path, config(), nullptr, false};  // persists nothing of this session's
     ReplaySession session{config(), over(events), &queue};
     Hub hub{.session = session, .log = &queue, .writer = &writer, .session_id = "test"};
     Peer peer{hub, kWall};
@@ -339,7 +339,7 @@ TEST(PeerTest, ACommandLoggedBeforeTheLogFailedIsStillAcked)
     const std::vector<MarketEvent> events = spaced_bids(10);
     const Scratch scratch{"peer-failed-after"};
     LogQueue queue;
-    const LogWriter writer{queue, scratch.path, config(), false};
+    const LogWriter writer{queue, scratch.path, config(), nullptr, false};
     ReplaySession session{config(), over(events), &queue};
     Hub hub{.session = session, .log = &queue, .writer = &writer, .session_id = "test"};
     Peer peer{hub, kWall};

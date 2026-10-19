@@ -55,12 +55,13 @@ inline MarketEvent execute(Timestamp ts, OrderId id, std::uint64_t quantity, std
 // Zero fees, 16,384 book slots, and risk limits of position 1,000, order 500 and 4 open orders.
 inline SessionConfig config(LatencyConfig latency = {})
 {
-    return SessionConfig{.session_id = "test",
-                         .instrument = kEquity,
-                         .symbol = kSymbol,
-                         .book_capacity = 16'384,
-                         .latency = latency,
-                         .limits = {.max_position = 1'000, .max_order_quantity = Quantity{500}, .max_open_orders = 4}};
+    return SessionConfig{
+        .session_id = "test",
+        .instrument = kEquity,
+        .symbol = kSymbol,
+        .book_capacity = 16'384,
+        .defaults = {.latency = latency,
+                     .limits = {.max_position = 1'000, .max_order_quantity = Quantity{500}, .max_open_orders = 4}}};
 }
 
 inline constexpr Timestamp kWall = 1'000 * kSecond;  // the wall clock at a test's first tick
@@ -91,7 +92,7 @@ inline std::vector<MarketEvent> spaced_bids(std::size_t n)
 // A factory of VectorSources over `events`, whatever the ticker; the caller keeps `events` alive.
 inline SourceFactory over(const std::vector<MarketEvent>& events)
 {
-    return [&events](std::string_view) { return std::make_unique<VectorSource>(events); };
+    return [&events](const Ticker&, const DayList&) { return std::make_unique<VectorSource>(events); };
 }
 
 // A client message of `type` to the session config() names, at `generation`, with `fields` (each with its leading

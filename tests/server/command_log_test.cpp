@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 
+#include <chrono>
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
@@ -8,13 +9,18 @@
 #include <string_view>
 #include <vector>
 
+#include <nlohmann/json.hpp>
+
 #include "chronos/server/command_log.hpp"
+#include "chronos/server/itch_input.hpp"
 #include "chronos/server/replay_session.hpp"
 #include "chronos/server/session_runner.hpp"
 #include "test_support.hpp"
 
 namespace simulator::server::test {
 namespace {
+
+using namespace std::chrono_literals;
 
 std::vector<std::string> read_lines(const std::filesystem::path& path)
 {
@@ -40,7 +46,7 @@ std::vector<std::string> sample_log(const SessionConfig& cfg, bool closed = fals
     const Scratch scratch{"sample"};
     {
         LogQueue queue;
-        const LogWriter writer{queue, scratch.path, cfg, false};
+        const LogWriter writer{queue, scratch.path, cfg, nullptr, false};
         ReplaySession session{cfg, over(events), &queue};
         session.submit(post_only_buy(999'800, 10), 42);
         session.tick(kWall);
@@ -182,7 +188,7 @@ TEST(CommandLogTest, ReplayingTheLogReproducesTheBookExecutionAndPortfolio)
     std::size_t not_ready = 0;
     {
         LogQueue queue;
-        const LogWriter writer{queue, path, cfg, false};
+        const LogWriter writer{queue, path, cfg, nullptr, false};
         ReplaySession session{cfg, over(events), &queue};
         session.control(kPlay);
         int t = 0;
@@ -225,21 +231,103 @@ TEST(CommandLogTest, ReplayingTheLogReproducesTheBookExecutionAndPortfolio)
     LoggedGeneration logged;
     std::string error;
     ASSERT_TRUE(read_log(path, 1, logged, error)) << error;
-    EXPECT_TRUE(logged.start == StrategySpec{});
+    EXPECT_TRUE(logged.spec.strategy == StrategySpec{});
     EXPECT_EQ(logged.applied.size(), applied_first);
     ASSERT_TRUE(logged.end.has_value());  // the restart's trailer
     EXPECT_EQ(logged.end->market_event_seq, 3'000u);
-    Generation fresh{cfg, over(events)(name(logged.ticker)), StrategySpec{}};
+    Generation fresh{cfg, logged.spec, over(events)(logged.spec.ticker, logged.spec.days)};
     ASSERT_TRUE(reproduce(fresh, logged));
     EXPECT_EQ(outcome(fresh.book, fresh.execution, fresh.portfolio, fresh.loop.report()), first);
 
     ASSERT_TRUE(read_log(path, 2, logged, error)) << error;
-    EXPECT_EQ(logged.start.kind, SessionStrategyKind::ImbalanceTaker);
+    EXPECT_EQ(logged.spec.strategy.kind, SessionStrategyKind::ImbalanceTaker);
     EXPECT_EQ(logged.applied.size(), applied_second);
     ASSERT_TRUE(logged.end.has_value());  // close()'s trailer
-    Generation again{cfg, over(events)(name(logged.ticker)), StrategySpec{}};
+    Generation again{cfg, logged.spec, over(events)(logged.spec.ticker, logged.spec.days)};
     ASSERT_TRUE(reproduce(again, logged));
     EXPECT_EQ(outcome(again.book, again.execution, again.portfolio, again.loop.report()), second);
+}
+
+// A two-day generation's header records each day as it was, and the build's source digest. read_log and reproduce()
+// over the same days give the session's digests; a day edited since, even keeping its size, mtime and inode so that
+// the cached listing still matches, is refused.
+TEST(CommandLogTest, ATwoDayLogNamesEachDayAndReproducesUntilADayChanges)
+{
+    const ScratchDir dir{"log-days"};
+    const std::filesystem::path friday_file = dir.path / "12272019.NASDAQ_ITCH50.bin";
+    itch_test::ItchBuilder friday = acme_day(4);
+    for (std::uint64_t match = 1; match <= 50'000; ++match) {  // 2.3 MB of prints: a middle the quick check never reads
+        friday.trade(1, kNineThirty + 9 * kSecond, 0, 'B', 100, "ACME", 100'000, match);
+    }
+    write_file(friday_file, friday.bytes());
+    write_file(dir.path / "12302019.NASDAQ_ITCH50.bin", acme_day(6, 1'000).bytes());
+    DayLibrary library{dir.path, dir.path / "fingerprints.json"};
+    const std::vector<DayHandle> days = library.scan();
+    SessionConfig cfg = config({.order_latency = 1'000, .report_latency = 1'000});
+    cfg.defaults.ticker = ticker("ACME");
+    cfg.defaults.days = {.day = {2019y / 12 / 27, 2019y / 12 / 30}, .count = 2};
+    const SourceFactory factory = chain_factory(library, kEquity, false);
+    const Scratch scratch{"days"};
+    Record end;
+    {
+        LogQueue queue;
+        const LogWriter writer{queue, scratch.path, cfg, &library, false};
+        ReplaySession session{cfg, factory, &queue};
+        session.submit(
+            Command{.generation = 1,
+                    .type = CommandType::Attach,
+                    .strategy = {.kind = SessionStrategyKind::MarketMaker, .market_maker = {.quote_size = 10}}},
+            0);
+        session.control(kFullSpeed);
+        session.control(kPlay);
+        for (Timestamp wall = kWall; session.state() != SessionState::Ended; wall += kMs) {
+            session.tick(wall);
+        }
+        session.close();
+        end = records(session).back();
+        wait_until_written(queue);
+    }
+    const nlohmann::json header = nlohmann::json::parse(read_lines(scratch.path).at(0));
+    EXPECT_EQ(header["protocol"], 2);
+    EXPECT_EQ(header["source_digest"].get<std::string>().size(), 64u);
+    EXPECT_EQ(header["window"], "full_day");
+    EXPECT_EQ(header["run_id"], "");
+    ASSERT_EQ(header["days"].size(), 2u);
+    const Timestamp midnight = session_midnight_ns(2019y / 12 / 27, -5h);
+    EXPECT_EQ(
+        header["days"][0],
+        (nlohmann::json{
+            {"date", "2019-12-27"},
+            {"file", "12272019.NASDAQ_ITCH50.bin"},
+            {"size", days[0]->size},
+            {"hash", days[0]->hash},
+            {"session", {{"open", midnight + RTH_OPEN_NS}, {"close", midnight + RTH_CLOSE_NS}, {"source", "feed"}}},
+            {"session_midnight", midnight}}));
+    EXPECT_EQ(header["days"][1]["hash"], days[1]->hash);
+
+    LoggedGeneration logged;
+    std::string error;
+    ASSERT_TRUE(read_log(scratch.path, 1, logged, error)) << error;
+    EXPECT_EQ(logged.spec.days, cfg.defaults.days);
+    EXPECT_EQ(logged.spec.strategy.kind, SessionStrategyKind::None);  // the attach is a logged command
+    Generation again{cfg, logged.spec, factory(logged.spec.ticker, logged.spec.days)};
+    ASSERT_TRUE(reproduce(again, logged, days));
+    EXPECT_EQ(digests(again), end.digests);
+    EXPECT_EQ(file_hash(friday_file), days[0]->hash);
+
+    const std::filesystem::file_time_type mtime = std::filesystem::last_write_time(friday_file);
+    {
+        std::fstream edit{friday_file, std::ios::in | std::ios::out | std::ios::binary};
+        edit.seekp(static_cast<std::streamoff>(friday.bytes().size() / 2));
+        edit.put('x');
+    }
+    std::filesystem::last_write_time(friday_file, mtime);
+    const std::vector<DayHandle> edited = library.scan();
+    EXPECT_EQ(edited[0]->hash, days[0]->hash);  // the cached listing still matches
+    EXPECT_EQ(edited[0], days[0]);  // as the same handle, with the mapping it kept
+    Generation changed{cfg, logged.spec, std::make_unique<DaySequenceSource>(edited, "ACME", kEquity, false, false)};
+    EXPECT_FALSE(reproduce(changed, logged, edited));
+    EXPECT_FALSE(reproduce(changed, logged, {}));  // and no days at all is no reproduction
 }
 
 TEST(CommandLogTest, TheLogHasAHeaderPerGenerationAndOneFlushedLinePerRecord)
@@ -251,11 +339,11 @@ TEST(CommandLogTest, TheLogHasAHeaderPerGenerationAndOneFlushedLinePerRecord)
     const std::filesystem::path& path = scratch.path;
     {
         LogQueue queue;
-        const LogWriter writer{queue, path, cfg, true};  // also fsyncs every command line
+        const LogWriter writer{queue, path, cfg, nullptr, true};  // also fsyncs every command line
         ReplaySession session{cfg, over(events), &queue};
         session.submit(post_only_buy(999'800, 10), 42);
         session.tick(kWall);
-        session.control(Control{.type = ControlType::Symbol, .symbol = ticker("MSFT")});
+        session.control(Control{.type = ControlType::Symbol, .spec = {.ticker = ticker("MSFT")}});
         session.tick(kWall);
         std::uint64_t last_logged = 0;  // the generation 2 header: an Ack is never logged
         for (const Record& r : records(session)) {
@@ -272,7 +360,7 @@ TEST(CommandLogTest, TheLogHasAHeaderPerGenerationAndOneFlushedLinePerRecord)
     };
     EXPECT_TRUE(has(0, "\"type\":\"header\""));
     EXPECT_TRUE(has(0, "\"generation\":1"));
-    EXPECT_TRUE(has(0, "\"protocol\":1"));
+    EXPECT_TRUE(has(0, "\"protocol\":2"));
     EXPECT_TRUE(has(0, "\"session_id\":\"test\""));
     EXPECT_TRUE(has(0, "\"order_ns\":100000"));
     EXPECT_TRUE(has(0, "\"max_order_quantity\":500"));
@@ -301,7 +389,7 @@ TEST(CommandLogTest, TheLogHasAHeaderPerGenerationAndOneFlushedLinePerRecord)
     LoggedGeneration logged;
     std::string error;
     ASSERT_TRUE(read_log(path, 2, logged, error)) << error;
-    EXPECT_EQ(name(logged.ticker), "MSFT");
+    EXPECT_EQ(name(logged.spec.ticker), "MSFT");
     EXPECT_FALSE(logged.end.has_value());  // generation 2 was never closed
     ASSERT_TRUE(read_log(path, 1, logged, error)) << error;
     ASSERT_TRUE(logged.end.has_value());
@@ -316,7 +404,7 @@ TEST(CommandLogTest, AReproductionStopsAtTheTrailerAndChecksItsDigests)
     Outcome closed;
     {
         LogQueue queue;
-        const LogWriter writer{queue, scratch.path, cfg, false};
+        const LogWriter writer{queue, scratch.path, cfg, nullptr, false};
         ReplaySession session{cfg, over(events), &queue};
         session.control(kPlay);
         for (int t = 0; t < 30; ++t) {  // orders, a pause, a step mid-timestamp, then play
@@ -333,18 +421,18 @@ TEST(CommandLogTest, AReproductionStopsAtTheTrailerAndChecksItsDigests)
     ASSERT_TRUE(logged.end.has_value());
     EXPECT_GT(logged.end->market_event_seq, 0u);
     EXPECT_LT(logged.end->market_event_seq, 3'000u);
-    Generation fresh{cfg, over(events)(name(logged.ticker)), StrategySpec{}};
+    Generation fresh{cfg, logged.spec, over(events)(logged.spec.ticker, logged.spec.days)};
     ASSERT_TRUE(reproduce(fresh, logged));
     EXPECT_EQ(outcome(fresh.book, fresh.execution, fresh.portfolio, fresh.loop.report()), closed);
 
     LoggedGeneration tampered = logged;  // a trailer whose digest does not match is a failed reproduction
     tampered.end->digests.portfolio ^= 1;
-    Generation again{cfg, over(events)(name(logged.ticker)), StrategySpec{}};
+    Generation again{cfg, logged.spec, over(events)(logged.spec.ticker, logged.spec.days)};
     EXPECT_FALSE(reproduce(again, tampered));
 
     LoggedGeneration untrailed = logged;  // a session that never closed: reproduce to the end of the stream
     untrailed.end.reset();
-    Generation whole{cfg, over(events)(name(logged.ticker)), StrategySpec{}};
+    Generation whole{cfg, logged.spec, over(events)(logged.spec.ticker, logged.spec.days)};
     EXPECT_TRUE(reproduce(whole, untrailed));
     EXPECT_EQ(whole.loop.report().replay.events, 3'000u);
 
@@ -353,14 +441,14 @@ TEST(CommandLogTest, AReproductionStopsAtTheTrailerAndChecksItsDigests)
     for (MarketEvent& event : bbb) {
         event.price.ticks += event.type == MarketEventType::Add ? 5'000 : 0;
     }
-    const SourceFactory by_ticker = [&](std::string_view t) {
-        return std::make_unique<VectorSource>(t == "BBB" ? bbb : events);
+    const SourceFactory by_ticker = [&](const Ticker& t, const DayList&) {
+        return std::make_unique<VectorSource>(name(t) == "BBB" ? bbb : events);
     };
     const Scratch switched{"switched"};
     Outcome live;
     {
         LogQueue queue;
-        const LogWriter writer{queue, switched.path, cfg, false};
+        const LogWriter writer{queue, switched.path, cfg, nullptr, false};
         ReplaySession session{cfg, by_ticker, &queue};
         Timestamp wall = kWall;
         const auto run = [&](int ticks) {
@@ -375,7 +463,7 @@ TEST(CommandLogTest, AReproductionStopsAtTheTrailerAndChecksItsDigests)
         session.book().best(Side::Buy, bid);
         session.submit(post_only_buy(bid.price.ticks, 10), 0);
         run(10);
-        session.control(Control{.type = ControlType::Symbol, .symbol = ticker("BBB")});
+        session.control(Control{.type = ControlType::Symbol, .spec = {.ticker = ticker("BBB")}});
         run(1);  // the switch: generation 2 replays BBB, paused before its first event
         session.control(kPlay);
         run(10);
@@ -393,21 +481,22 @@ TEST(CommandLogTest, AReproductionStopsAtTheTrailerAndChecksItsDigests)
     }
     EXPECT_GT(live.execution.taker_fills, 0u);
     ASSERT_TRUE(read_log(switched.path, 2, logged, error)) << error;
-    EXPECT_EQ(name(logged.ticker), "BBB");
+    EXPECT_EQ(name(logged.spec.ticker), "BBB");
     EXPECT_EQ(logged.applied.size(), 1u);
     ASSERT_TRUE(logged.end.has_value());
-    Generation bbb_again{cfg, by_ticker(name(logged.ticker)), StrategySpec{}};
+    Generation bbb_again{cfg, logged.spec, by_ticker(logged.spec.ticker, logged.spec.days)};
     ASSERT_TRUE(reproduce(bbb_again, logged));
     EXPECT_EQ(bbb_again.book.digest(), live.digest);
     EXPECT_EQ(outcome(bbb_again.book, bbb_again.execution, bbb_again.portfolio, bbb_again.loop.report()), live);
 
-    Generation wrong{cfg, by_ticker(""), StrategySpec{}};  // the first ticker's stream is not generation 2's input
+    Generation wrong{cfg, logged.spec,
+                     by_ticker(Ticker{}, logged.spec.days)};  // the first ticker's stream is not generation 2's input
     EXPECT_FALSE(reproduce(wrong, logged));
     EXPECT_NE(wrong.book.digest(), live.digest);
 
     ASSERT_TRUE(read_log(switched.path, 1, logged, error)) << error;  // the switch's trailer closed generation 1
     ASSERT_TRUE(logged.end.has_value());
-    Generation first_again{cfg, by_ticker(name(logged.ticker)), StrategySpec{}};
+    Generation first_again{cfg, logged.spec, by_ticker(logged.spec.ticker, logged.spec.days)};
     EXPECT_TRUE(reproduce(first_again, logged));
 }
 
@@ -422,7 +511,7 @@ TEST(CommandLogTest, AReproductionMatchesATrailerWrittenAfterANonEmptyDrain)
     Outcome closed;
     {
         LogQueue queue;
-        const LogWriter writer{queue, scratch.path, cfg, false};
+        const LogWriter writer{queue, scratch.path, cfg, nullptr, false};
         ReplaySession session{cfg, over(events), &queue};
         session.control(step(2));
         session.submit(post_only_buy(999'800, 10), 0);
@@ -437,7 +526,7 @@ TEST(CommandLogTest, AReproductionMatchesATrailerWrittenAfterANonEmptyDrain)
     std::string error;
     ASSERT_TRUE(read_log(scratch.path, 1, logged, error)) << error;
     ASSERT_TRUE(logged.end.has_value());
-    Generation fresh{cfg, over(events)(name(logged.ticker)), StrategySpec{}};
+    Generation fresh{cfg, logged.spec, over(events)(logged.spec.ticker, logged.spec.days)};
     ASSERT_TRUE(reproduce(fresh, logged));
     EXPECT_EQ(outcome(fresh.book, fresh.execution, fresh.portfolio, fresh.loop.report()), closed);
 }
@@ -506,7 +595,7 @@ TEST(CommandLogTest, AMarketMakerAtFullSpeedNeverOverrunsTheLog)
     const std::vector<MarketEvent> events = random_stream(20'000);
     const Scratch scratch{"backpressure"};
     LogQueue queue;
-    const LogWriter writer{queue, scratch.path, config(), false};
+    const LogWriter writer{queue, scratch.path, config(), nullptr, false};
     ReplaySession session{config(), over(events), &queue};
     session.submit(
         Command{.generation = 1,
@@ -548,7 +637,7 @@ TEST(CommandLogTest, ACommandAdmittedBeforeTheLogFilledIsRefusedAtApply)
 TEST(CommandLogTest, AWriterThatCannotOpenItsFileFailsTheLog)
 {
     LogQueue queue;
-    const LogWriter writer{queue, "/nonexistent-chronos-dir/session.jsonl", config(), false};
+    const LogWriter writer{queue, "/nonexistent-chronos-dir/session.jsonl", config(), nullptr, false};
     EXPECT_TRUE(queue.failed());
     const std::vector<MarketEvent> events{add(100, 1, Side::Sell, 1'000'000, 100)};
     ReplaySession session{config(), over(events), &queue};
@@ -574,7 +663,7 @@ TEST(CommandLogTest, ReadLogRefusesATruncatedLine)
     write_log(path, good);
     ASSERT_TRUE(read_log(path, 1, logged, error)) << error;
     EXPECT_EQ(logged.applied.size(), 1u);
-    EXPECT_TRUE(logged.start == StrategySpec{});
+    EXPECT_TRUE(logged.spec.strategy == StrategySpec{});
     write_log(path, {good[1], good[0], good[2], good[3]});
     ASSERT_TRUE(read_log(path, 1, logged, error)) << error;
     EXPECT_EQ(logged.applied.size(), 1u);
@@ -613,8 +702,10 @@ TEST(CommandLogTest, ReadLogRefusesATruncatedLine)
     EXPECT_EQ(refusal(path, 2), "no header for generation 2");
     write_log(path, {good[0], good[0], good[1]});
     EXPECT_EQ(refusal(path), "line 2: a second header for generation 1");
-    write_log(path, {tampered(0, "\"protocol\":1", "\"protocol\":2"), good[1]});
-    EXPECT_EQ(refusal(path), "line 1: unsupported log protocol");
+    write_log(path, {tampered(0, "\"protocol\":2", "\"protocol\":1"), good[1]});
+    const std::string commit = nlohmann::json::parse(good[0])["commit"];
+    EXPECT_EQ(refusal(path),
+              "line 1: log protocol 1, written by commit " + commit + ": reproduce it with that commit's build");
 
     // Two trailers for one generation, the second with a later seq.
     std::vector<std::string> closed = sample_log(config(), true);  // the trailer is last; line n has seq n

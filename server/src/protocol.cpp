@@ -111,7 +111,7 @@ bool decode_control(const json& j, Control& control)
         return only(j, {"type", "session_id", "generation", "action", "symbol"}) && read(j, "symbol", symbol) &&
             !symbol.empty() &&
             std::all_of(symbol.begin(), symbol.end(), [](char c) { return c >= 0x21 && c <= 0x7E; }) &&
-            to_ticker(symbol, control.symbol);
+            to_ticker(symbol, control.spec.ticker);
     case ControlType::Play:
     case ControlType::Pause:
     case ControlType::Restart:
@@ -305,10 +305,11 @@ std::string encode_hello(std::string_view session_id, std::uint64_t generation, 
     j["role"] = controller ? "controller" : "viewer";
     j["price_scale"] = config.instrument.price_scale;
     j["quantity_scale"] = config.instrument.quantity_scale;
-    j["fees"] = {{"maker", config.fees.maker_fee_per_share}, {"taker", config.fees.taker_fee_per_share}};
-    j["limits"] = {{"max_position", config.limits.max_position},
-                   {"max_order_quantity", config.limits.max_order_quantity.value()},
-                   {"max_open_orders", config.limits.max_open_orders}};
+    const RunSpec& spec = config.defaults;
+    j["fees"] = {{"maker", spec.fees.maker_fee_per_share}, {"taker", spec.fees.taker_fee_per_share}};
+    j["limits"] = {{"max_position", spec.limits.max_position},
+                   {"max_order_quantity", spec.limits.max_order_quantity.value()},
+                   {"max_open_orders", spec.limits.max_open_orders}};
     return text(j);
 }
 
@@ -318,7 +319,7 @@ std::string encode_snapshot(std::string_view session_id, const Snapshot& s, bool
     if (state) {
         j["full_resync"] = full_resync;
     }
-    j["symbol"] = name(s.symbol);
+    j["symbol"] = name(s.spec.ticker);
     j["snapshot_seq"] = s.snapshot_seq;
     j["exchange_ts"] = s.exchange_ts;
     j["event_seq"] = s.event_seq;
@@ -393,8 +394,8 @@ std::string encode_record(std::string_view session_id, const Record& r)
         break;
     case RecordKind::GenerationStart:
         j["kind"] = "generation_start";
-        j["symbol"] = name(r.control.symbol);
-        j["strategy"] = r.command.strategy.kind;
+        j["symbol"] = name(r.control.spec.ticker);
+        j["strategy"] = r.control.spec.strategy.kind;
         break;
     case RecordKind::GenerationEnd:
         j["kind"] = "generation_end";

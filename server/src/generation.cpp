@@ -24,6 +24,12 @@ ErrorCode risk_error(RiskCheck check) noexcept
     return ErrorCode::BadRequest;
 }
 
+// 00:00 New York time on the first day; 0 without days.
+Timestamp first_midnight(const DayList& days) noexcept
+{
+    return days.count == 0 ? 0 : session_midnight_ns(days.day[0], us_eastern_utc_offset(days.day[0]));
+}
+
 // Cancels every resting order, so a strategy swap leaves none holding a reservation.
 // ponytail: orders still in flight rest; cancel them manually after detach.
 void cancel_resting(const Generation& generation, OrderGateway& gateway) noexcept
@@ -35,13 +41,15 @@ void cancel_resting(const Generation& generation, OrderGateway& gateway) noexcep
 
 }  // namespace
 
-Generation::Generation(const SessionConfig& config, std::unique_ptr<MarketEventSource> market, const StrategySpec& spec)
-    : source(std::move(market)),
+Generation::Generation(const SessionConfig& config, const RunSpec& run, std::unique_ptr<MarketEventSource> market)
+    : spec(run),
+      source(std::move(market)),
       book(config.symbol, config.book_capacity),
-      execution(config.options.session_midnight),
-      portfolio(config.instrument, config.limits, config.fees),
-      strategy(spec),
-      loop(*source, book, execution, portfolio, strategy, config.latency, config.options)
+      execution(first_midnight(run.days)),
+      portfolio(config.instrument, run.limits, run.fees),
+      strategy(run.strategy),
+      loop(*source, book, execution, portfolio, strategy, run.latency,
+           {.check_invariants_every = config.check_invariants_every, .session_midnight = first_midnight(run.days)})
 {}
 
 Digests digests(const Generation& generation) noexcept

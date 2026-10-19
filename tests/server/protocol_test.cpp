@@ -48,7 +48,8 @@ TEST(ProtocolTest, DecodesEveryClientMessage)
     EXPECT_EQ(decoded(client_message("control", R"(,"action":"speed","speed":0)")).control.speed, 0u);
     EXPECT_EQ(decoded(client_message("control", R"(,"action":"seek","ts":1577716200000000123)")).control.seek_ts,
               1'577'716'200'000'000'123);
-    EXPECT_EQ(name(decoded(client_message("control", R"(,"action":"symbol","symbol":"AAPL")")).control.symbol), "AAPL");
+    EXPECT_EQ(name(decoded(client_message("control", R"(,"action":"symbol","symbol":"AAPL")")).control.spec.ticker),
+              "AAPL");
     EXPECT_EQ(decoded(client_message("control", R"(,"action":"cancel_seek")")).control.type, ControlType::CancelSeek);
 
     const ClientMessage ioc = decoded(
@@ -106,9 +107,9 @@ TEST(ProtocolTest, DecodesEveryClientMessage)
     EXPECT_EQ(twice.side, Side::Buy);
 
     // Any printable ASCII but a space, 1 to 8 characters.
-    EXPECT_EQ(name(decoded(client_message("control", R"(,"action":"symbol","symbol":"BRK.B")")).control.symbol),
+    EXPECT_EQ(name(decoded(client_message("control", R"(,"action":"symbol","symbol":"BRK.B")")).control.spec.ticker),
               "BRK.B");
-    EXPECT_EQ(name(decoded(client_message("control", R"(,"action":"symbol","symbol":"~!@#$%^&")")).control.symbol),
+    EXPECT_EQ(name(decoded(client_message("control", R"(,"action":"symbol","symbol":"~!@#$%^&")")).control.spec.ticker),
               "~!@#$%^&");
 }
 
@@ -264,7 +265,7 @@ TEST(ProtocolTest, EncodesSnapshotsRecordsAndReplies)
 {
     Snapshot s;
     s.generation = 3;
-    s.symbol = ticker("AAPL");
+    s.spec.ticker = ticker("AAPL");
     s.snapshot_seq = 9;
     s.exchange_ts = 1'577'716'200'000'000'123;
     s.event_seq = 11;
@@ -435,13 +436,13 @@ TEST(ProtocolTest, EncodesSnapshotsRecordsAndReplies)
     EXPECT_EQ(ack,
               json::parse(R"({"type":"ack","session_id":"s1","generation":3,"seq":7,"control":"seek",)"
                           R"("control_seq":9,"state":"seeking"})"));
-    const json start =
-        json::parse(encode_record("s1",
-                                  Record{.seq = 8,
-                                         .generation = 4,
-                                         .kind = RecordKind::GenerationStart,
-                                         .command = {.strategy = {.kind = SessionStrategyKind::MarketMaker}},
-                                         .control = {.symbol = ticker("MSFT")}}));
+    const json start = json::parse(encode_record(
+        "s1",
+        Record{
+            .seq = 8,
+            .generation = 4,
+            .kind = RecordKind::GenerationStart,
+            .control = {.spec = {.ticker = ticker("MSFT"), .strategy = {.kind = SessionStrategyKind::MarketMaker}}}}));
     EXPECT_EQ(start["kind"], "generation_start");
     EXPECT_EQ(start["symbol"], "MSFT");
     EXPECT_EQ(start["strategy"], "market_maker");
@@ -453,7 +454,7 @@ TEST(ProtocolTest, EncodesSnapshotsRecordsAndReplies)
     EXPECT_EQ(end["market_event_seq"], 3);
 
     SessionConfig session = config();
-    session.fees = {.maker_fee_per_share = -1, .taker_fee_per_share = 3};
+    session.defaults.fees = {.maker_fee_per_share = -1, .taker_fee_per_share = 3};
     EXPECT_EQ(json::parse(encode_hello("s1", 3, true, session)),
               json::parse(R"({"type":"hello","session_id":"s1","generation":3,"protocol":1,"role":"controller",)"
                           R"("price_scale":4,"quantity_scale":0,"fees":{"maker":-1,"taker":3},)"

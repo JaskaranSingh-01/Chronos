@@ -6,6 +6,7 @@
 #include <utility>
 
 #include "chronos/server/command_log.hpp"
+#include "chronos/server/itch_input.hpp"
 #include "simulator/orders/order.hpp"
 
 namespace simulator::server {
@@ -63,7 +64,7 @@ ReplaySession::ReplaySession(SessionConfig config, SourceFactory factory, LogQue
     controls_batch_.reserve(control_capacity);
     awaiting_.reserve(command_capacity);
     history_.candles.reserve(CandleBuilder::day_seconds);
-    engine_.emplace(config_, factory_(name(ticker_)), StrategySpec{});
+    engine_.emplace(config_, config_.defaults, factory_(config_.defaults.ticker, config_.defaults.days));
     publish_start();
     load();
 }
@@ -96,7 +97,8 @@ Admission ReplaySession::control(Control control) noexcept
     control.control_seq = next_control_seq_++;
     const bool bad = (control.type == ControlType::Step && control.steps == 0) ||
         (control.type == ControlType::Speed && control.speed > max_speed) ||
-        (control.type == ControlType::Symbol && name(control.symbol).empty());
+        (control.type == ControlType::Symbol && name(control.spec.ticker).empty()) ||
+        control.spec.days.count > max_days;
     ErrorCode error = bad ? ErrorCode::BadRequest : ErrorCode::None;
     if (error == ErrorCode::None && !controls_.push(control)) {
         error = ErrorCode::QueueFull;
@@ -317,10 +319,8 @@ void ReplaySession::publish_delivered() noexcept
 
 void ReplaySession::publish_start() noexcept
 {
-    publish(Record{.generation = generation_.load(),
-                   .kind = RecordKind::GenerationStart,
-                   .command = {.strategy = engine_->strategy.spec()},
-                   .control = {.symbol = ticker_}});
+    publish(Record{
+        .generation = generation_.load(), .kind = RecordKind::GenerationStart, .control = {.spec = engine_->spec}});
 }
 
 // The simulator events due by the clock run first, as a reproduction's advance_to() runs them.
@@ -348,14 +348,20 @@ void ReplaySession::load() noexcept
     }
 }
 
-// Builds the next generation from a fresh source of ticker_, keeping the attached strategy, and pauses before its
-// first event.
-void ReplaySession::restart() noexcept
+// The current generation's spec with the strategy attached now: what a restart keeps.
+RunSpec ReplaySession::carried() const noexcept
+{
+    RunSpec spec = engine_->spec;
+    spec.strategy = engine_->strategy.spec();
+    return spec;
+}
+
+// Builds the next generation of `spec` from a fresh source, and pauses before its first event.
+void ReplaySession::restart(const RunSpec& spec) noexcept
 {
     close();
-    const StrategySpec spec = engine_->strategy.spec();
     engine_.reset();
-    engine_.emplace(config_, factory_(name(ticker_)), spec);
+    engine_.emplace(config_, spec, factory_(spec.ticker, spec.days));
     generation_.fetch_add(1);
     awaiting_.clear();
     candles_ = CandleBuilder{};
@@ -422,15 +428,18 @@ void ReplaySession::apply_control(const Control& control, Timestamp wall_now) no
         anchor_exchange_ = clock();
         break;
     case ControlType::Restart:
-        restart();
+        restart(carried());
         break;
-    case ControlType::Symbol:
-        ticker_ = control.symbol;
-        restart();
+    case ControlType::Symbol: {
+        RunSpec spec = carried();
+        spec.ticker = control.spec.ticker;
+        spec.days = control.spec.days;
+        restart(spec);
         break;
+    }
     case ControlType::Seek:
         if (ended || control.seek_ts < clock()) {
-            restart();
+            restart(carried());
         }
         seek_target_ = control.seek_ts;
         seek_position_.store(clock());
@@ -618,7 +627,7 @@ void ReplaySession::publish_snapshot(Timestamp wall_now) noexcept
     Snapshot& s = snapshot_;
     const ReplayReport& replay = g.loop.report().replay;
     s.generation = generation_.load();
-    s.symbol = ticker_;
+    s.spec = g.spec;
     s.snapshot_seq = snapshot_seq_ + 1;
     s.exchange_ts = clock();
     s.event_seq = replay.events;
@@ -626,9 +635,10 @@ void ReplaySession::publish_snapshot(Timestamp wall_now) noexcept
     s.last_command_seq = last_command_seq_;
     s.state = state_.load();
     s.speed = speed_;
-    s.progress = config_.source_size == 0
+    const auto* chain = dynamic_cast<const DaySequenceSource*>(g.source.get());
+    s.progress = chain == nullptr || chain->size() == 0
         ? 0.0
-        : static_cast<double>(g.source->position()) / static_cast<double>(config_.source_size);
+        : static_cast<double>(chain->position()) / static_cast<double>(chain->size());
     s.failure = replay.failure;
     s.source_error = replay.source_error;
     s.trading_state = g.book.trading_state();

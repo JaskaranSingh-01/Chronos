@@ -78,7 +78,7 @@ TEST(RestartTest, RestartKeepsTheAttachedStrategy)
         return r.kind == RecordKind::GenerationStart && r.generation == 2;
     });
     ASSERT_NE(start, all.end());
-    EXPECT_EQ(start->command.strategy.kind, SessionStrategyKind::MarketMaker);
+    EXPECT_EQ(start->control.spec.strategy.kind, SessionStrategyKind::MarketMaker);
     Command manual = post_only_buy(999'800, 10);
     manual.generation = 2;
     session.submit(manual, 0);
@@ -169,17 +169,17 @@ TEST(RestartTest, ASymbolSwitchStartsAGenerationOnTheNewTicker)
     const std::vector<MarketEvent> aaa{add(100, 1, Side::Buy, 999'900, 100)};
     const std::vector<MarketEvent> bbb{add(200, 1, Side::Sell, 1'000'100, 50), add(300, 2, Side::Sell, 1'000'200, 50)};
     std::vector<std::string> built;  // the tickers the factory was asked for
-    ReplaySession session{config(), [&](std::string_view t) {
-                              built.emplace_back(t);
-                              return std::make_unique<VectorSource>(t == "BBB" ? bbb : aaa);
+    ReplaySession session{config(), [&](const Ticker& t, const DayList&) {
+                              built.emplace_back(name(t));
+                              return std::make_unique<VectorSource>(name(t) == "BBB" ? bbb : aaa);
                           }};
     EXPECT_EQ(session.control(Control{.type = ControlType::Symbol}).error, ErrorCode::BadRequest);  // no ticker
-    session.control(Control{.type = ControlType::Symbol, .symbol = ticker("BBB")});
+    session.control(Control{.type = ControlType::Symbol, .spec = {.ticker = ticker("BBB")}});
     session.tick(kWall);
 
     EXPECT_EQ(session.generation(), 2u);
     EXPECT_EQ(session.state(), SessionState::Paused);
-    EXPECT_EQ(name(latest(session).symbol), "BBB");
+    EXPECT_EQ(name(latest(session).spec.ticker), "BBB");
     session.control(step(2));
     session.tick(kWall);
     EXPECT_EQ(session.loop_report().replay.events, 2u);  // BBB's two events, not the first generation's one
@@ -190,7 +190,7 @@ TEST(RestartTest, ASymbolSwitchStartsAGenerationOnTheNewTicker)
     std::vector<std::string> started;  // each generation's ticker, from its GenerationStart record
     for (const Record& r : records(session)) {
         if (r.kind == RecordKind::GenerationStart) {
-            started.emplace_back(name(r.control.symbol));
+            started.emplace_back(name(r.control.spec.ticker));
         }
     }
     EXPECT_EQ(started, (std::vector<std::string>{"", "BBB", "BBB"}));
@@ -210,10 +210,9 @@ TEST(RestartTest, ARestartedItchSessionReplaysTheSameDay)
     const std::span<const std::byte> bytes = itch.bytes();
     const ItchSourceConfig itch_config{.ticker = "AAPL", .session_date = 2019y / 12 / 30, .utc_offset = -5h};
     InstrumentRegistry registry{1};
-    SessionConfig cfg = config();
-    cfg.source_size = bytes.size();
-    ReplaySession session{cfg,
-                          [&](std::string_view) { return std::make_unique<ItchSource>(bytes, itch_config, registry); }};
+    ReplaySession session{config(), [&](const Ticker&, const DayList&) {
+                              return std::make_unique<ItchSource>(bytes, itch_config, registry);
+                          }};
     const Timestamp midnight = session_midnight_ns(2019y / 12 / 30, -5h);
 
     session.control(kFullSpeed);
@@ -222,7 +221,6 @@ TEST(RestartTest, ARestartedItchSessionReplaysTheSameDay)
     const Snapshot first = latest(session);
     const std::uint64_t digest = session.book().digest();
     EXPECT_EQ(first.event_seq, 5u);
-    EXPECT_EQ(first.progress, 1.0);
     ASSERT_EQ(first.closed_count, 1u);
     EXPECT_EQ(first.closed_candles[0],
               (Candle{.start = midnight,

@@ -586,7 +586,7 @@ TEST(ServerTest, AnOrderIsAckedOnceLoggedAndItsFillIsReported)
                                           add(5'000, 2, Side::Buy, 999'900, 100)};
     const Scratch scratch{"server-ack"};
     LogQueue queue;
-    const LogWriter writer{queue, scratch.path, config(), false};
+    const LogWriter writer{queue, scratch.path, config(), nullptr, false};
     ReplaySession session{config(), over(events), &queue};
     Served served{session, options(), {}, &queue, &writer};
     const std::unique_ptr<Client> client = served.connect();

@@ -160,28 +160,24 @@ int main(int argc, char** argv)
     std::error_code ignored;
     std::filesystem::create_directories(sessions, ignored);
 
-    // The interactive simulator: the backtest's 50 us latencies, no fees, and limits for trading by hand. The log's
-    // header records all of it, with the input's fingerprint.
+    // The interactive simulator: the backtest's 50 us latencies, no fees, and limits for trading by hand, from the
+    // starting day. The log's header records all of it, with each day's file, hash and regular hours.
     const SessionConfig config{
         .session_id = session_id,
-        .input = input_fingerprint(start->file, start->mapped.bytes()),
         .instrument = {.price_scale = 4, .quantity_scale = 0},
-        .latency = {.order_latency = 50'000, .report_latency = 50'000},
-        .limits = {.max_position = 10'000, .max_order_quantity = Quantity{1'000}, .max_open_orders = 16},
-        .options = {.session_midnight = start->midnight},
-        .source_size = start->size};
+        .allow_truncated_tail = parsed.allow_truncated_tail,
+        .defaults = {.days = {.day = {start->date}, .count = 1},
+                     .latency = {.order_latency = 50'000, .report_latency = 50'000},
+                     .limits = {.max_position = 10'000, .max_order_quantity = Quantity{1'000}, .max_open_orders = 16}}};
     // Declared in this order, so destroyed writer last: the server, then the engine thread, before the session.
     LogQueue queue;
     const std::filesystem::path log_path = sessions / (session_id + ".jsonl");
-    const LogWriter writer{queue, log_path, config, parsed.fsync};
+    const LogWriter writer{queue, log_path, config, &library, parsed.fsync};
     if (queue.failed()) {
         std::fprintf(stderr, "error: cannot write the log %s\n", log_path.c_str());
         return 2;
     }
-    ReplaySession session{config,
-                          itch_factory(start->mapped.bytes(), start->date, us_eastern_utc_offset(start->date),
-                                       parsed.allow_truncated_tail),
-                          &queue};
+    ReplaySession session{config, chain_factory(library, config.instrument, parsed.allow_truncated_tail), &queue};
     std::optional<SessionRunner> runner{std::in_place, session};
     Hub hub{.session = session,
             .log = &queue,

@@ -1,5 +1,7 @@
 #include <gtest/gtest.h>
 
+#include <array>
+#include <chrono>
 #include <cstddef>
 #include <functional>
 #include <memory>
@@ -7,11 +9,14 @@
 #include <vector>
 
 #include "chronos/server/generation.hpp"
+#include "chronos/server/itch_input.hpp"
 #include "simulator/market/vector_source.hpp"
 #include "test_support.hpp"
 
 namespace simulator::server::test {
 namespace {
+
+using namespace std::chrono_literals;
 
 // A generation over `market`, which it keeps alive.
 struct Fixture
@@ -20,7 +25,7 @@ struct Fixture
     Generation g;
 
     explicit Fixture(std::vector<MarketEvent> market)
-        : events(std::move(market)), g(config(), std::make_unique<VectorSource>(events), StrategySpec{})
+        : events(std::move(market)), g(config(), config().defaults, std::make_unique<VectorSource>(events))
     {}
 
     void run_to_end()
@@ -212,7 +217,7 @@ TEST(GenerationTest, AtADayBoundaryEarlierReportsRunUnderTheOldDayAndLaterOnesAf
     VectorSource source{events};
     MarketBook book{kSymbol, 16};
     ExecutionSimulator execution;
-    Portfolio portfolio{kEquity, config().limits, FeeSchedule{}};
+    Portfolio portfolio{kEquity, config().defaults.limits, FeeSchedule{}};
     Probe probe;
     EventLoop<Probe> loop{source, book, execution, portfolio, probe, {.order_latency = 10, .report_latency = 1'000}};
     probe.midnight = [&loop] { return loop.session_midnight(); };
@@ -224,6 +229,55 @@ TEST(GenerationTest, AtADayBoundaryEarlierReportsRunUnderTheOldDayAndLaterOnesAf
     EXPECT_EQ(probe.seen,
               (std::vector<Probe::Seen>{{.order_id = 1, .now = boundary - 1, .midnight = 0, .book_orders = 1},
                                         {.order_id = 2, .now = boundary, .midnight = boundary, .book_orders = 0}}));
+}
+
+// The Portfolio and the strategy live through the night: Friday's position, cash, fees and marks are Monday's at the
+// Clear, and the market maker attached on Friday quotes again on Monday. Only the resting orders expire.
+TEST(GenerationTest, ThePortfolioAndTheStrategyCarryOvernight)
+{
+    const ScratchDir dir{"overnight"};
+    write_file(dir.path / "12272019.NASDAQ_ITCH50.bin", acme_day(4).bytes());
+    write_file(dir.path / "12302019.NASDAQ_ITCH50.bin", acme_day(4, 1'000).bytes());
+    DayLibrary library{dir.path, dir.path / "fingerprints.json"};
+    library.scan();
+    RunSpec spec = config().defaults;
+    spec.ticker = ticker("ACME");
+    spec.days = {.day = {2019y / 12 / 27, 2019y / 12 / 30}, .count = 2};
+    spec.fees = {.taker_fee_per_share = 3};
+    Generation g{config(), spec, chain_factory(library, kEquity, false)(spec.ticker, spec.days)};
+    Timestamp ts{0};
+    for (int i = 0; i < 3; ++i) {  // Friday's trading state, bid and offer
+        ASSERT_EQ(g.loop.peek(ts), PeekStatus::Event);
+        server::step(g.loop);
+    }
+    ASSERT_EQ(apply_command(g, order(OrderType::Ioc, Side::Buy, 100'100, 100)).error, ErrorCode::None);
+    ASSERT_EQ(apply_command(
+                  g,
+                  Command{.type = CommandType::Attach,
+                          .strategy = {.kind = SessionStrategyKind::MarketMaker, .market_maker = {.quote_size = 10}}})
+                  .error,
+              ErrorCode::None);
+    while (g.loop.peek(ts) == PeekStatus::Event && g.loop.pending()->type != MarketEventType::Clear) {
+        server::step(g.loop);
+    }
+    g.loop.advance_to(ts - 1);  // the end of Friday
+    const Portfolio& p = g.portfolio;
+    const std::array<std::int64_t, 4> friday{p.position(), p.cash(), p.fees(), p.pnl()};
+    EXPECT_EQ(friday[0], 100);
+    EXPECT_GT(friday[2], 0);  // the IOC's taker fee
+    EXPECT_FALSE(g.execution.resting_orders().empty());
+
+    server::step(g.loop);  // the Clear
+    g.loop.advance_to(ts);  // its Expired reports
+    EXPECT_EQ((std::array<std::int64_t, 4>{p.position(), p.cash(), p.fees(), p.pnl()}), friday);
+    EXPECT_TRUE(g.execution.resting_orders().empty());
+    EXPECT_EQ(p.open_orders(), 0u);
+    EXPECT_TRUE(g.strategy.attached());
+    EXPECT_EQ(g.loop.session_midnight(), session_midnight_ns(2019y / 12 / 30, -5h));
+
+    while (g.loop.peek(ts) == PeekStatus::Event && server::step(g.loop).ok) {
+    }
+    EXPECT_FALSE(g.execution.resting_orders().empty());  // quoting on Monday's book
 }
 
 }  // namespace
