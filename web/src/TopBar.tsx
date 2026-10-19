@@ -1,5 +1,5 @@
 import { memo, useEffect, useRef, useState } from 'react';
-import { clock, seekTs, signed } from './format';
+import { dateOf, dayLabel, dayTs, signed, stamp } from './format';
 import { selectFirstRun, store, useStore } from './store';
 
 const speeds: [number, string][] = [
@@ -21,7 +21,32 @@ const Symbols = memo(function Symbols() {
   );
 });
 
-// Symbol, replay controls, the exchange clock, progress, PnL and the session's status.
+// The days a load replays, found again each time the list opens; a day that is not ITCH 5.0 cannot be ticked.
+function DayPicker({ picked, pick, disabled }: { picked: string[]; pick(days: string[]): void; disabled: boolean }) {
+  const days = useStore((s) => s.days);
+  return (
+    <details className="days" onToggle={(e) => e.currentTarget.open && void store.loadDays()}>
+      <summary>{picked.length > 1 ? `${picked.length} days` : (picked[0] ?? 'Days')}</summary>
+      <div>
+        {days.map((day) => (
+          <label key={day.date}>
+            <input
+              type="checkbox"
+              checked={picked.includes(day.date)}
+              disabled={disabled || !day.itch50}
+              onChange={(e) =>
+                pick(e.target.checked ? [...picked, day.date].sort() : picked.filter((d) => d !== day.date))
+              }
+            />
+            {dayLabel(day)}
+          </label>
+        ))}
+      </div>
+    </details>
+  );
+}
+
+// Symbol and days, replay controls, the exchange clock, progress, PnL and the session's status.
 export function TopBar() {
   const snap = useStore((s) => s.snap);
   const symbol = useStore((s) => s.symbol);
@@ -31,9 +56,16 @@ export function TopBar() {
   const state = useStore((s) => s.state);
   const seekAt = useStore((s) => s.seekAt);
   const notice = useStore((s) => s.notice);
+  const genDays = useStore((s) => s.genDays);
   const fresh = useStore(selectFirstRun);
   const [typed, setTyped] = useState('');
+  const [picked, setPicked] = useState<string[]>([]);
   const [time, setTime] = useState('');
+  const [seekDay, setSeekDay] = useState('');
+  useEffect(() => setPicked(genDays), [genDays]); // a new generation's days start the picker
+  useEffect(() => {
+    if (picked.length > 0) void store.loadSymbols(picked); // the symbols listed on every day picked
+  }, [picked]);
   const symbolBox = useRef<HTMLInputElement>(null);
   useEffect(() => {
     if (fresh) symbolBox.current?.focus();
@@ -43,8 +75,10 @@ export function TopBar() {
   const idle = viewer || generation <= 1 || status !== 'open';
   const seeking = state === 'seeking';
   const cannotSeek = idle || seeking || !snap;
+  const multiDay = genDays.length > 1; // the clock shows the date, and a seek picks the day
   const seekTo = (clockTime: string) => {
-    if (snap) store.control({ action: 'seek', ts: seekTs(snap.exchange_ts, clockTime) });
+    const day = genDays.includes(seekDay) ? seekDay : snap && dateOf(snap.exchange_ts);
+    if (day) store.control({ action: 'seek', ts: dayTs(day, clockTime) });
   };
   // The exchange time shown: a running seek's position, else the book's; 0 (shown as a dash) before a symbol loads.
   const at = seeking && seekAt > 0 ? seekAt : (snap?.exchange_ts ?? 0);
@@ -59,7 +93,10 @@ export function TopBar() {
           const { symbols } = store.get();
           const entry = symbols.find((s) => s === name) ?? symbols.find((s) => s.toUpperCase() === name.toUpperCase());
           if (entry === undefined) store.notify(`unknown symbol ${name}`);
-          else if (store.control({ action: 'symbol', symbol: entry })) setTyped('');
+          // No days picked yet (no state so far): the server replays the last load's.
+          else if (store.control({ action: 'symbol', symbol: entry, days: picked.length > 0 ? picked : undefined })) {
+            setTyped('');
+          }
         }}
       >
         <input
@@ -73,6 +110,7 @@ export function TopBar() {
           onChange={(e) => setTyped(e.target.value)}
         />
         <Symbols />
+        <DayPicker picked={picked} pick={setPicked} disabled={viewer} />
         <button disabled={viewer || !typed.trim()}>Load</button>
       </form>
       <button disabled={idle} onClick={() => store.control({ action: 'restart' })}>
@@ -108,6 +146,19 @@ export function TopBar() {
           if (time) seekTo(time);
         }}
       >
+        {multiDay && (
+          <select
+            aria-label="Seek day"
+            value={seekDay}
+            disabled={cannotSeek}
+            onChange={(e) => setSeekDay(e.target.value)}
+          >
+            <option value="">this day</option>
+            {genDays.map((day) => (
+              <option key={day}>{day}</option>
+            ))}
+          </select>
+        )}
         <input
           aria-label="Seek to"
           type="time"
@@ -126,7 +177,7 @@ export function TopBar() {
           Cancel seek
         </button>
       )}
-      <span data-testid="clock">{at > 0 ? clock(at) : '—'} ET</span>
+      <span data-testid="clock">{at > 0 ? stamp(at, multiDay) : '—'} ET</span>
       <progress value={snap?.progress ?? 0} />
       <span>
         PnL <b>{snap && hello ? signed(snap.account.pnl, hello.price_scale + hello.quantity_scale) : '—'}</b>

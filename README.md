@@ -333,11 +333,12 @@ cmake --build build -j --target chronos-serve
 
 Open the URL it prints, `http://127.0.0.1:8080/`. Type a symbol such as `AAPL` in the top bar and press Enter: the
 replay waits, paused, before the symbol's first event. Play at 1×, 10×, 100× or Max, step one event at a time, or
-seek to a New York time. Click a book level to price the ticket, then trade post-only, IOC or market. Orders go
-through the backtests' `ExecutionSimulator`: 50 µs to arrive, 50 µs for each report, a place in the L3 queue, no
-fees, and limits of 10,000 shares of position, 1,000 shares an order and 16 open orders. Each command is logged to
-`sessions/<id>.jsonl` in the working directory, so the session can be reproduced. The first line on stdout names the
-URL and that log; errors go to stderr.
+seek to a New York time. To replay the symbol over several days in a row, tick them in the day list beside the symbol
+box before loading it: each night passes at once, at any speed, and Seek then takes a day and a time. Click a book level
+to price the ticket, then trade post-only, IOC or market. Orders go through the backtests' `ExecutionSimulator`: 50 µs
+to arrive, 50 µs for each report, a place in the L3 queue, no fees, and limits of 10,000 shares of position, 1,000
+shares an order and 16 open orders. Each command is logged to `sessions/<id>.jsonl` in the working directory, so the
+session can be reproduced. The first line on stdout names the URL and that log; errors go to stderr.
 
 - Run it from the repository root, as `--web` defaults to `web/dist`.
 - `--data` names a directory of days, each file named `MMDDYYYY.NASDAQ_ITCH50.bin`; `--date` picks the starting day,
@@ -369,11 +370,11 @@ npx playwright install chromium                # once
 npm run e2e                                    # builds web/dist, then Playwright; needs the build's two binaries
 ```
 
-Each end-to-end test starts its own `chronos-serve` on a small generated day, which `chronos-e2e-fixture` writes to a
-temp directory. The tests place an order and see it fill; drop the WebSocket in the middle of a restart and check
-that the terminal ends on the new generation and sends nothing stale; seek to a New York time; and connect to a
-server that wants a token. The binaries are `chronos-serve` and `chronos-e2e-fixture`, from `build/` or the
-directory `CHRONOS_BUILD` names.
+Each end-to-end test starts its own `chronos-serve` on two small generated days, which `chronos-e2e-fixture` writes to a
+temp directory. The tests place an order and see it fill; drop the WebSocket in the middle of a restart and check that
+the terminal ends on the new generation and sends nothing stale; seek to a New York time; load both days and play across
+the night; and connect to a server that wants a token. The binaries are `chronos-serve` and `chronos-e2e-fixture`, from
+`build/` or the directory `CHRONOS_BUILD` names.
 
 **Interactive benchmark** (`chronos-serve` at max speed, with the terminal attached and trading):
 

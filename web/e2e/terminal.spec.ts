@@ -2,7 +2,7 @@ import { test as base, expect, type Page } from '@playwright/test';
 import { rmSync } from 'node:fs';
 import { fixture, serve } from './serve';
 
-// Each test gets its own chronos-serve on the fixture day; `serverArgs` adds options such as --token.
+// Each test gets its own chronos-serve on the fixture days; `serverArgs` adds options such as --token.
 const test = base.extend<{ serverArgs: string[]; url: string }>({
   serverArgs: [[], { option: true }],
   url: async ({ serverArgs }, use) => {
@@ -124,10 +124,29 @@ test('a seek lands on the New York time typed', async ({ page, url }) => {
   await pickAcme(page);
   await page.getByRole('button', { name: 'Open 09:30' }).click();
   await expect(page.getByTestId('clock')).toHaveText('09:30:00.000 ET');
+  await expect(page.getByRole('button', { name: 'Cancel seek' })).toBeHidden(); // the clock shows a seek's target early
   await page.getByLabel('Seek to').fill('09:31:45');
-  await page.getByRole('button', { name: 'Seek' }).click();
+  await page.getByRole('button', { name: 'Seek', exact: true }).click();
   await expect(page.getByTestId('clock')).toHaveText('09:31:45.000 ET');
   await expect(page.getByTestId('session')).toContainText('ACME · gen 2 · paused');
+});
+
+test('two days load together and play across the night in no time at 100×', async ({ page, url }) => {
+  await page.goto(url);
+  await page.getByText('2019-12-30', { exact: true }).click(); // the day picker, on the starting day
+  await page.getByLabel('2019-12-27').check();
+  await expect(page.locator('.days summary')).toHaveText('2 days');
+  await pickAcme(page);
+  await expect(page.getByLabel('Seek day')).toBeVisible();
+  await page.getByRole('button', { name: '100×' }).click();
+  await page.getByRole('button', { name: '▶ Play' }).click();
+  // Each day's two minutes take 1.2 s at 100×; waiting out the 62 hours between them would take 37 minutes.
+  await expect(page.getByTestId('session')).toContainText('ACME · gen 2 · ended', { timeout: 15_000 });
+  await expect(page.getByTestId('clock')).toHaveText('2019-12-30 09:31:59.000 ET');
+  await page.getByLabel('Seek day').selectOption('2019-12-27'); // a seek takes a day too
+  await page.getByLabel('Seek to').fill('09:31:45');
+  await page.getByRole('button', { name: 'Seek', exact: true }).click();
+  await expect(page.getByTestId('clock')).toHaveText('2019-12-27 09:31:45.000 ET');
 });
 
 test.describe('with a token', () => {

@@ -44,9 +44,37 @@ export interface Account {
   max_drawdown: number;
 }
 
+// A day chronos-serve found (GET /api/days); its regular hours are epoch ns, from its own feed or the 09:30-16:00
+// fallback.
+export interface Day {
+  date: string; // YYYY-MM-DD
+  file: string;
+  size: number;
+  hash: string;
+  quick_check: string;
+  itch50: boolean;
+  cut_tail: boolean;
+  session: { open: number; close: number; source: 'feed' | 'fallback' };
+  symbols: number;
+}
+
+// A generation's settings, as a Lab run is posted.
+export interface Spec {
+  symbol: string;
+  days: string[];
+  strategy: string;
+  params: Record<string, number>;
+  latency: { order_ns: number; report_ns: number };
+  fees: { maker: number; taker: number };
+  limits: { max_position: number; max_order_quantity: number; max_open_orders: number };
+  window: 'regular' | 'full_day';
+}
+
 export interface Snapshot extends Envelope {
   type: 'snapshot' | 'state';
   full_resync?: boolean; // state only: sent after a gap
+  spec?: Spec; // state only
+  run_id?: string; // state only: '' unless the generation watches a run
   symbol: string;
   snapshot_seq: number;
   exchange_ts: number;
@@ -110,6 +138,9 @@ export interface GenerationStart extends Ring {
   kind: 'generation_start';
   symbol: string;
   strategy: string;
+  days?: string[]; // protocol 2
+  window?: 'regular' | 'full_day';
+  run_id?: string;
 }
 
 export interface GenerationEnd extends Ring {
@@ -152,7 +183,7 @@ export type Control =
   | { action: 'step'; n: number }
   | { action: 'speed'; speed: number }
   | { action: 'seek'; ts: number }
-  | { action: 'symbol'; symbol: string };
+  | { action: 'symbol'; symbol: string; days?: string[] };
 
 export interface Order {
   side: Side;

@@ -2,6 +2,7 @@ import { useSyncExternalStore } from 'react';
 import type {
   Candle,
   Control,
+  Day,
   Execution,
   Hello,
   History,
@@ -17,10 +18,12 @@ export type Status = 'connecting' | 'open' | 'closed' | 'token' | 'host';
 
 export interface State {
   status: Status; // token: the server wants a token we lack; host: open the UI on 127.0.0.1 or localhost
-  symbols: string[];
+  symbols: string[]; // listed on every day picked
+  days: Day[]; // every day the server found, as of the day picker's last look
   hello: Hello | null;
   generation: number; // the newest seen in any envelope
   symbol: string; // this generation's, from its generation_start or a snapshot; '' until known
+  genDays: string[]; // this generation's days, from its generation_start or state
   snap: Snapshot | null; // the latest of `generation`; null until its first state
   state: SessionState; // from snapshots and control acks
   seq: number; // the last ring seq applied: reports and control acks
@@ -45,13 +48,16 @@ export interface Env {
 
 const tapeSize = 512;
 const tokenKey = 'chronos-token';
+const protocol = 2; // the server protocol this terminal speaks
 
 export const initial: State = {
   status: 'connecting',
   symbols: [],
+  days: [],
   hello: null,
   generation: 0,
   symbol: '',
+  genDays: [],
   snap: null,
   state: 'ended',
   seq: 0,
@@ -113,6 +119,7 @@ function newGeneration(s: State, generation: number): State {
     ...s,
     generation,
     symbol: '',
+    genDays: [],
     snap: null,
     seekAt: 0,
     notice: '',
@@ -145,6 +152,7 @@ function onSnapshot(s: State, m: Snapshot): State {
     ...s,
     snap: m,
     symbol: m.symbol,
+    genDays: m.spec?.days ?? s.genDays,
     state: m.state,
     // A state with nothing to recover holds every report up to its watermark.
     seq: m.type === 'state' && (m.full_resync || s.seq === 0) ? Math.max(s.seq, m.last_report_seq) : s.seq,
@@ -159,7 +167,11 @@ export function apply(s: State, m: ServerMessage): State {
   if (m.type === 'hello') {
     const same = s.hello?.session_id === m.session_id; // a new id: the server restarted, and its seqs with it
     const base = same ? s : { ...initial, status: s.status, symbols: s.symbols, barsVersion: s.barsVersion + 1 };
-    return { ...(m.generation > base.generation ? newGeneration(base, m.generation) : base), hello: m };
+    const next = { ...(m.generation > base.generation ? newGeneration(base, m.generation) : base), hello: m };
+    // An older server is a stale binary, met only through the Vite dev proxy.
+    return m.protocol < protocol
+      ? { ...next, notice: `chronos-serve speaks protocol ${m.protocol}: rebuild it` }
+      : next;
   }
   if (m.session_id !== s.hello?.session_id) return s; // from a session this client no longer follows
   if (m.generation > s.generation) s = newGeneration(s, m.generation);
@@ -189,7 +201,10 @@ export function apply(s: State, m: ServerMessage): State {
     case 'report': {
       if (m.seq <= s.seq) return s;
       const next = { ...s, seq: m.seq };
-      if (m.kind === 'generation_start' && m.generation === s.generation) next.symbol = m.symbol;
+      if (m.kind === 'generation_start' && m.generation === s.generation) {
+        next.symbol = m.symbol;
+        next.genDays = m.days ?? s.genDays;
+      }
       if (m.kind === 'execution' && m.report_type === 'fill' && m.generation === s.generation) {
         next.fills = [...s.fills, m];
       }
@@ -351,6 +366,29 @@ export function createStore(env: Env) {
     }
   }
 
+  // The days the server finds now: it rescans its directory for each ask.
+  async function loadDays() {
+    try {
+      const res = await api('/api/days');
+      if (res.ok) set({ ...state, days: ((await res.json()) as { days: Day[] }).days });
+    } catch {
+      // the list stays as it was; the next look asks again
+    }
+  }
+
+  // The symbols listed on every one of `days`; only the latest ask's answer is kept.
+  let symbolDays = '';
+  async function loadSymbols(days: string[]) {
+    const asked = (symbolDays = days.join(','));
+    try {
+      const res = await api(`/api/symbols?days=${asked}`);
+      const symbols = res.ok ? ((await res.json()) as { symbols: string[] }).symbols : null;
+      if (symbols && asked === symbolDays) set({ ...state, symbols });
+    } catch {
+      // the list stays as it was; the next pick asks again
+    }
+  }
+
   // Never queued: a message the socket cannot take now is refused, so nothing stale is sent after a reconnect.
   function send(body: object): boolean {
     const hello = state.hello;
@@ -374,6 +412,8 @@ export function createStore(env: Env) {
       void start();
     },
     notify: (notice: string) => set({ ...state, notice }),
+    loadDays,
+    loadSymbols,
     control: (c: Control) => send({ type: 'control', ...c }),
     order: (o: Order) => send({ type: 'order', client_id: ++clientId, ...o }),
     cancel: (order_id: number) => send({ type: 'cancel', order_id }),

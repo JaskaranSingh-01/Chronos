@@ -1,4 +1,4 @@
-import type { FillRule } from './protocol';
+import type { Day, FillRule } from './protocol';
 
 const newYork = { timeZone: 'America/New_York', hourCycle: 'h23' } as const;
 const wallClock = new Intl.DateTimeFormat('en-US', {
@@ -8,6 +8,7 @@ const wallClock = new Intl.DateTimeFormat('en-US', {
   second: '2-digit',
   fractionalSecondDigits: 3,
 });
+const isoDate = new Intl.DateTimeFormat('en-CA', { ...newYork, year: 'numeric', month: '2-digit', day: '2-digit' });
 const fields = new Intl.DateTimeFormat('en-US', {
   ...newYork,
   year: 'numeric',
@@ -52,6 +53,18 @@ export const ruleLabel = (rule?: FillRule) => (rule ? ruleLabels[rule] : '—');
 // An exchange time (epoch ns) as New York wall-clock time to the millisecond.
 export const clock = (ns: number) => wallClock.format(ns / 1e6);
 
+// The New York date of an exchange time, YYYY-MM-DD.
+export const dateOf = (ns: number) => isoDate.format(ns / 1e6);
+
+// The clock with its date, for a generation of several days.
+export const stamp = (ns: number, withDate: boolean) => (withDate ? `${dateOf(ns)} ${clock(ns)}` : clock(ns));
+
+// A day of the day picker: its date, marked when its regular hours are the fallback or it cannot be loaded.
+export const dayLabel = (day: Day) =>
+  day.date +
+  (day.session.source === 'fallback' ? ' · 09:30-16:00 fallback' : '') +
+  (day.itch50 ? '' : ' · not ITCH 5.0');
+
 // New York's UTC offset in seconds at `epochSeconds`; a session day never spans a DST change.
 export function etOffset(epochSeconds: number): number {
   const at = Math.floor(epochSeconds);
@@ -66,3 +79,6 @@ export function seekTs(ns: number, hhmmss: string): number {
   const midnight = now - ((now + etOffset(now)) % 86_400);
   return (midnight + hours * 3_600 + minutes * 60 + seconds) * 1e9; // whole seconds x 1e9 are exact in a double
 }
+
+// The epoch ns of New York time `hhmmss` on `day` (YYYY-MM-DD); noon UTC falls on that New York date at either offset.
+export const dayTs = (day: string, hhmmss: string) => seekTs(Date.parse(`${day}T12:00:00Z`) * 1e6, hhmmss);

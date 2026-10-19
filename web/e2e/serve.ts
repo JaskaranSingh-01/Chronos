@@ -7,7 +7,7 @@ import { createInterface } from 'node:readline';
 // chronos-serve and chronos-e2e-fixture come from the repo's CMake build, ../build unless CHRONOS_BUILD names another.
 const build = resolve(process.env.CHRONOS_BUILD ?? '../build');
 
-// Writes the fixture day (ACME, 2019-12-30) into a fresh temp dir and returns the dir.
+// Writes the fixture days (ACME, 2019-12-27 and 2019-12-30) into a fresh temp dir and returns the dir.
 export function fixture(): string {
   const dir = mkdtempSync(join(tmpdir(), 'chronos-fixture-'));
   execFileSync(join(build, 'chronos-e2e-fixture'), [dir]);

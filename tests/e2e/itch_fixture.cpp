@@ -5,8 +5,9 @@
 
 #include "itch/itch_test_builder.hpp"
 
-// Writes DIR/12302019.NASDAQ_ITCH50.bin, a small ITCH 5.0 day of one stock, ACME, for the web end-to-end tests, with
-// regular hours from 09:30 to 16:00 as its System Events set them:
+// Writes DIR/12272019.NASDAQ_ITCH50.bin and DIR/12302019.NASDAQ_ITCH50.bin, a Friday and a Monday alike, each a small
+// ITCH 5.0 day of one stock, ACME, for the web end-to-end tests, with regular hours from 09:30 to 16:00 as its System
+// Events set them:
 // - 09:30:00: 300 bid at 10.00, then 300 offered at 10.01, then 100 of the offer trade, one event at a time;
 // - from 09:30:01, one print a second, each between 10.00 and 10.04, with a halt from 09:31:00 to 09:31:30.
 int main(int argc, char** argv)
@@ -34,9 +35,14 @@ int main(int argc, char** argv)
     itch.system_event(0, 16 * 3'600 * second, 'M');
     const std::filesystem::path dir{argv[1]};
     std::filesystem::create_directories(dir);
-    std::ofstream out{dir / "12302019.NASDAQ_ITCH50.bin", std::ios::binary};
     const auto bytes = itch.bytes();
-    out.write(reinterpret_cast<const char*>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
-    out.close();
-    return out ? 0 : 1;
+    for (const char* name : {"12272019.NASDAQ_ITCH50.bin", "12302019.NASDAQ_ITCH50.bin"}) {
+        std::ofstream out{dir / name, std::ios::binary};
+        out.write(reinterpret_cast<const char*>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
+        out.close();
+        if (!out) {
+            return 1;
+        }
+    }
+    return 0;
 }

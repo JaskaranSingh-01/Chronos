@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { Candle, Execution, Hello, MyOrder, ServerMessage, SessionState, Snapshot, Trade } from './protocol';
+import type { Candle, Execution, Hello, MyOrder, ServerMessage, SessionState, Snapshot, Spec, Trade } from './protocol';
 import {
   apply,
   createStore,
@@ -18,7 +18,7 @@ const hello = (over: Partial<Hello> = {}): Hello => ({
   type: 'hello',
   session_id: 's1',
   generation: 2,
-  protocol: 1,
+  protocol: 2,
   role: 'controller',
   price_scale: 4,
   quantity_scale: 0,
@@ -240,6 +240,39 @@ describe('apply', () => {
     expect(run(hello({ generation: 1 }), snapshot({ generation: 1, symbol: '' })).symbol).toBe(''); // the empty ticker
   });
 
+  it("takes the generation's days from its state and its generation_start, and forgets them for a new one", () => {
+    const spec: Spec = {
+      symbol: 'ACME',
+      days: ['2019-12-27', '2019-12-30'],
+      strategy: 'none',
+      params: {},
+      latency: { order_ns: 50_000, report_ns: 50_000 },
+      fees: { maker: 0, taker: 0 },
+      limits: { max_position: 10_000, max_order_quantity: 1_000, max_open_orders: 16 },
+      window: 'full_day',
+    };
+    const s = run(hello(), snapshot({ type: 'state', spec }));
+    expect(s.genDays).toEqual(['2019-12-27', '2019-12-30']);
+    expect(apply(s, snapshot({ snapshot_seq: 2 })).genDays).toBe(s.genDays); // a snapshot carries none
+    const start: ServerMessage = {
+      type: 'report',
+      kind: 'generation_start',
+      session_id: 's1',
+      generation: 3,
+      seq: 1,
+      symbol: 'ACME',
+      strategy: 'none',
+      days: ['2019-12-31'],
+    };
+    expect(apply(s, start).genDays).toEqual(['2019-12-31']);
+    expect(apply(s, hello({ generation: 3 })).genDays).toEqual([]);
+  });
+
+  it('asks for a rebuilt chronos-serve when hello speaks an older protocol', () => {
+    expect(run(hello({ protocol: 1 })).notice).toBe('chronos-serve speaks protocol 1: rebuild it');
+    expect(run(hello()).notice).toBe('');
+  });
+
   it('clears the notice on a control ack and a new generation, and the seek target when a seek starts', () => {
     const progress = (seek: number): ServerMessage => ({ type: 'progress', session_id: 's1', generation: 2, seek });
     const s = run(hello(), snapshot({ type: 'state' }), progress(T + 5 * S));
@@ -448,6 +481,7 @@ describe('createStore', () => {
         const auth = (init?.headers as Record<string, string> | undefined)?.Authorization;
         fetched.push(auth ? `${path} ${auth}` : path);
         if (path.startsWith('/api/history')) return (await history(path)) as Response;
+        if (path.startsWith('/api/days')) return Response.json({ start: '2019-12-30', days: [{ date: '2019-12-30' }] });
         const status = statuses.shift() ?? 200;
         return status === 200 ? Response.json({ symbols: ['ACME'] }) : new Response(null, { status });
       },
@@ -561,6 +595,18 @@ describe('createStore', () => {
     expect(store.cancel(1)).toBe(false);
     expect(store.get().notice).toBe('not connected');
     expect(f.sent).toHaveLength(2);
+  });
+
+  it('loads the days only when asked, and the symbols listed on every day picked', async () => {
+    const f = fake();
+    const store = createStore(f.env);
+    await store.start();
+    expect(f.fetched).toEqual(['/api/symbols']);
+    await store.loadDays();
+    expect(store.get().days.map((d) => d.date)).toEqual(['2019-12-30']);
+    await store.loadSymbols(['2019-12-27', '2019-12-30']);
+    expect(f.fetched.slice(1)).toEqual(['/api/days', '/api/symbols?days=2019-12-27,2019-12-30']);
+    expect(store.get().symbols).toEqual(['ACME']);
   });
 
   it('shows a note the UI puts on the notice line', () => {
