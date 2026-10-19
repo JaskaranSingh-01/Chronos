@@ -10,6 +10,7 @@
 #include <nlohmann/json.hpp>
 
 #include "json_enums.hpp"
+#include "simulator/cli/replay_args.hpp"
 
 namespace simulator::server {
 namespace {
@@ -83,6 +84,27 @@ bool read_optional(const json& object, const char* key, std::uint64_t max, I& va
     return true;
 }
 
+// An optional "days": 1 to max_days dates, YYYY-MM-DD, strictly increasing; absent, the count stays 0.
+bool read_days(const json& j, DayList& days)
+{
+    const auto it = j.find("days");
+    if (it == j.end()) {
+        return true;
+    }
+    if (!it->is_array() || it->empty() || it->size() > max_days) {
+        return false;
+    }
+    for (const json& day : *it) {
+        std::chrono::year_month_day& date = days.day[days.count];
+        if (!day.is_string() || !parse_date(day.get<std::string>(), date) ||
+            (days.count > 0 && date <= days.day[days.count - 1])) {
+            return false;
+        }
+        ++days.count;
+    }
+    return true;
+}
+
 bool decode_control(const json& j, Control& control)
 {
     std::uint64_t value = 0;
@@ -108,10 +130,10 @@ bool decode_control(const json& j, Control& control)
         control.seek_ts = static_cast<Timestamp>(value);
         return true;
     case ControlType::Symbol:
-        return only(j, {"type", "session_id", "generation", "action", "symbol"}) && read(j, "symbol", symbol) &&
+        return only(j, {"type", "session_id", "generation", "action", "symbol", "days"}) && read(j, "symbol", symbol) &&
             !symbol.empty() &&
             std::all_of(symbol.begin(), symbol.end(), [](char c) { return c >= 0x21 && c <= 0x7E; }) &&
-            to_ticker(symbol, control.spec.ticker);
+            to_ticker(symbol, control.spec.ticker) && read_days(j, control.spec.days);
     case ControlType::Play:
     case ControlType::Pause:
     case ControlType::Restart:
@@ -215,6 +237,70 @@ json order_json(const MyOrder& order)
             {"ahead_orders", order.ahead_orders}};
 }
 
+json days_json(const DayList& days)
+{
+    json dates = json::array();
+    for (std::size_t i = 0; i < days.count; ++i) {
+        dates.push_back(iso_date(days.day[i]));
+    }
+    return dates;
+}
+
+// A generation's settings in the shape a Lab run is posted in (spec §7.2); no strategy has no params.
+json fees_json(const RunSpec& spec)
+{
+    return {{"maker", spec.fees.maker_fee_per_share}, {"taker", spec.fees.taker_fee_per_share}};
+}
+
+json limits_json(const RunSpec& spec)
+{
+    return {{"max_position", spec.limits.max_position},
+            {"max_order_quantity", spec.limits.max_order_quantity.value()},
+            {"max_open_orders", spec.limits.max_open_orders}};
+}
+
+json spec_json(const RunSpec& spec)
+{
+    const MarketMakerParams& mm = spec.strategy.market_maker;
+    const ImbalanceTakerParams& it = spec.strategy.imbalance;
+    json params = json::object();
+    if (spec.strategy.kind == SessionStrategyKind::MarketMaker) {
+        params = {{"quote_size", mm.quote_size},
+                  {"max_position", mm.max_position},
+                  {"requote_cooldown_ns", mm.requote_cooldown_ns},
+                  {"improve_ticks", mm.improve_ticks}};
+    } else if (spec.strategy.kind == SessionStrategyKind::ImbalanceTaker) {
+        params = {{"threshold", it.threshold},
+                  {"clip", it.clip},
+                  {"max_position", it.max_position},
+                  {"cooldown_ns", it.cooldown_ns}};
+    }
+    return {{"symbol", name(spec.ticker)},
+            {"days", days_json(spec.days)},
+            {"strategy", spec.strategy.kind},
+            {"params", params},
+            {"latency", {{"order_ns", spec.latency.order_latency}, {"report_ns", spec.latency.report_latency}}},
+            {"fees", fees_json(spec)},
+            {"limits", limits_json(spec)},
+            {"window", spec.window}};
+}
+
+// A source error, and in a generation of several days the day it failed on: the last whose midnight the clock reached.
+std::string source_error(const Snapshot& s)
+{
+    std::string text{to_string(s.source_error)};
+    const DayList& days = s.spec.days;
+    if (s.source_error == SourceError::None || days.count < 2) {
+        return text;
+    }
+    std::size_t day = 0;
+    while (day + 1 < days.count &&
+           session_midnight_ns(days.day[day + 1], us_eastern_utc_offset(days.day[day + 1])) <= s.exchange_ts) {
+        ++day;
+    }
+    return text + " on " + iso_date(days.day[day]);
+}
+
 // A day of /api/days; `symbols` counts its stock directory.
 json day_json(const DayHandle& day)
 {
@@ -306,10 +392,8 @@ std::string encode_hello(std::string_view session_id, std::uint64_t generation, 
     j["price_scale"] = config.instrument.price_scale;
     j["quantity_scale"] = config.instrument.quantity_scale;
     const RunSpec& spec = config.defaults;
-    j["fees"] = {{"maker", spec.fees.maker_fee_per_share}, {"taker", spec.fees.taker_fee_per_share}};
-    j["limits"] = {{"max_position", spec.limits.max_position},
-                   {"max_order_quantity", spec.limits.max_order_quantity.value()},
-                   {"max_open_orders", spec.limits.max_open_orders}};
+    j["fees"] = fees_json(spec);
+    j["limits"] = limits_json(spec);
     return text(j);
 }
 
@@ -318,6 +402,8 @@ std::string encode_snapshot(std::string_view session_id, const Snapshot& s, bool
     json j = envelope(state ? "state" : "snapshot", session_id, s.generation);
     if (state) {
         j["full_resync"] = full_resync;
+        j["spec"] = spec_json(s.spec);
+        j["run_id"] = "";
     }
     j["symbol"] = name(s.spec.ticker);
     j["snapshot_seq"] = s.snapshot_seq;
@@ -329,7 +415,7 @@ std::string encode_snapshot(std::string_view session_id, const Snapshot& s, bool
     j["speed"] = s.speed;
     j["progress"] = s.progress;
     j["failure"] = s.failure;
-    j["source_error"] = to_string(s.source_error);
+    j["source_error"] = source_error(s);
     j["trading_state"] = s.trading_state;
     j["bids"] = array_of(std::span{s.bids}.first(s.bid_levels), level_json);
     j["asks"] = array_of(std::span{s.asks}.first(s.ask_levels), level_json);
@@ -396,6 +482,9 @@ std::string encode_record(std::string_view session_id, const Record& r)
         j["kind"] = "generation_start";
         j["symbol"] = name(r.control.spec.ticker);
         j["strategy"] = r.control.spec.strategy.kind;
+        j["days"] = days_json(r.control.spec.days);
+        j["window"] = r.control.spec.window;
+        j["run_id"] = "";
         break;
     case RecordKind::GenerationEnd:
         j["kind"] = "generation_end";

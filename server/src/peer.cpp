@@ -75,15 +75,37 @@ bool Peer::receive(std::string_view text, Timestamp now, std::vector<std::string
             return refuse("stale_generation", "a control for an earlier generation");
         }
         if (control.type == ControlType::Symbol) {
-            const DayHandle day = hub_.library != nullptr ? hub_.library->find(hub_.start) : nullptr;
-            if (day == nullptr ||
-                !std::binary_search(day->symbols.begin(), day->symbols.end(), name(control.spec.ticker))) {
-                return refuse("bad_request", "not in the day's stock directory");
+            if (control.spec.days.count == 0) {
+                control.spec.days = hub_.days;  // written out, so the engine never resolves "the current days"
             }
-            control.spec.days = DayList{.day = {hub_.start}, .count = 1};
+            if (control.spec.days.count == 0) {
+                return refuse("bad_request", "no day to load");
+            }
+            std::string missing;  // the days whose stock directory lacks the symbol
+            for (std::size_t i = 0; i < control.spec.days.count; ++i) {
+                const std::chrono::year_month_day date = control.spec.days.day[i];
+                const DayHandle day = hub_.library != nullptr ? hub_.library->find(date) : nullptr;
+                if (day == nullptr || !day->itch50) {
+                    return refuse("bad_request",
+                                  iso_date(date) + (day == nullptr ? ": no such day" : ": not ITCH 5.0"));
+                }
+                if (!std::binary_search(day->symbols.begin(), day->symbols.end(), name(control.spec.ticker))) {
+                    missing += (missing.empty() ? "" : ", ") + iso_date(date);
+                }
+            }
+            if (!missing.empty()) {
+                return refuse("symbol_missing",
+                              std::string{name(control.spec.ticker)} + " is not listed on " + missing);
+            }
         }
         const Admission admission = session.control(control);
-        return admission.error == ErrorCode::None ? true : refuse(to_string(admission.error), "control refused");
+        if (admission.error != ErrorCode::None) {
+            return refuse(to_string(admission.error), "control refused");
+        }
+        if (control.type == ControlType::Symbol) {
+            hub_.days = control.spec.days;
+        }
+        return true;
     }
     if (now - window_start_ >= second) {
         window_start_ = now;

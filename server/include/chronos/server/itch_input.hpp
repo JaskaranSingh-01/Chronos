@@ -96,7 +96,8 @@ public:
 
 // Each generation's stream: a DaySequenceSource of `ticker` over `days` from `library`, or for the empty ticker an
 // empty stream. The engine thread resolves the days only here, as it builds a generation. The library outlives it.
-// ponytail: a day the library no longer holds (removed between admission and the load) replays as an empty stream.
+// ponytail: a day removed between admission and the load replays as an empty stream, and one replaced by a non-ITCH
+// file fails the chain up front, named as its first day; re-check the days here if that matters.
 SourceFactory chain_factory(const DayLibrary& library, const Instrument& instrument, bool allow_truncated_tail);
 
 // One ticker over days in date order, the ticker SymbolId 0 in each day's own ItchSource, with a Clear at each next

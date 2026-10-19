@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 
+#include <chrono>
 #include <cstdint>
 #include <limits>
 #include <optional>
@@ -10,6 +11,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include "chronos/server/itch_input.hpp"
 #include "chronos/server/protocol.hpp"
 #include "test_support.hpp"
 
@@ -111,6 +113,35 @@ TEST(ProtocolTest, DecodesEveryClientMessage)
               "BRK.B");
     EXPECT_EQ(name(decoded(client_message("control", R"(,"action":"symbol","symbol":"~!@#$%^&")")).control.spec.ticker),
               "~!@#$%^&");
+}
+
+// A load names 1 to 32 days, strictly increasing; without the key it names none, and the Peer fills them in.
+TEST(ProtocolTest, DecodesTheDaysOfASymbolLoad)
+{
+    const auto load = [](const std::string& days) {
+        ClientMessage message;
+        std::string error;
+        const bool valid =
+            decode(client_message("control", R"(,"action":"symbol","symbol":"SPY")" + days), message, error);
+        return valid ? std::optional<DayList>{message.control.spec.days} : std::nullopt;
+    };
+    using namespace std::chrono_literals;
+    EXPECT_EQ(load(""), DayList{});
+    EXPECT_EQ(load(R"(,"days":["2019-12-27","2019-12-30"])"),
+              (DayList{.day = {2019y / 12 / 27, 2019y / 12 / 30}, .count = 2}));
+    std::string all = R"(,"days":[)";
+    for (int day = 1; day <= 32; ++day) {
+        all +=
+            (day > 1 ? ",\"" : "\"") + iso_date(std::chrono::sys_days{2019y / 1 / 1} + std::chrono::days{day}) + "\"";
+    }
+    EXPECT_EQ(load(all + "]")->count, 32u);
+    EXPECT_FALSE(load(all + R"(,"2019-03-01"])"));  // 33 days
+    EXPECT_FALSE(load(R"(,"days":[])"));
+    EXPECT_FALSE(load(R"(,"days":["2019-12-30","2019-12-27"])"));  // not increasing
+    EXPECT_FALSE(load(R"(,"days":["2019-12-30","2019-12-30"])"));
+    EXPECT_FALSE(load(R"(,"days":["2019-02-30"])"));
+    EXPECT_FALSE(load(R"(,"days":[20191230])"));
+    EXPECT_FALSE(load(R"(,"days":"2019-12-30")"));
 }
 
 TEST(ProtocolTest, RefusesAnythingOutsideItsSchema)
@@ -379,7 +410,7 @@ TEST(ProtocolTest, EncodesSnapshotsRecordsAndReplies)
     EXPECT_EQ(state["source_error"], to_string(SourceError::TruncatedMessage));
     EXPECT_EQ(state["candle"], nullptr);
     EXPECT_EQ(state["metrics"]["log_failed"], true);
-    snapshot_keys.insert("full_resync");
+    snapshot_keys.insert({"full_resync", "spec", "run_id"});
     EXPECT_EQ(keys_of(state), snapshot_keys);
 
     const json step = json::parse(encode_record("s1",
@@ -456,7 +487,7 @@ TEST(ProtocolTest, EncodesSnapshotsRecordsAndReplies)
     SessionConfig session = config();
     session.defaults.fees = {.maker_fee_per_share = -1, .taker_fee_per_share = 3};
     EXPECT_EQ(json::parse(encode_hello("s1", 3, true, session)),
-              json::parse(R"({"type":"hello","session_id":"s1","generation":3,"protocol":1,"role":"controller",)"
+              json::parse(R"({"type":"hello","session_id":"s1","generation":3,"protocol":2,"role":"controller",)"
                           R"("price_scale":4,"quantity_scale":0,"fees":{"maker":-1,"taker":3},)"
                           R"("limits":{"max_position":1000,"max_order_quantity":500,"max_open_orders":4}})"));
     EXPECT_EQ(json::parse(encode_hello("s1", 3, false, session))["role"], "viewer");
@@ -480,6 +511,46 @@ TEST(ProtocolTest, EncodesSnapshotsRecordsAndReplies)
     EXPECT_EQ(json::parse(encode_history("s1", 3, bars, trades)),
               json::parse(R"({"session_id":"s1","generation":3,"candles":[[1000000000,1,4,1,2,7]],)"
                           R"("trades":[[5,2905600,100,"sell"]]})"));
+}
+
+// Protocol 2's additions: generation_start's days, window and run id, the state's spec, and a source error's day.
+TEST(ProtocolTest, EncodesTheGenerationsSpecAndTheDayASourceErrorIsOn)
+{
+    using namespace std::chrono_literals;
+    const RunSpec spec{.ticker = ticker("SPY"),
+                       .days = {.day = {2019y / 12 / 27, 2019y / 12 / 30}, .count = 2},
+                       .latency = {.order_latency = 50'000, .report_latency = 40'000},
+                       .fees = {.maker_fee_per_share = -20, .taker_fee_per_share = 30},
+                       .limits = {.max_position = 500, .max_order_quantity = Quantity{100}, .max_open_orders = 2},
+                       .strategy = {.kind = SessionStrategyKind::MarketMaker,
+                                    .market_maker = {.quote_size = 100, .max_position = 500}}};
+    const json start = json::parse(encode_record(
+        "s1", Record{.seq = 8, .generation = 4, .kind = RecordKind::GenerationStart, .control = {.spec = spec}}));
+    EXPECT_EQ(start["days"], json::parse(R"(["2019-12-27","2019-12-30"])"));
+    EXPECT_EQ(start["window"], "full_day");
+    EXPECT_EQ(start["run_id"], "");
+
+    Snapshot s;
+    s.spec = spec;
+    s.exchange_ts = session_midnight_ns(2019y / 12 / 30, -5h) + kSecond;
+    s.source_error = SourceError::TruncatedMessage;
+    const json state = json::parse(encode_snapshot("s1", s, true, false));
+    EXPECT_EQ(
+        state["spec"],
+        json::parse(
+            R"({"symbol":"SPY","days":["2019-12-27","2019-12-30"],"strategy":"market_maker",)"
+            R"("params":{"quote_size":100,"max_position":500,"requote_cooldown_ns":100000000,"improve_ticks":0},)"
+            R"("latency":{"order_ns":50000,"report_ns":40000},"fees":{"maker":-20,"taker":30},)"
+            R"("limits":{"max_position":500,"max_order_quantity":100,"max_open_orders":2},"window":"full_day"})"));
+    EXPECT_EQ(state["run_id"], "");
+    EXPECT_EQ(state["source_error"], "TruncatedMessage on 2019-12-30");
+    s.exchange_ts -= kSecond;  // Monday's midnight itself, where its first message fails
+    EXPECT_EQ(json::parse(encode_snapshot("s1", s, false, false))["source_error"], "TruncatedMessage on 2019-12-30");
+    s.exchange_ts -= kSecond;  // still Friday's
+    EXPECT_EQ(json::parse(encode_snapshot("s1", s, false, false))["source_error"], "TruncatedMessage on 2019-12-27");
+    s.spec.days.count = 1;  // one day: as UI-1 named it
+    EXPECT_EQ(json::parse(encode_snapshot("s1", s, false, false))["source_error"], "TruncatedMessage");
+    EXPECT_EQ(json::parse(encode_snapshot("s1", Snapshot{}, true, false))["spec"]["params"], json::object());
 }
 
 }  // namespace

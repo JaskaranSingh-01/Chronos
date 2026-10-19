@@ -20,14 +20,14 @@
 
 namespace simulator::server {
 
-// The protocol version hello carries.
-inline constexpr int ws_protocol = 1;
+// The protocol version hello carries; 2 adds days: a UI-1 client ignores the new keys, a UI-2 client needs them.
+inline constexpr int ws_protocol = 2;
 // The largest message a client may send (spec §6.4).
 inline constexpr std::size_t max_message_bytes = 64 * 1024;
 
 enum class ClientType : std::uint8_t {
     Auth,     // auth{token}: the first message when the server has a token
-    Control,  // control{action}: play, pause, step n, speed s, seek ts, restart, symbol S, cancel_seek
+    Control,  // control{action}: play, pause, step n, speed s, seek ts, restart, symbol S [days], cancel_seek
     Command,  // order, cancel, attach{strategy, params} or detach
     Resync    // resync{from_report_seq}
 };

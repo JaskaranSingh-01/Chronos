@@ -3,12 +3,14 @@
 #include <chrono>
 #include <cstdint>
 #include <memory>
+#include <span>
 #include <string>
 #include <vector>
 
 #include <nlohmann/json.hpp>
 
 #include "chronos/server/command_log.hpp"
+#include "chronos/server/itch_input.hpp"
 #include "chronos/server/peer.hpp"
 #include "test_support.hpp"
 
@@ -363,7 +365,11 @@ TEST(PeerTest, MessagesForAnotherSessionOrGenerationAndMalformedOnesAreRefused)
     write_file(data.path / "12302019.NASDAQ_ITCH50.bin", acme_day().bytes());
     DayLibrary library{data.path, data.path / "fingerprints.json"};
     library.scan();
-    Hub hub{.session = session, .session_id = "test", .library = &library, .start = 2019y / 12 / 30};
+    Hub hub{.session = session,
+            .session_id = "test",
+            .library = &library,
+            .start = 2019y / 12 / 30,
+            .days = {.day = {2019y / 12 / 30}, .count = 1}};
     Peer peer{hub, kWall};
     poll(peer);
     const auto code = [&](const std::string& text) {
@@ -381,7 +387,7 @@ TEST(PeerTest, MessagesForAnotherSessionOrGenerationAndMalformedOnesAreRefused)
     EXPECT_EQ(no_price.at(0)["client_id"], 9);
     EXPECT_EQ(code(R"({"type":"control","session_id":"old","generation":1,"action":"play"})"), "stale_generation");
     EXPECT_EQ(code(client_message("control", R"(,"action":"play")", 2)), "stale_generation");
-    EXPECT_EQ(code(client_message("control", R"(,"action":"symbol","symbol":"MSFT")")), "bad_request");
+    EXPECT_EQ(code(client_message("control", R"(,"action":"symbol","symbol":"MSFT")")), "symbol_missing");
     EXPECT_EQ(code(client_message("control", R"(,"action":"symbol","symbol":"ACME")")), "");
     EXPECT_EQ(code(client_message("control", R"(,"action":"speed","speed":1000)")), "");
 }
@@ -412,6 +418,57 @@ TEST(PeerTest, ASeekSendsProgressAndTheNewGenerationArrivesAsAState)
     EXPECT_EQ(arrived.back()["generation"], 2);
     EXPECT_EQ(arrived.back()["event_seq"], 6'000);
     EXPECT_EQ(send(peer, client_message("order", kBuy)).at(0)["code"], "stale_generation");  // generation 1's
+}
+
+// Each day of a load must be listed, ITCH 5.0 and hold the symbol; a load naming none takes the last admitted days.
+TEST(PeerTest, ASymbolLoadNamesItsDaysOrTakesTheLastAdmittedOnes)
+{
+    const ScratchDir data{"peer-loads"};
+    itch_test::ItchBuilder friday;  // AAA alone
+    friday.system_event(0, kSecond, 'O').stock_directory(1, kSecond, "AAA").system_event(0, 2 * kSecond, 'S');
+    itch_test::ItchBuilder broken;  // no start of messages
+    broken.stock_directory(1, kSecond, "ACME");
+    write_file(data.path / "12262019.NASDAQ_ITCH50.bin", broken.bytes());
+    write_file(data.path / "12272019.NASDAQ_ITCH50.bin", friday.bytes());
+    write_file(data.path / "12302019.NASDAQ_ITCH50.bin", acme_day().bytes());
+    write_file(data.path / "12312019.NASDAQ_ITCH50.bin", acme_day().bytes());
+    DayLibrary library{data.path, data.path / "fingerprints.json"};
+    library.scan();
+    ReplaySession session{config(), [](const Ticker&, const DayList&) {
+                              return std::make_unique<VectorSource>(std::span<const MarketEvent>{});
+                          }};
+    Hub hub{.session = session,
+            .session_id = "test",
+            .library = &library,
+            .start = 2019y / 12 / 30,
+            .days = {.day = {2019y / 12 / 30}, .count = 1}};
+    Peer peer{hub, kWall};
+    poll(peer);
+    Timestamp wall = kWall;
+    const auto load = [&](const std::string& fields) {
+        const std::vector<json> reply =
+            send(peer, client_message("control", R"(,"action":"symbol")" + fields, session.generation()));
+        session.tick(wall += snapshot_interval);  // applies it and publishes a snapshot
+        return reply.empty() ? json{} : reply[0];
+    };
+    const auto days_loaded = [&] { return latest(session).spec.days; };
+
+    EXPECT_EQ(load(R"(,"symbol":"ACME")"), json{});  // the starting day
+    EXPECT_EQ(days_loaded(), (DayList{.day = {2019y / 12 / 30}, .count = 1}));
+    EXPECT_EQ(load(R"(,"symbol":"ACME","days":["2019-12-30","2019-12-31"])"), json{});
+    EXPECT_EQ(load(R"(,"symbol":"ACME")"), json{});  // the last admitted days
+    EXPECT_EQ(days_loaded(), (DayList{.day = {2019y / 12 / 30, 2019y / 12 / 31}, .count = 2}));
+
+    const json missing = load(R"(,"symbol":"ACME","days":["2019-12-27","2019-12-30"])");
+    EXPECT_EQ(missing["code"], "symbol_missing");
+    EXPECT_EQ(missing["message"], "ACME is not listed on 2019-12-27");
+    EXPECT_EQ(load(R"(,"symbol":"AAA","days":["2019-12-27","2019-12-30","2019-12-31"])")["message"],
+              "AAA is not listed on 2019-12-30, 2019-12-31");
+    EXPECT_EQ(load(R"(,"symbol":"ACME","days":["2019-12-26"])")["message"], "2019-12-26: not ITCH 5.0");
+    EXPECT_EQ(load(R"(,"symbol":"ACME","days":["2019-12-25"])")["message"], "2019-12-25: no such day");
+    EXPECT_EQ(load(R"(,"symbol":"ACME","days":["2019-12-31","2019-12-30"])")["code"], "bad_request");
+    EXPECT_EQ(load(R"(,"symbol":"ACME")"), json{});  // a refused load changes nothing
+    EXPECT_EQ(days_loaded(), (DayList{.day = {2019y / 12 / 30, 2019y / 12 / 31}, .count = 2}));
 }
 
 }  // namespace

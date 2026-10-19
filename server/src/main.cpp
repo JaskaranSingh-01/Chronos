@@ -30,7 +30,7 @@ constexpr std::string_view serve_usage =
     "                     [--token T] [--fsync] [--allow-truncated-tail]\n"
     "\n"
     "Serves an interactive replay of the days in DIR, the files named MMDDYYYY.NASDAQ_ITCH50.bin; the UI picks the\n"
-    "symbol. A new file is read once, a few seconds a day, and its hash kept in runs/fingerprints.json.\n"
+    "symbol and its days. A new file is read once, a few seconds a day, and its hash kept in runs/fingerprints.json.\n"
     "  --date YYYY-MM-DD       the starting day (default the latest)\n"
     "  --host IP               the address to bind, an IP address (default 127.0.0.1); any other requires a\n"
     "                          token, and one is made and printed once if --token is not given; it guards\n"
@@ -187,7 +187,8 @@ int main(int argc, char** argv)
             .fsync = parsed.fsync,
             .config = config,
             .library = &library,
-            .start = start->date};
+            .start = start->date,
+            .days = config.defaults.days};
     HttpServer server{hub,
                       ServerOptions{.host = parsed.host, .port = parsed.port, .web = parsed.web, .sessions = sessions}};
     if (!server.start()) {

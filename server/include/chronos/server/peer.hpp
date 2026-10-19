@@ -76,6 +76,7 @@ struct Hub
     SessionConfig config{};  // what hello tells a client: its scales, fees and limits
     DayLibrary* library{nullptr};          // the days a load may name; nullptr: none
     std::chrono::year_month_day start{};  // the starting day
+    DayList days{};                       // the days of the last load admitted: a load that names none replays them
     const Peer* controller{nullptr};      // the one connection that may control and trade
     std::vector<Record> reports = std::vector<Record>(Peer::reports_per_poll);  // poll()'s ring chunk
     Snapshot snapshot{};                                                         // poll()'s copy of the latest one
