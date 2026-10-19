@@ -113,7 +113,12 @@ public:
         anomalies_.reserve(max_fifo_anomaly_samples);
     }
 
-    // Call before book.apply(event). Appends our fills to `out`.
+    void set_session_midnight(Timestamp session_midnight) noexcept
+    {
+        session_midnight_ = session_midnight;
+    }
+
+    // Call before book.apply(event). Appends our fills to `out`; on a Clear, an Expired for each resting order.
     void on_market(const MarketEvent& event, const MarketBook& book, std::vector<ExecutionReport>& out) noexcept;
 
     // Appends the order's reports to `out`: an IOC's last one has leaves 0,

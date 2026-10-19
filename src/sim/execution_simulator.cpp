@@ -73,7 +73,7 @@ void ExecutionSimulator::on_market(const MarketEvent& event, const MarketBook& b
         }
     } else if (event.type == MarketEventType::Execute || event.type == MarketEventType::Cancel ||
                event.type == MarketEventType::Delete || event.type == MarketEventType::Replace) {
-        // Trade and Status touch no visible order; Modify and Clear are not applied by MarketBook yet.
+        // Trade and Status touch no visible order; Modify is not applied by MarketBook yet.
         const Order* h = book.find(event.order_id);
         if (h == nullptr) {
             return;
@@ -128,6 +128,15 @@ void ExecutionSimulator::on_market(const MarketEvent& event, const MarketBook& b
         if (replace && trading) {
             cross(side, event.price, event.quantity.value(), event.timestamp, FillCause::RuleCReplace, out);
         }
+    } else if (event.type == MarketEventType::Clear) {  // a new day: each resting order expires, as DAY orders do
+        for (const ShadowOrder& o : orders_) {
+            out.push_back(ExecutionReport{.exchange_time = event.timestamp,
+                                          .order_id = o.id,
+                                          .quantity = Quantity{o.remaining},
+                                          .type = ReportType::Expired,
+                                          .side = o.side});
+        }
+        orders_.clear();
     }
 
     if (out.size() != before) {

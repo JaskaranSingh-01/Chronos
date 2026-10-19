@@ -207,7 +207,6 @@ TEST(MarketBookTest, RejectsEachInvalidEventWithItsOwnResult)
     EXPECT_EQ(book.apply(add(2, Side::Buy, 100, 10)), ApplyResult::PoolExhausted);
 
     EXPECT_EQ(book.apply(reduce(MarketEventType::Modify, 1, 5)), ApplyResult::Unsupported);
-    EXPECT_EQ(book.apply(reduce(MarketEventType::Clear, 0, 0)), ApplyResult::Unsupported);
 
     EXPECT_EQ(book.digest(), before);
     EXPECT_EQ(book.order_count(), 1u);
@@ -253,6 +252,38 @@ TEST(MarketBookTest, StatusSetsTheTradingStateWithoutTouchingOrders)
     EXPECT_EQ(book.digest(), before);
     EXPECT_EQ(book.last_sequence(), 1u);
     EXPECT_EQ(book.order_count(), 1u);
+}
+
+// Every order leaves and frees its slot, the book trades again and sequences restart at 1, as in a fresh book.
+TEST(MarketBookTest, ClearResetsTheBookToAFreshOne)
+{
+    MarketBook book{kSymbol, 3};
+    for (const MarketEvent& event : {add(1, Side::Buy, 100, 10), add(2, Side::Sell, 101, 20), add(3, Side::Buy, 99, 30),
+                                     status(TradingState::Halted)}) {
+        ASSERT_EQ(book.apply(event), ApplyResult::Applied);
+    }
+    const MarketEvent clear{.symbol = kSymbol, .type = MarketEventType::Clear};
+    MarketEvent other_symbol = clear;
+    other_symbol.symbol = kSymbol + 1;
+    EXPECT_EQ(book.apply(other_symbol), ApplyResult::WrongSymbol);
+    EXPECT_EQ(book.order_count(), 3u);
+
+    ASSERT_EQ(book.apply(clear), ApplyResult::Applied);
+    EXPECT_EQ(book.order_count(), 0u);
+    EXPECT_EQ(book.trading_state(), TradingState::Trading);
+    EXPECT_EQ(book.last_sequence(), 0u);
+    EXPECT_EQ(book.peak_order_count(), 3u);  // kept
+    expect_invariants(book);                 // no slot left in use
+
+    MarketBook fresh{kSymbol, 3};
+    EXPECT_EQ(book.digest(), fresh.digest());
+    for (const MarketEvent& event :
+         {add(7, Side::Buy, 100, 5), add(8, Side::Buy, 100, 6), add(9, Side::Sell, 102, 7)}) {
+        ASSERT_EQ(book.apply(event), ApplyResult::Applied);  // every slot is free again
+        ASSERT_EQ(fresh.apply(event), ApplyResult::Applied);
+    }
+    EXPECT_EQ(book.find(7)->sequence(), 1u);
+    EXPECT_EQ(book.digest(), fresh.digest());
 }
 
 TEST(MarketBookTest, BestIsFalseOnAnEmptySide)
@@ -474,8 +505,9 @@ TEST(MarketBookTest, DigestMatchesForSameEventsAndDiffersByOneShare)
     EXPECT_NE(a.digest(), b.digest());
 }
 
-// A fixed-seed stream of valid and invalid events of every type. Invariants
-// hold after every apply, and a rejected event (or a Trade) never changes the
+// A fixed-seed stream of valid and invalid events of every type, with a Clear
+// every 1,000 events so the pool still fills between them. Invariants hold
+// after every apply, and a rejected event (or a Trade) never changes the
 // digest. Returns the final digest.
 std::uint64_t run_random_stream(std::uint64_t seed, std::array<std::size_t, apply_result_count>& counts)
 {
@@ -487,12 +519,12 @@ std::uint64_t run_random_stream(std::uint64_t seed, std::array<std::size_t, appl
             MarketEventType::Add,     MarketEventType::Add,    MarketEventType::Add,     MarketEventType::Add,
             MarketEventType::Add,     MarketEventType::Add,    MarketEventType::Execute, MarketEventType::Execute,
             MarketEventType::Cancel,  MarketEventType::Cancel, MarketEventType::Delete,  MarketEventType::Replace,
-            MarketEventType::Replace, MarketEventType::Trade,  MarketEventType::Modify,  MarketEventType::Clear,
+            MarketEventType::Replace, MarketEventType::Trade,  MarketEventType::Modify,  MarketEventType::Modify,
         };
 
         MarketEvent event{};
         event.timestamp = i;
-        event.type = types[rng() % 16];
+        event.type = i % 1'000 == 999 ? MarketEventType::Clear : types[rng() % 16];
         event.order_id = 1 + rng() % 128;
         event.new_order_id = rng() % 8 == 0 ? event.order_id : 1 + rng() % 128;
         event.price = Price{static_cast<std::int64_t>(95 + rng() % 11)};

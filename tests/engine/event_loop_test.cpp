@@ -356,6 +356,90 @@ TEST(EventLoopTest, RestingOrderFillsAsMakerAndCancelsEndToEnd)
     EXPECT_EQ(h.execution.open_orders(), 0u);
 }
 
+// A new day: the Clear expires both resting orders, and their Expired reports release what the Portfolio reserved.
+TEST(EventLoopTest, ClearExpiresRestingOrdersAndReleasesTheirReservations)
+{
+    const std::vector<MarketEvent> events{
+        add(10, 1, Side::Buy, 999'900, 100), add(20, 2, Side::Sell, 1'000'100, 100),
+        MarketEvent{.timestamp = 1'000, .symbol = kSymbol, .type = MarketEventType::Clear}};
+    Harness h{events};
+    h.strategy.act = [](StrategyContext& ctx, const MarketEvent& event) {
+        OrderId id{0};
+        if (event.timestamp == 20) {
+            ASSERT_EQ(ctx.gateway.send(Side::Buy, Price{999'900}, Quantity{50}, TimeInForce::Day, id),
+                      RiskCheck::Accepted);
+            ASSERT_EQ(ctx.gateway.send(Side::Sell, Price{1'000'100}, Quantity{30}, TimeInForce::Day, id),
+                      RiskCheck::Accepted);
+        }
+    };
+
+    const LoopReport report = h.run({.order_latency = 100, .report_latency = 100});
+
+    ASSERT_TRUE(report.replay.succeeded());
+    ASSERT_EQ(h.strategy.kinds(), (std::vector<char>{'M', 'M', 'R', 'R', 'M', 'R', 'R'}));
+    EXPECT_EQ(h.strategy.seen[5].now, 1'100);
+    EXPECT_EQ(h.strategy.seen[5].report,
+              (ExecutionReport{.exchange_time = 1'000,
+                               .order_id = 1,
+                               .quantity = Quantity{50},
+                               .type = ReportType::Expired,
+                               .side = Side::Buy}));
+    EXPECT_EQ(h.strategy.seen[6].report,
+              (ExecutionReport{.exchange_time = 1'000,
+                               .order_id = 2,
+                               .quantity = Quantity{30},
+                               .type = ReportType::Expired,
+                               .side = Side::Sell}));
+    EXPECT_EQ(h.execution.open_orders(), 0u);
+    EXPECT_EQ(h.portfolio.open_orders(), 0u);
+    EXPECT_EQ(h.portfolio.open_quantity(Side::Buy), 0u);
+    EXPECT_EQ(h.portfolio.open_quantity(Side::Sell), 0u);
+    EXPECT_EQ(h.book.order_count(), 0u);
+}
+
+// Under day 2's midnight, an 08:00 fill is pre-open and a book crossed at 09:30:01 is crossed in regular hours.
+TEST(EventLoopTest, SetSessionMidnightMovesFillPhasesAndTheRthCheckToTheNewDay)
+{
+    constexpr Timestamp second = 1'000'000'000;
+    constexpr Timestamp day2 = 86'400 * second;  // day 1's midnight is 0
+    const std::vector<MarketEvent> events{add(RTH_OPEN_NS + 10 * second, 1, Side::Sell, 1'000'100, 100),
+                                          add(RTH_OPEN_NS + 20 * second, 2, Side::Sell, 1'000'000, 10),
+                                          add(day2 + 8 * 3'600 * second, 3, Side::Sell, 1'000'000, 10),
+                                          add(day2 + RTH_OPEN_NS + second, 4, Side::Buy, 1'000'200, 10)};
+    Harness h{events};
+    h.strategy.act = [](StrategyContext& ctx, const MarketEvent& event) {
+        OrderId id{0};
+        if (event.order_id == 1) {
+            ASSERT_EQ(ctx.gateway.send(Side::Buy, Price{1'000'000}, Quantity{50}, TimeInForce::Day, id),
+                      RiskCheck::Accepted);
+        }
+    };
+    EventLoop<Recorder> loop{h.source,
+                             h.book,
+                             h.execution,
+                             h.portfolio,
+                             h.strategy,
+                             LatencyConfig{},
+                             ReplayOptions{.check_invariants_every = 1}};
+    Timestamp ts{0};
+    for (int i = 0; i < 2; ++i) {
+        ASSERT_EQ(loop.peek(ts), PeekStatus::Event);
+        ASSERT_TRUE(loop.step().ok);
+    }
+    EXPECT_EQ(loop.session_midnight(), 0);
+    loop.set_session_midnight(day2);
+    EXPECT_EQ(loop.session_midnight(), day2);
+    const LoopReport report = loop.run();
+
+    const auto& fills = h.execution.statistics().fills_by[static_cast<std::size_t>(FillCause::RuleCAdd)];
+    EXPECT_EQ(fills[static_cast<std::size_t>(SessionPhase::Regular)], 1u);  // day 1
+    EXPECT_EQ(fills[static_cast<std::size_t>(SessionPhase::PreOpen)], 1u);  // day 2
+    EXPECT_EQ(fills[static_cast<std::size_t>(SessionPhase::PostClose)], 0u);
+    EXPECT_EQ(report.replay.failure, ReplayFailure::InvariantViolation);
+    EXPECT_EQ(report.replay.invariant_error, InvariantError::CrossedInRth);
+    EXPECT_EQ(report.replay.events, 4u);
+}
+
 // Re-sends an IOC that never fills on every report, forever, and re-arms a
 // timer on every timer.
 struct PingPong

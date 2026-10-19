@@ -35,8 +35,9 @@ ApplyResult MarketBook::apply(const MarketEvent& event) noexcept
     case MarketEventType::Status:
         trading_state_ = event.trading_state;
         return ApplyResult::Applied;
-    case MarketEventType::Modify:
     case MarketEventType::Clear:
+        return clear();
+    case MarketEventType::Modify:
         break;
     }
 
@@ -152,6 +153,18 @@ ApplyResult MarketBook::replace(const MarketEvent& event) noexcept
     assert(erased && released && order != nullptr);
 
     insert(*order);  // fresh sequence: back of the queue
+    return ApplyResult::Applied;
+}
+
+// A new day: every order leaves as a Delete would; the book trades and sequences from 1, as a fresh one does.
+ApplyResult MarketBook::clear() noexcept
+{
+    while (const Order* order = book_.best_bid() != nullptr ? book_.best_bid() : book_.best_ask()) {
+        [[maybe_unused]] const ApplyResult erased = erase(MarketEvent{.order_id = order->id()});
+        assert(erased == ApplyResult::Applied);
+    }
+    trading_state_ = TradingState::Trading;
+    next_sequence_ = 1;
     return ApplyResult::Applied;
 }
 

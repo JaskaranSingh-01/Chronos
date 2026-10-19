@@ -647,5 +647,19 @@ TEST_F(RestingOrderTest, RestingOrdersListsOurQuotesUntilCancelled)
     EXPECT_EQ(execution_.resting_orders()[0].id, 11u);
 }
 
+// A new day: every resting order expires with what is left of it, as a DAY order does, and leaves the simulator.
+TEST_F(RestingOrderTest, ClearExpiresEveryRestingOrder)
+{
+    market(add(1, Side::Sell, kP + 200, 100));
+    EXPECT_EQ(arrive(day(1, Side::Buy, kP, 100)), (Reports{accepted(1, Side::Buy, 100)}));
+    EXPECT_EQ(arrive(day(2, Side::Sell, kP + 100, 50)), (Reports{accepted(2, Side::Sell, 50)}));
+    EXPECT_EQ(market(add(2, Side::Sell, kP, 30)).size(), 1u);  // (c): order 1 has 70 left
+
+    EXPECT_EQ(market(at(kNow, MarketEvent{.symbol = kSymbol, .type = MarketEventType::Clear})),
+              (Reports{expired(1, Side::Buy, 70), expired(2, Side::Sell, 50)}));
+    EXPECT_EQ(execution_.open_orders(), 0u);
+    EXPECT_EQ(book_.order_count(), 0u);
+}
+
 }  // namespace
 }  // namespace simulator

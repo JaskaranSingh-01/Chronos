@@ -21,7 +21,7 @@ enum class ApplyResult : std::uint8_t {
     ExceedsRemaining,  // Execute/Cancel of more than the order's remaining
     InvalidReplace,    // Replace with new_order_id == order_id
     PoolExhausted,     // Add with no free order slot
-    Unsupported        // Modify, Clear
+    Unsupported        // Modify
 };
 
 inline constexpr std::size_t apply_result_count = 9;
@@ -85,6 +85,7 @@ private:
     ApplyResult reduce(const MarketEvent& event) noexcept;  // Execute, Cancel
     ApplyResult erase(const MarketEvent& event) noexcept;   // Delete
     ApplyResult replace(const MarketEvent& event) noexcept;
+    ApplyResult clear() noexcept;
     void insert(Order& order) noexcept;                     // activate, sequence, link
 
 public:

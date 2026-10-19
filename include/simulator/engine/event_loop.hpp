@@ -266,6 +266,18 @@ public:
         return report_;
     }
 
+    // A new day's 00:00 exchange-local, for the RTH check and the simulator's fill phases from now on.
+    void set_session_midnight(Timestamp session_midnight) noexcept
+    {
+        options_.session_midnight = session_midnight;
+        execution_.set_session_midnight(session_midnight);
+    }
+
+    Timestamp session_midnight() const noexcept
+    {
+        return options_.session_midnight;
+    }
+
     // When the next SimEvent is due; false if none is queued.
     bool next_sim_time(Timestamp& ts) const noexcept
     {
