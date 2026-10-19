@@ -76,6 +76,19 @@ struct Applied
 // Applies one command at the loop's clock through the gateway strategies use.
 Applied apply_command(Generation& generation, const Command& command) noexcept;
 
+// The one stepping function. A pending Clear starts a new day at its timestamp: the simulator events due before it run
+// under the old day, then the session midnight moves to it, then it applies; those due at it run after it.
+template <Strategy S>
+StepResult step(EventLoop<S>& loop) noexcept
+{
+    if (const MarketEvent* next = loop.pending(); next != nullptr && next->type == MarketEventType::Clear) {
+        const Timestamp boundary = next->timestamp;
+        loop.advance_to(boundary - 1);
+        loop.set_session_midnight(boundary);
+    }
+    return loop.step();
+}
+
 // Fingerprints of a generation's state, for the command log's trailer.
 struct Digests
 {

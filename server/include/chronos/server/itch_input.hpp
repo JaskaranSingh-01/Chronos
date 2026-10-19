@@ -14,6 +14,7 @@
 
 #include "chronos/server/generation.hpp"
 #include "simulator/io/mapped_file.hpp"
+#include "simulator/market/instrument_registry.hpp"
 
 namespace simulator::server {
 
@@ -95,6 +96,41 @@ public:
     std::vector<DayHandle> scan();
     // The day the last scan found for `date`; nullptr if none.
     DayHandle find(std::chrono::year_month_day date) const;
+};
+
+// One ticker over days in date order, the ticker SymbolId 0 in each day's own ItchSource, with a Clear at each next
+// day's midnight. A day not ITCH 5.0 (InvalidHeader) or with other instrument fields (InstrumentRejected) fails the
+// chain. With `hash_as_read`, each day's bytes go into XXH3-128 as replayed, and the rest of the file as it ends.
+class DaySequenceSource final : public MarketEventSource
+{
+private:
+    struct Hashing;
+    std::vector<DayHandle> days_;
+    std::string ticker_;
+    Instrument instrument_;
+    bool allow_truncated_tail_;
+    std::size_t day_{0};                         // the day being read
+    std::unique_ptr<MarketEventSource> source_;  // its source; null between days
+    std::uint64_t before_{0};                    // the sizes of the days before it
+    std::unique_ptr<Hashing> hashing_;           // null without hash as read
+    std::vector<std::string> hashes_;
+    SourceError error_{SourceError::None};
+
+public:
+    DaySequenceSource(std::vector<DayHandle> days, std::string_view ticker, const Instrument& instrument,
+                      bool allow_truncated_tail, bool hash_as_read);
+    ~DaySequenceSource() override;
+
+    SourceResult next(MarketEvent& event) noexcept override;
+    // The sizes of the days before the current one, plus its own position.
+    std::uint64_t position() const noexcept override;
+    // The chain's: a day refused up front, or the current day's.
+    SourceError error() const noexcept override;
+
+    // position() at the end: the days' sizes.
+    std::uint64_t size() const noexcept;
+    // With hash as read, day_hash() of each day replayed to its end, in order.
+    const std::vector<std::string>& hashes() const noexcept;
 };
 
 }  // namespace simulator::server

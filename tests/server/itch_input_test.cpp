@@ -5,10 +5,12 @@
 #include <cstddef>
 #include <filesystem>
 #include <fstream>
+#include <initializer_list>
 #include <iterator>
 #include <memory>
 #include <span>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "chronos/server/itch_input.hpp"
@@ -267,6 +269,141 @@ TEST(ItchInputTest, AMidFileEditKeepingSizeMtimeAndInodeStillListsTheCachedHash)
     MappedFile edited;
     ASSERT_TRUE(edited.open(file.c_str()));
     EXPECT_EQ(rehashed, day_hash(edited.bytes()));
+}
+
+// The library's days in `dir`, each written from its builder under its date's file name.
+std::vector<DayHandle> library_days(const ScratchDir& dir,
+                                    std::initializer_list<std::pair<const char*, std::span<const std::byte>>> files)
+{
+    for (const auto& [name, bytes] : files) {
+        write_file(dir.path / name, bytes);
+    }
+    return DayLibrary{dir.path, dir.path / "fingerprints.json"}.scan();
+}
+
+// Every event `source` yields before it ends or fails, and its position after each.
+std::pair<std::vector<MarketEvent>, std::vector<std::uint64_t>> drain(MarketEventSource& source)
+{
+    std::vector<MarketEvent> events;
+    std::vector<std::uint64_t> positions;
+    MarketEvent event;
+    while (source.next(event) == SourceResult::Event) {
+        events.push_back(event);
+        positions.push_back(source.position());
+    }
+    return {events, positions};
+}
+
+TEST(ItchInputTest, ADaySequenceReplaysItsDaysWithAClearAtEachNextMidnight)
+{
+    const ScratchDir dir{"chain"};
+    const itch_test::ItchBuilder friday = acme_day(2);
+    const itch_test::ItchBuilder monday = acme_day(3, 1'000);
+    const std::vector<DayHandle> days = library_days(
+        dir, {{"12272019.NASDAQ_ITCH50.bin", friday.bytes()}, {"12302019.NASDAQ_ITCH50.bin", monday.bytes()}});
+    DaySequenceSource chain{days, "ACME", kEquity, false, false};
+    EXPECT_EQ(chain.size(), friday.bytes().size() + monday.bytes().size());
+
+    const auto [events, positions] = drain(chain);
+    EXPECT_EQ(chain.error(), SourceError::None);
+    ASSERT_EQ(events.size(), 12u);  // a trading state, two orders and two trades; the Clear; then three trades
+    EXPECT_EQ(events[4].timestamp, session_midnight_ns(2019y / 12 / 27, -5h) + kNineThirty + 2 * kSecond);
+    EXPECT_EQ(events[5].type, MarketEventType::Clear);
+    EXPECT_EQ(events[5].timestamp, session_midnight_ns(2019y / 12 / 30, -5h));
+    EXPECT_EQ(positions[5], friday.bytes().size());  // the Clear: all of Friday, none of Monday
+    EXPECT_EQ(events[7].price, Price{101'000});      // Monday's bid
+    EXPECT_GT(positions[6], friday.bytes().size());
+    EXPECT_EQ(chain.position(), chain.size());
+    EXPECT_TRUE(std::is_sorted(events.begin(), events.end(),
+                               [](const MarketEvent& a, const MarketEvent& b) { return a.timestamp < b.timestamp; }));
+    EXPECT_TRUE(std::all_of(events.begin(), events.end(), [](const MarketEvent& e) { return e.symbol == 0; }));
+
+    DaySequenceSource one{{days[1]}, "ACME", kEquity, false, false};  // one day: no Clear at all
+    const auto [alone, unused] = drain(one);
+    EXPECT_EQ(alone.size(), 6u);
+    EXPECT_TRUE(std::none_of(alone.begin(), alone.end(),
+                             [](const MarketEvent& e) { return e.type == MarketEventType::Clear; }));
+}
+
+// Each day's times come from its own date's offset: Monday after the spring change runs on daylight time.
+TEST(ItchInputTest, ADaySequenceAcrossADaylightSavingChangeStaysInOrder)
+{
+    const ScratchDir dir{"dst"};
+    const itch_test::ItchBuilder day = acme_day(1);
+    const std::vector<DayHandle> days =
+        library_days(dir, {{"03082019.NASDAQ_ITCH50.bin", day.bytes()}, {"03112019.NASDAQ_ITCH50.bin", day.bytes()}});
+    DaySequenceSource chain{days, "ACME", kEquity, false, false};
+    const auto [events, positions] = drain(chain);
+    ASSERT_EQ(events.size(), 9u);
+    EXPECT_EQ(events[3].timestamp, session_midnight_ns(2019y / 3 / 8, -5h) + kNineThirty + kSecond);
+    EXPECT_EQ(events[4].type, MarketEventType::Clear);
+    EXPECT_EQ(events[4].timestamp, session_midnight_ns(2019y / 3 / 11, -4h));
+    EXPECT_EQ(events[5].timestamp, session_midnight_ns(2019y / 3 / 11, -4h) + 3 * 3'600 * kSecond);
+    EXPECT_TRUE(std::is_sorted(events.begin(), events.end(),
+                               [](const MarketEvent& a, const MarketEvent& b) { return a.timestamp < b.timestamp; }));
+}
+
+// A day that fails ends the chain with its own error, after every event of the days before it.
+TEST(ItchInputTest, AFailingDayFailsTheChainAfterTheDaysBeforeIt)
+{
+    const ScratchDir dir{"failing"};
+    const itch_test::ItchBuilder friday = acme_day(2);
+    const itch_test::ItchBuilder monday = acme_day(3);
+    const std::span<const std::byte> cut = monday.bytes().first(monday.bytes().size() - 3);  // 'M' is cut
+    const std::vector<DayHandle> days =
+        library_days(dir, {{"12272019.NASDAQ_ITCH50.bin", friday.bytes()}, {"12302019.NASDAQ_ITCH50.bin", cut}});
+    DaySequenceSource strict{days, "ACME", kEquity, false, false};
+    const auto [events, positions] = drain(strict);
+    EXPECT_EQ(events.size(), 12u);  // every event of both days: only the last message is cut
+    EXPECT_EQ(strict.error(), SourceError::TruncatedMessage);
+    EXPECT_GT(strict.position(), friday.bytes().size());  // in Monday
+
+    DaySequenceSource lenient{days, "ACME", kEquity, true, false};
+    EXPECT_EQ(drain(lenient).first.size(), 12u);
+    EXPECT_EQ(lenient.error(), SourceError::None);
+}
+
+// The bytes hashed are the bytes replayed, a MiB at a time, then the rest of each file, a cut tail included.
+TEST(ItchInputTest, HashAsReadEqualsTheHashPassIncludingACutTail)
+{
+    const ScratchDir dir{"hash-as-read"};
+    itch_test::ItchBuilder friday = acme_day(2);
+    for (std::uint64_t match = 1; match <= 50'000; ++match) {  // 2.3 MB of prints: two whole MiB, then the rest
+        friday.trade(1, kNineThirty + 9 * kSecond, 0, 'B', 100, "ACME", 100'000, match);
+    }
+    const itch_test::ItchBuilder monday = acme_day(3);
+    const std::span<const std::byte> cut = monday.bytes().first(monday.bytes().size() - 3);
+    const std::vector<DayHandle> days =
+        library_days(dir, {{"12272019.NASDAQ_ITCH50.bin", friday.bytes()}, {"12302019.NASDAQ_ITCH50.bin", cut}});
+    DaySequenceSource chain{days, "ACME", kEquity, true, true};
+    EXPECT_TRUE(chain.hashes().empty());
+    drain(chain);
+    EXPECT_EQ(chain.hashes(), (std::vector<std::string>{days[0]->hash, days[1]->hash}));
+    EXPECT_EQ(days[1]->hash, day_hash(cut));
+    EXPECT_TRUE(days[1]->cut_tail);
+
+    DaySequenceSource unhashed{days, "ACME", kEquity, true, false};
+    drain(unhashed);
+    EXPECT_TRUE(unhashed.hashes().empty());
+}
+
+TEST(ItchInputTest, AChainWithADayNotItch50OrOtherInstrumentFieldsIsRefusedBeforeItsFirstEvent)
+{
+    const ScratchDir dir{"refused"};
+    itch_test::ItchBuilder no_start;  // no start of messages first
+    no_start.stock_directory(1, kSecond, "ACME").add_order(1, kNineThirty, 1, 'B', 100, "ACME", 100'000);
+    const std::vector<DayHandle> days = library_days(
+        dir, {{"12272019.NASDAQ_ITCH50.bin", acme_day().bytes()}, {"12302019.NASDAQ_ITCH50.bin", no_start.bytes()}});
+    MarketEvent event;
+    DaySequenceSource not_itch{days, "ACME", kEquity, false, false};
+    EXPECT_EQ(not_itch.next(event), SourceResult::Error);
+    EXPECT_EQ(not_itch.error(), SourceError::InvalidHeader);
+    EXPECT_EQ(not_itch.position(), 0u);
+
+    DaySequenceSource cents{{days[0]}, "ACME", Instrument{.price_scale = 2, .quantity_scale = 0}, false, false};
+    EXPECT_EQ(cents.next(event), SourceResult::Error);
+    EXPECT_EQ(cents.error(), SourceError::InstrumentRejected);
+    EXPECT_EQ(cents.next(event), SourceResult::Error);  // sticky
 }
 
 TEST(ItchInputTest, AFileCutMidMessageFailsUnlessItsTailIsAllowed)

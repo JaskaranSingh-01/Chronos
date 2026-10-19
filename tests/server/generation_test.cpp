@@ -1,5 +1,7 @@
 #include <gtest/gtest.h>
 
+#include <cstddef>
+#include <functional>
 #include <memory>
 #include <utility>
 #include <vector>
@@ -153,6 +155,75 @@ TEST(GenerationTest, AnAttachedStrategyQuotesAndRefusesManualOrdersUntilDetached
     ASSERT_EQ(reports.size(), 2u);
     EXPECT_EQ(reports[0].type, ReportType::Accepted);
     EXPECT_EQ(reports[1].type, ReportType::Cancelled);
+}
+
+// Sends an IOC on the first market event and another from a timer 1 ns later, and records the session midnight and the
+// book's orders as each report reaches it.
+struct Probe
+{
+    struct Seen
+    {
+        OrderId order_id{0};
+        Timestamp now{0};
+        Timestamp midnight{0};
+        std::size_t book_orders{0};
+
+        bool operator==(const Seen&) const = default;
+    };
+
+    std::function<Timestamp()> midnight;  // the loop's session_midnight()
+    std::vector<Seen> seen;
+
+    void on_market(StrategyContext& ctx, const MarketEvent& event) noexcept
+    {
+        if (event.order_id == 1) {
+            OrderId id{0};
+            ctx.gateway.send(Side::Buy, Price{1'000'000}, Quantity{10}, TimeInForce::Ioc, id);
+            ctx.set_timer(event.timestamp + 1, 0);
+        }
+    }
+
+    void on_report(StrategyContext& ctx, const ExecutionReport& report) noexcept
+    {
+        seen.push_back({.order_id = report.order_id,
+                        .now = ctx.now(),
+                        .midnight = midnight(),
+                        .book_orders = ctx.book.order_count()});
+    }
+
+    void on_timer(StrategyContext& ctx, std::uint64_t) noexcept
+    {
+        OrderId id{0};
+        ctx.gateway.send(Side::Buy, Price{1'000'000}, Quantity{10}, TimeInForce::Ioc, id);
+    }
+};
+
+static_assert(Strategy<Probe>);
+
+// Review gate 3: a report due at the boundary minus 1 ns runs under the old day's midnight, before the Clear; one due
+// at the boundary runs after the Clear, under the new day's.
+TEST(GenerationTest, AtADayBoundaryEarlierReportsRunUnderTheOldDayAndLaterOnesAfterTheClear)
+{
+    constexpr Timestamp boundary = 2'011;
+    const std::vector<MarketEvent> events{
+        add(1'000, 1, Side::Sell, 1'010'000, 100),  // order 1's report: 1,000 + 10 + 1,000; order 2's: 1 ns later
+        MarketEvent{.timestamp = boundary, .symbol = kSymbol, .type = MarketEventType::Clear},
+        add(boundary + 5, 2, Side::Sell, 1'010'000, 100)};
+    VectorSource source{events};
+    MarketBook book{kSymbol, 16};
+    ExecutionSimulator execution;
+    Portfolio portfolio{kEquity, config().limits, FeeSchedule{}};
+    Probe probe;
+    EventLoop<Probe> loop{source, book, execution, portfolio, probe, {.order_latency = 10, .report_latency = 1'000}};
+    probe.midnight = [&loop] { return loop.session_midnight(); };
+
+    Timestamp ts{0};
+    while (loop.peek(ts) == PeekStatus::Event && server::step(loop).ok) {  // not the test helper step(n)
+    }
+    loop.finish();
+    EXPECT_EQ(probe.seen,
+              (std::vector<Probe::Seen>{{.order_id = 1, .now = boundary - 1, .midnight = 0, .book_orders = 1},
+                                        {.order_id = 2, .now = boundary, .midnight = boundary, .book_orders = 0}}));
 }
 
 }  // namespace

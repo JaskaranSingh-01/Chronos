@@ -129,6 +129,7 @@ void ExecutionSimulator::on_market(const MarketEvent& event, const MarketBook& b
             cross(side, event.price, event.quantity.value(), event.timestamp, FillCause::RuleCReplace, out);
         }
     } else if (event.type == MarketEventType::Clear) {  // a new day: each resting order expires, as DAY orders do
+        // ponytail: an order in flight at a Clear rests on the new day; drop it by send time if needed.
         for (const ShadowOrder& o : orders_) {
             out.push_back(ExecutionReport{.exchange_time = event.timestamp,
                                           .order_id = o.id,

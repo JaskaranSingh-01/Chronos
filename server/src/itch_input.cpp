@@ -53,6 +53,11 @@ public:
     {
         return source_.error();
     }
+
+    const Instrument& instrument() const noexcept
+    {
+        return source_.instrument();
+    }
 };
 
 std::string hex(std::uint64_t value)
@@ -376,6 +381,103 @@ std::vector<DayHandle> DayLibrary::scan()
         write_cache(cache_, found);
     }
     return handles(found);
+}
+
+struct DaySequenceSource::Hashing
+{
+    XXH3_state_t state;
+    std::uint64_t hashed{0};  // the current day's bytes in the hash
+};
+
+DaySequenceSource::DaySequenceSource(std::vector<DayHandle> days, std::string_view ticker, const Instrument& instrument,
+                                     bool allow_truncated_tail, bool hash_as_read)
+    : days_(std::move(days)),
+      ticker_(ticker),
+      instrument_(instrument),
+      allow_truncated_tail_(allow_truncated_tail),
+      hashing_(hash_as_read ? std::make_unique<Hashing>() : nullptr)
+{
+    if (std::any_of(days_.begin(), days_.end(), [](const DayHandle& day) { return !day->itch50; })) {
+        error_ = SourceError::InvalidHeader;
+    }
+}
+
+DaySequenceSource::~DaySequenceSource() = default;
+
+SourceResult DaySequenceSource::next(MarketEvent& event) noexcept
+{
+    constexpr std::uint64_t step = std::uint64_t{1} << 20;
+    while (error_ == SourceError::None && day_ < days_.size()) {
+        const Day& day = *days_[day_];
+        const auto hash_to = [&](std::uint64_t end) {
+            XXH3_128bits_update(&hashing_->state, day.mapped.bytes().data() + hashing_->hashed, end - hashing_->hashed);
+            hashing_->hashed = end;
+        };
+        if (source_ == nullptr) {
+            auto source =
+                std::make_unique<TickerSource>(day.mapped.bytes(),
+                                               ItchSourceConfig{.ticker = ticker_,
+                                                                .session_date = day.date,
+                                                                .utc_offset = us_eastern_utc_offset(day.date),
+                                                                .allow_truncated_tail = allow_truncated_tail_});
+            if (source->instrument().price_scale != instrument_.price_scale ||
+                source->instrument().quantity_scale != instrument_.quantity_scale) {
+                error_ = SourceError::InstrumentRejected;
+                break;
+            }
+            source_ = std::move(source);
+            if (hashing_ != nullptr) {
+                XXH3_128bits_reset(&hashing_->state);
+                hashing_->hashed = 0;
+            }
+        }
+        const SourceResult result = source_->next(event);
+        if (result == SourceResult::Event) {
+            if (hashing_ != nullptr && source_->position() >= hashing_->hashed + step) {
+                hash_to(source_->position() / step * step);  // whole MiBs already replayed
+            }
+            return result;
+        }
+        if (result == SourceResult::Error) {
+            error_ = source_->error();
+            break;
+        }
+        if (hashing_ != nullptr) {
+            hash_to(day.size);
+            hashes_.push_back(hex(XXH3_128bits_digest(&hashing_->state)));
+        }
+        before_ += day.size;
+        source_.reset();
+        if (++day_ < days_.size()) {
+            event = MarketEvent{.timestamp = days_[day_]->midnight, .type = MarketEventType::Clear};
+            return SourceResult::Event;
+        }
+    }
+    return error_ == SourceError::None ? SourceResult::EndOfStream : SourceResult::Error;
+}
+
+std::uint64_t DaySequenceSource::position() const noexcept
+{
+    return before_ + (source_ != nullptr ? source_->position() : 0);
+}
+
+SourceError DaySequenceSource::error() const noexcept
+{
+    return error_;
+}
+
+std::uint64_t DaySequenceSource::size() const noexcept
+{
+    std::uint64_t total = 0;
+    for (const DayHandle& day : days_) {
+        total += day->size;
+    }
+    return total;
+}
+
+const std::vector<std::string>& DaySequenceSource::hashes() const noexcept
+{
+    return hashes_;
 }
 
 }  // namespace simulator::server

@@ -531,7 +531,7 @@ void ReplaySession::step_market() noexcept
         ++trades_total_;
         candles_.add(trade);
     }
-    g.loop.step();
+    step(g.loop);
     publish_delivered();
 }
 

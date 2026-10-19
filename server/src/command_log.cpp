@@ -485,7 +485,7 @@ bool reproduce(Generation& generation, const LoggedGeneration& logged) noexcept
     std::uint64_t batch = 0;
     for (const Record& record : logged.applied) {
         while (loop.report().replay.events < record.market_event_seq) {
-            if (loop.peek(next_ts) != PeekStatus::Event || !loop.step().ok) {
+            if (loop.peek(next_ts) != PeekStatus::Event || !step(loop).ok) {
                 return false;
             }
             generation.strategy.delivered.clear();
@@ -505,7 +505,7 @@ bool reproduce(Generation& generation, const LoggedGeneration& logged) noexcept
     }
     // On to where the session left the generation (its trailer's boundary), or to the end of the stream.
     const std::uint64_t stop = logged.end ? logged.end->market_event_seq : std::numeric_limits<std::uint64_t>::max();
-    while (loop.report().replay.events < stop && loop.peek(next_ts) == PeekStatus::Event && loop.step().ok) {
+    while (loop.report().replay.events < stop && loop.peek(next_ts) == PeekStatus::Event && step(loop).ok) {
         generation.strategy.delivered.clear();
     }
     if (loop.peek(next_ts) != PeekStatus::Event) {
