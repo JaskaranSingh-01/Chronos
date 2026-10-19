@@ -92,7 +92,8 @@ export function TopBar() {
           if (!name) return;
           const { symbols } = store.get();
           const entry = symbols.find((s) => s === name) ?? symbols.find((s) => s.toUpperCase() === name.toUpperCase());
-          if (entry === undefined) store.notify(`unknown symbol ${name}`);
+          if (entry === undefined)
+            store.notify(picked.length > 1 ? `${name} is not listed on every day picked` : `unknown symbol ${name}`);
           // No days picked yet (no state so far): the server replays the last load's.
           else if (store.control({ action: 'symbol', symbol: entry, days: picked.length > 0 ? picked : undefined })) {
             setTyped('');

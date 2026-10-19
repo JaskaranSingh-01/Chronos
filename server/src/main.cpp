@@ -140,7 +140,8 @@ int main(int argc, char** argv)
         return 0;
     }
     DayLibrary library{parsed.data, std::filesystem::path{"runs"} / "fingerprints.json"};
-    const std::vector<DayHandle> days = library.scan();  // hashes every new day before serving
+    // ponytail: startup waits to hash every uncached day, seconds each; hash in the background if that matters.
+    const std::vector<DayHandle> days = library.scan();
     if (days.empty()) {
         std::fprintf(stderr, "error: no day file (MMDDYYYY.NASDAQ_ITCH50.bin) in %s\n", parsed.data.c_str());
         return 2;

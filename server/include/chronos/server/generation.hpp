@@ -37,7 +37,8 @@ inline bool to_ticker(std::string_view text, Ticker& ticker) noexcept
     return true;
 }
 
-inline constexpr std::size_t max_days = 32;  // ponytail: 32 days per generation or run (~8 min of backtest)
+// ponytail: 32 days per generation or run (~8 min of backtest); raise it, minding the report ring's record size.
+inline constexpr std::size_t max_days = 32;
 
 // A generation's or a run's days, oldest first.
 struct DayList

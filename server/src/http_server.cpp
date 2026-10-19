@@ -200,7 +200,7 @@ crow::response HttpServer::Impl::symbols(const crow::request& request)
 }
 
 // GET /api/history?session_id&generation&from_ts: the generation's bars and latest trades, as of its last snapshot.
-// ponytail: a full-day read holds the history lock about 1-3 ms and may drop one snapshot frame for every client;
+// ponytail: a read holds the history lock about 1-3 ms per day of the chain, and may drop snapshot frames for all;
 // per-client rate limiting or paging comes when needed.
 crow::response HttpServer::Impl::history(const crow::request& request)
 {

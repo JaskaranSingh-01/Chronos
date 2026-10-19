@@ -82,6 +82,7 @@ private:
     std::filesystem::path cache_;
     std::mutex scan_mutex_;  // one scan at a time, so no file is hashed twice and the cache has one writer
     mutable std::mutex mutex_;
+    // ponytail: every discovered day stays mapped; unmap days unused for a while if address space matters.
     std::map<std::chrono::year_month_day, DayHandle> days_;
 
 public:

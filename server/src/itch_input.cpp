@@ -162,7 +162,7 @@ bool open_version(const std::filesystem::path& path, Day& day)
     day.file = path.filename().string();
     day.path = path;
     struct stat status{};
-    if (!day_date(day.file, day.date) || ::stat(path.c_str(), &status) != 0) {
+    if (!day_date(day.file, day.date) || ::stat(path.c_str(), &status) != 0 || !S_ISREG(status.st_mode)) {
         return false;
     }
     // ponytail: a file truncated in place can SIGBUS a reader of the mapping; copy or read() it if that matters.
@@ -382,10 +382,11 @@ std::vector<DayHandle> DayLibrary::scan()
         const std::lock_guard lock{mutex_};
         return handles(days_);
     }
+    std::map<std::chrono::year_month_day, DayHandle> retired;  // released after the lock: a last handle unmaps
     {
         const std::lock_guard lock{mutex_};
         changed = changed || found.size() != days_.size();  // a file went
-        days_ = found;
+        retired = std::exchange(days_, found);
     }
     if (changed) {
         write_cache(cache_, found);

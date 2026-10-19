@@ -177,6 +177,7 @@ class ReplaySession
 public:
     static constexpr std::size_t command_capacity = 1'024;
     static constexpr std::size_t control_capacity = 64;
+    // ponytail: ~600 B records (~39 MB), as a Control carries its RunSpec; key loads by generation if it grows.
     static constexpr std::size_t ring_capacity = 65'536;
     // The most market events a tick applies, so controls are seen at full speed: Playing yields at the next new
     // timestamp, but Step and Seek stop at the budget, possibly mid-timestamp.

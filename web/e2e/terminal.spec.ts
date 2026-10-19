@@ -140,7 +140,7 @@ test('two days load together and play across the night in no time at 100×', asy
   await expect(page.getByLabel('Seek day')).toBeVisible();
   await page.getByRole('button', { name: '100×' }).click();
   await page.getByRole('button', { name: '▶ Play' }).click();
-  // Each day's two minutes take 1.2 s at 100×; waiting out the 62 hours between them would take 37 minutes.
+  // Each day's two minutes take 1.2 s at 100×; waiting out the 72 hours between them would take 43 minutes.
   await expect(page.getByTestId('session')).toContainText('ACME · gen 2 · ended', { timeout: 15_000 });
   await expect(page.getByTestId('clock')).toHaveText('2019-12-30 09:31:59.000 ET');
   await page.getByLabel('Seek day').selectOption('2019-12-27'); // a seek takes a day too
