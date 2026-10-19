@@ -37,7 +37,7 @@ struct Candle
     bool operator==(const Candle&) const = default;
 };
 
-// 1 s bars from market trades only, keeping the whole day's; a second without a trade has no bar.
+// 1 s bars from market trades only, keeping every day's bars of a generation; a second without a trade has no bar.
 class CandleBuilder
 {
 private:
@@ -48,10 +48,11 @@ private:
 public:
     static constexpr std::size_t day_seconds = 86'400;
 
-    // ponytail: capacity is one session day; a longer stream reallocates in add(). Reset per day if sessions span days.
-    CandleBuilder()
+    // ponytail: `days` whole days of 1 s bars, about 4 MB a day, copied again by the history;
+    // page by day if a long chain's memory matters.
+    explicit CandleBuilder(std::size_t days = 1)
     {
-        closed_.reserve(day_seconds);
+        closed_.reserve(day_seconds * days);
     }
 
     // Precondition: trades arrive in time order.

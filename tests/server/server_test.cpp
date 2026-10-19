@@ -332,6 +332,41 @@ TEST(ServerTest, ServesTheSymbolsHistoryLogAndUi)
     EXPECT_EQ(served.get("/../dist/index.html").first, 404);  // no way out of the UI's directory
 }
 
+// /api/history holds every day of a generation, oldest first: Friday's bars, then Monday's after the Clear.
+TEST(ServerTest, TheHistoryOfATwoDayGenerationHoldsBothDays)
+{
+    constexpr Timestamp monday = 3 * 86'400 * kSecond;
+    std::vector<MarketEvent> events{add(1, 1, Side::Sell, 1'000'000, 1'000)};
+    for (Timestamp second = 1; second <= 3; ++second) {
+        events.push_back(execute(second * kSecond, 1, 1));
+    }
+    events.push_back(MarketEvent{.timestamp = monday, .symbol = kSymbol, .type = MarketEventType::Clear});
+    events.push_back(add(monday + 1, 2, Side::Sell, 1'000'100, 1'000));
+    for (Timestamp second = 1; second <= 3; ++second) {
+        events.push_back(execute(monday + second * kSecond, 2, 1));
+    }
+    ReplaySession session{config(), over(events)};
+    Served served{session, options()};
+    session.control(kFullSpeed);
+    session.control(kPlay);
+    ASSERT_TRUE(eventually([&] {
+        SessionState published = SessionState::Paused;
+        session.read_snapshot([&](const Snapshot& s) { published = s.state; });
+        return published == SessionState::Ended;
+    }));
+
+    const auto [status, body] = served.get("/api/history?session_id=test&generation=1&from_ts=0");
+    ASSERT_EQ(status, 200);
+    const json history = json::parse(body);
+    std::vector<Timestamp> starts;
+    for (const json& bar : history["candles"]) {
+        starts.push_back(bar[0].get<Timestamp>());
+    }
+    EXPECT_EQ(starts,
+              (std::vector<Timestamp>{kSecond, 2 * kSecond, 3 * kSecond, monday + kSecond, monday + 2 * kSecond}));
+    EXPECT_EQ(history["trades"].size(), 6u);
+}
+
 // GET /api/days rescans on every request; /api/symbols lists the starting day's tickers, or those on every day listed.
 TEST(ServerTest, ServesTheDaysAndTheSymbolsOnEveryListedDay)
 {

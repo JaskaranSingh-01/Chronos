@@ -164,6 +164,101 @@ TEST(RestartTest, SeekingBackwardRestartsAndFastForwards)
     EXPECT_EQ(far.loop_report().replay.events, 10'000u);
 }
 
+inline constexpr Timestamp kMonday = 3 * 86'400 * kSecond;  // a new day's midnight, three days on
+
+// Two days of one bid a second: Friday's at 1 s and 2 s, the Clear at Monday's midnight, Monday's 3 s and 4 s later.
+std::vector<MarketEvent> two_days()
+{
+    return {add(kSecond, 1, Side::Buy, 999'900, 100), add(2 * kSecond, 2, Side::Buy, 999'800, 100),
+            MarketEvent{.timestamp = kMonday, .symbol = kSymbol, .type = MarketEventType::Clear},
+            add(kMonday + 3 * kSecond, 3, Side::Buy, 999'700, 100),
+            add(kMonday + 4 * kSecond, 4, Side::Buy, 999'600, 100)};
+}
+
+// At 1x the night between two days takes no wall time: once Friday's last event is applied the Clear is due at once,
+// and pacing starts again at Monday's first event.
+TEST(RestartTest, PlayingAtOneTimesCrossesTheNightInNoWallTime)
+{
+    const std::vector<MarketEvent> events = two_days();
+    ReplaySession session{config(), over(events)};
+    session.control(kPlay);
+    EXPECT_EQ(session.tick(kWall), kWall + 1);  // the clock waits 1 ns before Friday's first event
+    EXPECT_EQ(session.tick(kWall + kSecond), kWall + kSecond + 1);
+    EXPECT_EQ(session.loop_report().replay.events, 1u);
+
+    EXPECT_EQ(session.tick(kWall + kSecond + 1), kWall + 2 * kSecond + 1);  // Monday's second event, 1 s on
+    EXPECT_EQ(session.loop_report().replay.events, 4u);  // Friday's last, the Clear, Monday's first
+    EXPECT_EQ(session.clock(), kMonday + 3 * kSecond);
+    EXPECT_EQ(session.tick(kWall + 2 * kSecond + 1), ReplaySession::never);
+    EXPECT_EQ(session.state(), SessionState::Ended);
+
+    // A tick whose budget ends at the Clear asks to wake at once, not at Monday's midnight in wall time.
+    std::vector<MarketEvent> busy = spaced_bids(ReplaySession::events_per_tick);
+    busy.push_back(events[2]);  // the Clear
+    ReplaySession full{config(), over(busy)};
+    full.control(kPlay);
+    full.tick(kWall);
+    EXPECT_EQ(full.tick(kWall + 5 * kSecond), kWall + 5 * kSecond);  // the budget ends at the Clear: more is due now
+    EXPECT_EQ(full.loop_report().replay.events, ReplaySession::events_per_tick);
+
+    // The same when the budget ends just after the Clear, before Monday's first event.
+    std::vector<MarketEvent> edge = spaced_bids(ReplaySession::events_per_tick - 1);
+    edge.push_back(events[2]);  // the Clear
+    edge.push_back(events[3]);  // Monday's first event
+    ReplaySession spent{config(), over(edge)};
+    spent.control(kPlay);
+    spent.tick(kWall);
+    EXPECT_EQ(spent.tick(kWall + 5 * kSecond), kWall + 5 * kSecond);
+    EXPECT_EQ(spent.loop_report().replay.events, ReplaySession::events_per_tick);
+
+    // However the clock reached the night, Play crosses it at once: here a Step onto the Clear came first.
+    ReplaySession stepped{config(), over(events)};
+    stepped.control(step(3));
+    stepped.tick(kWall);
+    ASSERT_EQ(stepped.clock(), kMonday);
+    stepped.control(kPlay);
+    EXPECT_EQ(stepped.tick(kWall + 10 * kSecond), kWall + 11 * kSecond);  // Monday's first event now, its second 1 s on
+    EXPECT_EQ(stepped.loop_report().replay.events, 4u);
+}
+
+// A seek forward steps through the night to Monday; a seek back into Friday starts the chain again.
+TEST(RestartTest, SeekingCrossesTheNightForwardAndStartsTheChainAgainBackward)
+{
+    const std::vector<MarketEvent> events = two_days();
+    ReplaySession session{config(), over(events)};
+    session.control(Control{.type = ControlType::Seek, .seek_ts = kMonday + 3 * kSecond + 500});
+    EXPECT_EQ(session.tick(kWall), ReplaySession::never);
+    EXPECT_EQ(session.state(), SessionState::Paused);
+    EXPECT_EQ(session.loop_report().replay.events, 4u);
+    EXPECT_EQ(session.clock(), kMonday + 3 * kSecond + 500);
+    EXPECT_EQ(session.book().order_count(), 1u);  // Monday's book alone
+
+    session.control(Control{.type = ControlType::Seek, .seek_ts = kSecond + 500});
+    EXPECT_EQ(session.tick(kWall), ReplaySession::never);
+    EXPECT_EQ(session.generation(), 2u);
+    EXPECT_EQ(session.loop_report().replay.events, 1u);
+    EXPECT_EQ(session.clock(), kSecond + 500);
+
+    // A seek into the night, before the Clear, leaves Friday's book; Play then crosses the night at once.
+    session.control(Control{.type = ControlType::Seek, .seek_ts = kMonday / 2});
+    EXPECT_EQ(session.tick(kWall), ReplaySession::never);
+    EXPECT_EQ(session.clock(), kMonday / 2);
+    EXPECT_EQ(session.loop_report().replay.events, 2u);
+    EXPECT_EQ(session.book().order_count(), 2u);  // Friday's book
+    session.control(kPlay);
+    EXPECT_EQ(session.tick(kWall + 10 * kSecond), kWall + 11 * kSecond);  // the Clear and Monday's first; second 1 s on
+    EXPECT_EQ(session.loop_report().replay.events, 4u);
+    EXPECT_EQ(session.book().order_count(), 1u);
+
+    // A seek that lands after Monday's midnight but before its first event: Play applies that event at once.
+    session.control(Control{.type = ControlType::Seek, .seek_ts = kMonday + kSecond});
+    EXPECT_EQ(session.tick(kWall + 20 * kSecond), ReplaySession::never);
+    EXPECT_EQ(session.loop_report().replay.events, 3u);  // Friday's two and the Clear
+    session.control(kPlay);
+    EXPECT_EQ(session.tick(kWall + 30 * kSecond), kWall + 31 * kSecond);
+    EXPECT_EQ(session.loop_report().replay.events, 4u);
+}
+
 TEST(RestartTest, ASymbolSwitchStartsAGenerationOnTheNewTicker)
 {
     const std::vector<MarketEvent> aaa{add(100, 1, Side::Buy, 999'900, 100)};

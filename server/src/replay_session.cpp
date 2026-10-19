@@ -63,7 +63,6 @@ ReplaySession::ReplaySession(SessionConfig config, SourceFactory factory, LogQue
     batch_.reserve(command_capacity);
     controls_batch_.reserve(control_capacity);
     awaiting_.reserve(command_capacity);
-    history_.candles.reserve(CandleBuilder::day_seconds);
     engine_.emplace(config_, config_.defaults, factory_(config_.defaults.ticker, config_.defaults.days));
     publish_start();
     load();
@@ -364,7 +363,7 @@ void ReplaySession::restart(const RunSpec& spec) noexcept
     engine_.emplace(config_, spec, factory_(spec.ticker, spec.days));
     generation_.fetch_add(1);
     awaiting_.clear();
-    candles_ = CandleBuilder{};
+    candles_ = CandleBuilder{std::max<std::size_t>(spec.days.count, 1)};
     candles_published_ = 0;
     trades_total_ = 0;
     trades_published_ = 0;
@@ -458,15 +457,28 @@ void ReplaySession::apply_control(const Control& control, Timestamp wall_now) no
 }
 
 // Applies the market events paced time has reached, then the simulator events due by it; true if more are due now.
+// A new day's Clear is due at once: the night passes in no wall time, and pacing restarts at the day's first event.
 bool ReplaySession::play(Timestamp wall_now) noexcept
 {
     Generation& g = *engine_;
-    const Timestamp target = speed_ == 0 ? never : anchor_exchange_ + (wall_now - anchor_wall_) * speed_;
+    const auto paced = [&] { return speed_ == 0 ? never : anchor_exchange_ + (wall_now - anchor_wall_) * speed_; };
+    const auto new_day = [&] { return g.loop.pending()->type == MarketEventType::Clear; };
+    // The last event applied was a day's Clear: the rest of a night plays in no wall time, however the clock got there.
+    const auto night = [&] {
+        const ReplayReport& r = g.loop.report().replay;
+        return r.events != 0 && r.last_timestamp == g.loop.session_midnight();
+    };
+    Timestamp target = paced();
     Timestamp next_ts{0};
     PeekStatus status = g.loop.peek(next_ts);
-    for (std::size_t n = 0; status == PeekStatus::Event && next_ts <= target; ++n) {
+    for (std::size_t n = 0; status == PeekStatus::Event && (next_ts <= target || new_day() || night()); ++n) {
         if ((n >= events_per_tick || log_backed_up()) && next_ts != clock()) {
             break;  // the budget is spent or the log is backed up, and never inside one timestamp
+        }
+        if (night()) {
+            anchor_exchange_ = next_ts;
+            anchor_wall_ = wall_now;
+            target = paced();
         }
         step_market();
         status = g.loop.peek(next_ts);
@@ -477,7 +489,7 @@ bool ReplaySession::play(Timestamp wall_now) noexcept
     }
     g.loop.advance_to(std::min(target, next_ts - 1));
     publish_delivered();
-    return next_ts <= target;
+    return next_ts <= target || new_day() || night();
 }
 
 // Applies up to events_per_tick of the market events a Step asked for; true if some are left.
@@ -611,6 +623,7 @@ bool ReplaySession::offer_history() noexcept
     if (history_.generation != generation_.load()) {
         history_.generation = generation_.load();
         history_.candles.clear();
+        history_.candles.reserve(CandleBuilder::day_seconds * std::max<std::size_t>(engine_->spec.days.count, 1));
     }
     const std::span<const Candle> closed = candles_.closed();
     history_.candles.insert(history_.candles.end(),
