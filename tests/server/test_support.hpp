@@ -7,7 +7,9 @@
 #include <chrono>
 #include <cstdint>
 #include <filesystem>
+#include <fstream>
 #include <random>
+#include <span>
 #include <string>
 #include <string_view>
 #include <system_error>
@@ -17,6 +19,7 @@
 
 #include "chronos/server/generation.hpp"
 #include "chronos/server/replay_session.hpp"
+#include "itch/itch_test_builder.hpp"
 #include "simulator/market/market_event.hpp"
 #include "simulator/market/vector_source.hpp"
 
@@ -246,6 +249,55 @@ struct Scratch
     Scratch(const Scratch&) = delete;
     Scratch& operator=(const Scratch&) = delete;
 };
+
+// A directory in the system temp directory, unique to this process; removed with the object.
+struct ScratchDir
+{
+    std::filesystem::path path;
+
+    explicit ScratchDir(const std::string& name)
+        : path(std::filesystem::temp_directory_path() /
+               ("chronos_server_tests-" + std::to_string(::getpid()) + "-" + name))
+    {
+        std::filesystem::remove_all(path);
+        std::filesystem::create_directories(path);
+    }
+
+    ~ScratchDir()
+    {
+        std::error_code ignored;
+        std::filesystem::remove_all(path, ignored);
+    }
+};
+
+inline void write_file(const std::filesystem::path& path, std::span<const std::byte> bytes)
+{
+    std::ofstream out{path, std::ios::binary};
+    out.write(reinterpret_cast<const char*>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
+}
+
+inline constexpr std::uint64_t kNineThirty = 34'200 * kSecond;  // ns after midnight
+
+// An ITCH 5.0 day of one stock, ACME: the start of messages, its directory entry and trading state, the start of
+// system hours, and regular hours from 09:30 to 16:00 as the System Events set them. At 09:30 a 10.00 bid and a 10.01
+// offer of 1,000 rest, and from 09:30:01 one of them trades 100 a second, `seconds` times; `shift` ticks move every
+// price.
+inline itch_test::ItchBuilder acme_day(std::uint64_t seconds = 4, std::uint32_t shift = 0)
+{
+    itch_test::ItchBuilder itch;
+    itch.system_event(0, 3 * 3'600 * kSecond, 'O')
+        .stock_directory(1, 3 * 3'600 * kSecond, "ACME")
+        .trading_action(1, 3 * 3'600 * kSecond, "ACME", 'T')
+        .system_event(0, 4 * 3'600 * kSecond, 'S')
+        .system_event(0, kNineThirty, 'Q')
+        .add_order(1, kNineThirty, 1, 'B', 1'000, "ACME", 100'000 + shift)
+        .add_order(1, kNineThirty, 2, 'S', 1'000, "ACME", 100'100 + shift);
+    for (std::uint64_t s = 1; s <= seconds; ++s) {
+        itch.executed(1, kNineThirty + s * kSecond, s % 2 == 0 ? 1 : 2, 100, s);
+    }
+    itch.system_event(0, 57'600 * kSecond, 'M');
+    return itch;
+}
 
 // The session's latest snapshot; a test failure if none was published.
 inline Snapshot latest(const ReplaySession& session)

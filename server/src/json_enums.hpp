@@ -2,6 +2,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include "chronos/server/itch_input.hpp"
 #include "chronos/server/replay_session.hpp"
 
 // The JSON names of the enums the command log and the WebSocket protocol share. Reading an unknown name gives the
@@ -81,5 +82,7 @@ NLOHMANN_JSON_SERIALIZE_ENUM(ControlType,
                               {ControlType::Restart, "restart"},
                               {ControlType::Symbol, "symbol"},
                               {ControlType::CancelSeek, "cancel_seek"}})
+NLOHMANN_JSON_SERIALIZE_ENUM(SessionSource, {{SessionSource::Feed, "feed"}, {SessionSource::Fallback, "fallback"}})
+NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(FeedSession, open, close, source)
 
 }  // namespace simulator::server

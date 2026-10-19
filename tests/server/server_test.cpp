@@ -225,26 +225,6 @@ json await(Client& client, const std::string& type, const std::function<bool(con
     return nullptr;
 }
 
-// A directory in the system temp directory, unique to this process; removed with the object.
-struct ScratchDir
-{
-    std::filesystem::path path;
-
-    explicit ScratchDir(const std::string& name)
-        : path(std::filesystem::temp_directory_path() /
-               ("chronos_server_tests-" + std::to_string(::getpid()) + "-" + name))
-    {
-        std::filesystem::remove_all(path);
-        std::filesystem::create_directories(path);
-    }
-
-    ~ScratchDir()
-    {
-        std::error_code ignored;
-        std::filesystem::remove_all(path, ignored);
-    }
-};
-
 // A session served on a free loopback port, with its engine thread.
 struct Served
 {

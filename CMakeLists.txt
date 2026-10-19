@@ -144,7 +144,15 @@ FetchContent_Declare(
     PATCH_COMMAND patch -p1 -i ${PROJECT_SOURCE_DIR}/cmake/crow-1.3.4.patch
 )
 
-FetchContent_MakeAvailable(asio crow)
+# xxHash (BSD-2), header-only and pinned: the full-file XXH3-128 that identifies a day.
+FetchContent_Declare(
+    xxhash
+    URL https://github.com/Cyan4973/xxHash/archive/refs/tags/v0.8.3.tar.gz
+    URL_HASH SHA256=aae608dfe8213dfd05d909a57718ef82f30722c392344583d3f39050c7f29a80
+    SOURCE_SUBDIR none
+)
+
+FetchContent_MakeAvailable(asio crow xxhash)
 
 add_library(crow_headers INTERFACE)
 target_include_directories(crow_headers SYSTEM INTERFACE ${crow_SOURCE_DIR}/include ${asio_SOURCE_DIR}/asio/include)
@@ -179,6 +187,7 @@ target_link_libraries(chronos_server
 )
 
 target_link_libraries(chronos_server PRIVATE nlohmann_json::nlohmann_json crow_headers)
+target_include_directories(chronos_server SYSTEM PRIVATE ${xxhash_SOURCE_DIR})
 
 # The command log's header records the commit (generated/build_info.hpp).
 add_dependencies(chronos_server build_info)
