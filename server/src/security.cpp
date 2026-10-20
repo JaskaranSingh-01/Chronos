@@ -1,5 +1,8 @@
 #include "chronos/server/security.hpp"
 
+#include <time.h>
+
+#include <ctime>
 #include <random>
 
 namespace simulator::server {
@@ -25,6 +28,16 @@ std::string random_hex(std::size_t bytes)
         hex += digits[byte & 0xFU];
     }
     return hex;
+}
+
+std::string new_session_id()
+{
+    const std::time_t now = std::time(nullptr);
+    std::tm utc{};
+    ::gmtime_r(&now, &utc);
+    char stamp[24];
+    std::strftime(stamp, sizeof stamp, "%Y%m%dT%H%M%SZ", &utc);
+    return std::string{stamp} + "-" + random_hex(8);
 }
 
 bool token_equal(std::string_view given, std::string_view expected) noexcept

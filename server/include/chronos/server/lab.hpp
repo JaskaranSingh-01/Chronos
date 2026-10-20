@@ -1,11 +1,19 @@
 #pragma once
 
+#include <atomic>
 #include <chrono>
+#include <condition_variable>
 #include <cstddef>
 #include <cstdint>
+#include <deque>
+#include <filesystem>
+#include <map>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <string>
+#include <string_view>
+#include <thread>
 #include <vector>
 
 #include "chronos/server/backtest.hpp"
@@ -85,6 +93,76 @@ struct Run
     std::optional<RunState> verifying{};  // a verification Queued or Running; written, but decode_run drops it
     std::vector<Verification> verifications{};
     double progress{0};  // the bytes read over the days' sizes while running; not saved
+};
+
+// Why the Backtester refused a request.
+enum class Refusal : std::uint8_t {
+    None,
+    NotFound,  // no such run, or one being deleted
+    Conflict,  // the run is not in a state that allows it
+    QueueFull  // max_queued jobs wait already
+};
+
+// The Lab's runs (spec §5.3, §5.4) and the one worker thread that runs their jobs, oldest first. The worker writes a
+// run's file, <dir>/<id>.json, through a temp file and a rename as the run finishes, and again after each
+// verification; never earlier. A run deleted while a job of it is busy is hidden at once, and erased, its file with
+// it, when the worker stops the job. The mutex covers the runs and the queue for a lookup or a state change only: no
+// file, hash or replay work runs under it.
+class Backtester
+{
+private:
+    struct Job
+    {
+        std::string id;
+        std::vector<DayHandle> days;  // the run's, as the library listed them when it was submitted
+    };
+
+    struct Entry
+    {
+        Run run;
+        bool busy{false};     // its job is running, or its file is being written
+        bool deleted{false};  // a tombstone: hidden, and erased once the busy job stops
+    };
+
+    SessionConfig config_;
+    std::filesystem::path dir_;
+    mutable std::mutex mutex_;
+    std::condition_variable wake_;
+    // ponytail: every run's results stay in memory, up to ~3 MB each; read them from their files past a few hundred.
+    std::map<std::string, Entry, std::less<>> runs_;
+    std::deque<Job> queue_;
+    std::string running_;  // the id of the run whose job is running; "" if none
+    std::uint64_t running_size_{0};  // its days' sizes
+    std::atomic<bool> cancel_{false};  // the running job's
+    std::atomic<std::uint64_t> bytes_read_{0};
+    bool stop_{false};
+    std::thread worker_;
+
+    void work();
+    void finish(const Job& job, RunResult result);
+    void save(Run run);
+    std::filesystem::path file(std::string_view id) const;
+
+public:
+    // Loads every run saved in `dir`, creating it if it is missing, and starts the worker.
+    Backtester(SessionConfig config, std::filesystem::path dir);
+    // Cancels the running job and drops the queued ones; neither is saved.
+    ~Backtester();
+
+    Backtester(const Backtester&) = delete;
+    Backtester& operator=(const Backtester&) = delete;
+
+    // Queues a run of `spec` over `days`, the library's handles of spec.days, and names it `id`.
+    Refusal submit(const RunSpec& spec, std::vector<DayHandle> days, std::string& id);
+    // Cancels a queued run at once, and a running one at its next market event; Conflict once it has ended.
+    Refusal cancel(std::string_view id);
+    // Erases a queued or idle run, and an idle run's file; a busy one is a tombstone until its job stops. `warning`
+    // says why a file could not be removed.
+    Refusal remove(std::string_view id, std::string& warning);
+    // GET /api/backtests.
+    std::string list() const;
+    // GET /api/backtests/<id>.
+    Refusal get(std::string_view id, std::string& json) const;
 };
 
 }  // namespace simulator::server

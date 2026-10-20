@@ -12,6 +12,10 @@ namespace simulator::server {
 // `bytes` random bytes from std::random_device, as lower-case hex.
 std::string random_hex(std::size_t bytes);
 
+// The UTC time and 64 random bits, e.g. 20261018T101500Z-9c2e41d07ab35f18: a session's or a Lab run's id, never one
+// used before.
+std::string new_session_id();
+
 // Equal, in a time that does not depend on where `given` first differs from `expected`.
 bool token_equal(std::string_view given, std::string_view expected) noexcept;
 

@@ -171,6 +171,7 @@ add_library(chronos_server
     server/src/generation.cpp
     server/src/http_server.cpp
     server/src/itch_input.cpp
+    server/src/lab.cpp
     server/src/peer.cpp
     server/src/protocol.cpp
     server/src/replay_session.cpp
@@ -292,6 +293,7 @@ add_executable(chronos_server_tests
     tests/server/command_log_test.cpp
     tests/server/generation_test.cpp
     tests/server/itch_input_test.cpp
+    tests/server/lab_test.cpp
     tests/server/peer_test.cpp
     tests/server/protocol_test.cpp
     tests/server/replay_session_test.cpp

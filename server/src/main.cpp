@@ -3,7 +3,6 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
-#include <ctime>
 #include <filesystem>
 #include <optional>
 #include <span>
@@ -111,17 +110,6 @@ bool parse(std::span<const std::string_view> args, ServeArgs& out, std::string& 
         return false;
     }
     return true;
-}
-
-// The start time in UTC and 64 random bits: never an earlier session's id, whose log this one would append to.
-std::string new_session_id()
-{
-    const std::time_t now = std::time(nullptr);
-    std::tm utc{};
-    ::gmtime_r(&now, &utc);
-    char stamp[24];
-    std::strftime(stamp, sizeof stamp, "%Y%m%dT%H%M%SZ", &utc);
-    return std::string{stamp} + "-" + random_hex(8);
 }
 
 }  // namespace
