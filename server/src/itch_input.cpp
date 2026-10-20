@@ -331,7 +331,6 @@ DayHandle reopen(const Day& day)
     fresh->itch50 = day.itch50;
     fresh->cut_tail = day.cut_tail;
     fresh->session = day.session;
-    fresh->symbols = day.symbols;
     fresh->midnight = day.midnight;
     return fresh;
 }

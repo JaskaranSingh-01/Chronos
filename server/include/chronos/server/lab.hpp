@@ -163,7 +163,8 @@ public:
     Refusal cancel(std::string_view id);
     // Queues a verification of a completed run over its days as `library` lists them now, or keeps the one already
     // queued or running: a backtest() of its spec with hash as read, over fresh mappings. Conflict for a run that is
-    // not completed or partial; InputChanged if a day's cached hash is not the run's.
+    // not completed or partial; InputChanged if a day's cached hash is not the run's; OtherSettings for a run under
+    // another --allow-truncated-tail; QueueFull if max_queued jobs wait.
     Refusal verify(std::string_view id, const DayLibrary& library);
     // A Watch in Terminal's admission (spec §5.5): fills `control`'s spec and watch from the completed run
     // control.watch.run_id, if each of its days is listed with the run's hash and it ran with this server's

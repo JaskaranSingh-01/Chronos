@@ -377,11 +377,12 @@ void Backtester::work()
             bytes_read_.store(0);
         }
         std::vector<DayHandle> days = job.days;
-        if (job.verify) {
-            std::transform(days.begin(), days.end(), days.begin(), [](const DayHandle& day) { return reopen(*day); });
-        }
         RunResult result;
         try {
+            if (job.verify) {
+                std::transform(days.begin(), days.end(), days.begin(),
+                               [](const DayHandle& day) { return reopen(*day); });
+            }
             if (std::find(days.begin(), days.end(), nullptr) == days.end()) {
                 result = backtest(config_, spec, days, job.verify, cancel_, bytes_read_);
             } else {  // a file gone since the verification was queued: no replay, and each day's re-hash
@@ -451,9 +452,7 @@ void Backtester::save(Run run)
     } catch (...) {  // the worker's thread must not end on an exception (spec §9)
         error = "cannot encode the run";
     }
-    if (!error.empty()) {
-        run.warning = "not saved: " + error;
-    }
+    run.warning = error.empty() ? "" : "not saved: " + error;  // a later save that succeeds clears an earlier failure
     {
         const std::lock_guard lock{mutex_};
         const auto found = runs_.find(id);
