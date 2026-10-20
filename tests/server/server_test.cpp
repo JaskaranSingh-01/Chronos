@@ -734,6 +734,8 @@ TEST(ServerTest, TheLabApiQueuesListsServesCancelsAndDeletesRuns)
         refused += code == 429 && body == R"({"error":"queue_full"})" ? 1 : 0;
     }
     EXPECT_GE(refused, 1);
+    ASSERT_FALSE(ids.empty());
+    EXPECT_EQ(served.send("POST", "/api/backtests/" + ids.back() + "/cancel").first, 204);  // still waiting
     for (const std::string& queued_id : ids) {
         EXPECT_EQ(served.send("DELETE", "/api/backtests/" + queued_id).first, 204);
     }

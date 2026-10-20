@@ -405,7 +405,7 @@ a built-in strategy over one symbol and one or more days, at full speed. Its HTT
 | `GET /api/backtests` | every run, without its results: state, progress, PnL and fills |
 | `GET /api/backtests/<id>` | the whole run: spec, provenance, results |
 | `POST /api/backtests/<id>/cancel` | cancels a queued or running run; 409 once it has ended |
-| `DELETE /api/backtests/<id>` | removes a run and its file; a running one stops and is never saved |
+| `DELETE /api/backtests/<id>` | removes a run and its file (200 with a `warning` if the file stays); a running one stops and is never saved |
 
 A run is posted as `{"symbol":"SPY","days":["2019-12-30"],"strategy":"market_maker"}`. Every other key takes
 `simulator backtest`'s default: `params`, `latency` (`order_ns`, `report_ns`), `fees` (`maker`, `taker`, in ticks a

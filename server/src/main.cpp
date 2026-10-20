@@ -159,7 +159,7 @@ int main(int argc, char** argv)
         .defaults = {.days = {.day = {start->date}, .count = 1},
                      .latency = {.order_latency = 50'000, .report_latency = 50'000},
                      .limits = {.max_position = 10'000, .max_order_quantity = Quantity{1'000}, .max_open_orders = 16}}};
-    // Declared in this order, so destroyed writer last: the server, then the engine thread, before the session.
+    // Declared in this order, so destroyed writer last: the server, the engine thread, the Lab, then the session.
     LogQueue queue;
     const std::filesystem::path log_path = sessions / (session_id + ".jsonl");
     const LogWriter writer{queue, log_path, config, &library, parsed.fsync};
