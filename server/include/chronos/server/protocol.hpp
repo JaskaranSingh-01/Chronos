@@ -10,6 +10,7 @@
 
 #include "chronos/server/candles.hpp"
 #include "chronos/server/itch_input.hpp"
+#include "chronos/server/lab.hpp"
 #include "chronos/server/replay_session.hpp"
 
 // The WebSocket protocol (spec §6.3) and the HTTP bodies, as JSON text. Prices are integer ticks, quantities shares,
@@ -76,5 +77,18 @@ std::string encode_days(std::chrono::year_month_day start, std::span<const DayHa
 // GET /api/history.
 std::string encode_history(std::string_view session_id, std::uint64_t generation, std::span<const Candle> candles,
                            std::span<const Trade> trades);
+
+// POST /api/backtests (spec §7.2): exactly its keys, in range as the CLI caps them, each optional one taking
+// default_spec()'s value, an omitted limit following the params as the CLI's does. False with `field` naming the first
+// bad one, e.g. "params.quote_size" or "days[1]"; "" for a body that is not a JSON object.
+bool decode_run_spec(std::string_view text, RunSpec& spec, std::string& field);
+// GET /api/strategies: each strategy's params and limits, their defaults and caps.
+std::string encode_strategies();
+// A run as runs/<id>.json holds it and GET /api/backtests/<id> serves it (spec §7.3).
+std::string encode_run(const Run& run);
+// A runs/<id>.json: false unless it is a finished run of format 1.
+bool decode_run(std::string_view text, Run& run);
+// GET /api/backtests: each run without its results, with its progress and headline; `queued` jobs wait.
+std::string encode_runs(std::span<const Run> runs, std::size_t queued);
 
 }  // namespace simulator::server

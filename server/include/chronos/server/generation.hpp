@@ -129,4 +129,12 @@ struct Digests
 
 Digests digests(const Generation& generation) noexcept;
 
+// A Watch's or a Verify's verdict on a re-run of a Lab run, decided in this order (spec §5.5).
+enum class Outcome : std::uint8_t {
+    InputChanged,   // a day's full re-hash differs from the run's
+    DifferentCode,  // this build's source digest differs from the run's
+    Reproduced,     // the digests are the run's
+    Mismatch
+};
+
 }  // namespace simulator::server

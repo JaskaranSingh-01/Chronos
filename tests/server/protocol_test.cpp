@@ -3,15 +3,19 @@
 #include <chrono>
 #include <cstdint>
 #include <limits>
+#include <memory>
 #include <optional>
 #include <set>
+#include <span>
 #include <string>
 #include <thread>
 #include <vector>
 
 #include <nlohmann/json.hpp>
 
+#include "chronos/server/backtest.hpp"
 #include "chronos/server/itch_input.hpp"
+#include "chronos/server/lab.hpp"
 #include "chronos/server/protocol.hpp"
 #include "test_support.hpp"
 
@@ -551,6 +555,229 @@ TEST(ProtocolTest, EncodesTheGenerationsSpecAndTheDayASourceErrorIsOn)
     s.spec.days.count = 1;  // one day: as UI-1 named it
     EXPECT_EQ(json::parse(encode_snapshot("s1", s, false, false))["source_error"], "TruncatedMessage");
     EXPECT_EQ(json::parse(encode_snapshot("s1", Snapshot{}, true, false))["spec"]["params"], json::object());
+}
+
+// A Lab run's spec, decoded; a test failure, naming the field, if it is refused.
+RunSpec run_spec(const std::string& text)
+{
+    RunSpec spec;
+    std::string field;
+    EXPECT_TRUE(decode_run_spec(text, spec, field)) << text << ": " << field;
+    return spec;
+}
+
+// The field decode_run_spec() names for `text`, which it must refuse.
+std::string bad_field(const std::string& text)
+{
+    RunSpec spec;
+    std::string field = "unset";
+    EXPECT_FALSE(decode_run_spec(text, spec, field)) << text;
+    return field;
+}
+
+// A run's symbol, days and strategy are required; every other key takes `simulator backtest`'s default, and an omitted
+// limit follows the params as the CLI's does.
+TEST(ProtocolTest, DecodesARunSpecWithTheClisDefaults)
+{
+    using namespace std::chrono_literals;
+    RunSpec expected = default_spec(SessionStrategyKind::MarketMaker);
+    expected.ticker = ticker("SPY");
+    expected.days = {.day = {2019y / 12 / 27, 2019y / 12 / 30}, .count = 2};
+    const RunSpec minimal =
+        run_spec(R"({"symbol":"SPY","days":["2019-12-27","2019-12-30"],"strategy":"market_maker"})");
+    EXPECT_EQ(json::parse(encode_snapshot("s", Snapshot{.spec = minimal}, true, false))["spec"],
+              json::parse(encode_snapshot("s", Snapshot{.spec = expected}, true, false))["spec"]);
+    EXPECT_EQ(minimal.window, TradingWindow::Regular);
+    EXPECT_EQ(minimal.latency.order_latency, 50'000);
+    EXPECT_EQ(minimal.limits.max_open_orders, 2u);
+
+    const RunSpec sized = run_spec(R"({"symbol":"SPY","days":["2019-12-30"],"strategy":"market_maker",)"
+                                   R"("params":{"quote_size":200,"max_position":800}})");
+    EXPECT_EQ(sized.limits.max_order_quantity, Quantity{200});  // as --quote-size 200 --max-position 800 set them
+    EXPECT_EQ(sized.limits.max_position, 800);
+    EXPECT_EQ(sized.strategy.market_maker.requote_cooldown_ns, 100'000'000);
+
+    const RunSpec full = run_spec(
+        R"({"symbol":"AAPL","days":["2019-12-30"],"strategy":"imbalance",)"
+        R"("params":{"threshold":2.5,"clip":50,"max_position":300,"cooldown_ns":0},)"
+        R"("latency":{"order_ns":1000000000000,"report_ns":0},"fees":{"maker":-1000000,"taker":1000000},)"
+        R"("limits":{"max_position":1000000000,"max_order_quantity":7,"max_open_orders":3},"window":"full_day"})");
+    EXPECT_EQ(name(full.ticker), "AAPL");
+    EXPECT_EQ(full.strategy.kind, SessionStrategyKind::ImbalanceTaker);
+    EXPECT_EQ(full.strategy.imbalance,
+              (ImbalanceTakerParams{.threshold = 2.5, .clip = 50, .max_position = 300, .cooldown_ns = 0}));
+    EXPECT_EQ(full.latency.order_latency, 1'000'000'000'000);
+    EXPECT_EQ(full.latency.report_latency, 0);
+    EXPECT_EQ(full.fees.maker_fee_per_share, -1'000'000);
+    EXPECT_EQ(full.fees.taker_fee_per_share, 1'000'000);
+    EXPECT_EQ(full.limits.max_position, 1'000'000'000);
+    EXPECT_EQ(full.limits.max_order_quantity, Quantity{7});
+    EXPECT_EQ(full.limits.max_open_orders, 3u);
+    EXPECT_EQ(full.window, TradingWindow::FullDay);
+}
+
+// Keys are exact and every value is in its range; a refusal names its field.
+TEST(ProtocolTest, RefusesABadRunSpecNamingItsField)
+{
+    using namespace std::chrono_literals;
+    const std::string head = R"({"symbol":"SPY","days":["2019-12-30"],"strategy":"market_maker")";
+    EXPECT_EQ(bad_field("["), "");
+    EXPECT_EQ(bad_field("[1]"), "");
+    EXPECT_EQ(bad_field(head + R"(,"frob":1})"), "frob");
+    EXPECT_EQ(bad_field(R"({"days":["2019-12-30"],"strategy":"market_maker"})"), "symbol");
+    EXPECT_EQ(bad_field(R"({"symbol":"TOOLONGXX","days":["2019-12-30"],"strategy":"market_maker"})"), "symbol");
+    EXPECT_EQ(bad_field(R"({"symbol":"A B","days":["2019-12-30"],"strategy":"market_maker"})"), "symbol");
+    EXPECT_EQ(bad_field(R"({"symbol":"SPY","strategy":"market_maker"})"), "days");
+    EXPECT_EQ(bad_field(R"({"symbol":"SPY","days":[],"strategy":"market_maker"})"), "days");
+    std::string many = R"({"symbol":"SPY","strategy":"market_maker","days":[)";
+    for (int day = 0; day < 33; ++day) {
+        const std::chrono::year_month_day date{std::chrono::sys_days{2019y / 1 / 1} + std::chrono::days{day}};
+        many += (day == 0 ? "\"" : ",\"") + iso_date(date) + "\"";
+    }
+    EXPECT_EQ(bad_field(many + "]}"), "days");  // 33 days
+    EXPECT_EQ(bad_field(R"({"symbol":"SPY","days":["2019-12-30","2019-12-27"],"strategy":"market_maker"})"), "days[1]");
+    EXPECT_EQ(bad_field(R"({"symbol":"SPY","days":["2019-12-30","2019-02-30"],"strategy":"market_maker"})"), "days[1]");
+    EXPECT_EQ(bad_field(R"({"symbol":"SPY","days":["2019-12-30"]})"), "strategy");
+    EXPECT_EQ(bad_field(R"({"symbol":"SPY","days":["2019-12-30"],"strategy":"none"})"), "strategy");
+    EXPECT_EQ(bad_field(head + R"(,"params":[1]})"), "params");
+    EXPECT_EQ(bad_field(head + R"(,"params":{"quote_size":0}})"), "params.quote_size");
+    EXPECT_EQ(bad_field(head + R"(,"params":{"quote_size":1000000001}})"), "params.quote_size");
+    EXPECT_EQ(bad_field(head + R"(,"params":{"clip":5}})"), "params.clip");
+    EXPECT_EQ(bad_field(head + R"(,"params":{"requote_cooldown_ns":-1}})"), "params.requote_cooldown_ns");
+    EXPECT_EQ(bad_field(R"({"symbol":"SPY","days":["2019-12-30"],"strategy":"imbalance","params":{"threshold":0.5}})"),
+              "params.threshold");
+    EXPECT_EQ(bad_field(head + R"(,"latency":5})"), "latency");
+    EXPECT_EQ(bad_field(head + R"(,"latency":{"order_ns":1000000000001}})"), "latency.order_ns");
+    EXPECT_EQ(bad_field(head + R"(,"latency":{"report_ns":2.5}})"), "latency.report_ns");
+    EXPECT_EQ(bad_field(head + R"(,"latency":{"order_us":5}})"), "latency.order_us");
+    EXPECT_EQ(bad_field(head + R"(,"fees":{"maker":-1000001}})"), "fees.maker");
+    EXPECT_EQ(bad_field(head + R"(,"fees":{"maker":18446744073709551615}})"), "fees.maker");
+    EXPECT_EQ(bad_field(head + R"(,"fees":{"taker":-1}})"), "fees.taker");
+    EXPECT_EQ(bad_field(head + R"(,"limits":{"max_position":1000000001}})"), "limits.max_position");
+    EXPECT_EQ(bad_field(head + R"(,"limits":{"max_order_quantity":0}})"), "limits.max_order_quantity");
+    EXPECT_EQ(bad_field(head + R"(,"limits":{"max_open_orders":0}})"), "limits.max_open_orders");
+    EXPECT_EQ(bad_field(head + R"(,"window":"nightly"})"), "window");
+}
+
+// GET /api/strategies: the defaults a run's omitted keys take, and every cap the decoder applies.
+TEST(ProtocolTest, EncodesTheStrategiesWithTheirDefaultsAndCaps)
+{
+    const json j = json::parse(encode_strategies());
+    ASSERT_EQ(j["strategies"].size(), 2u);
+    const json& mm = j["strategies"][0];
+    EXPECT_EQ(mm["kind"], "market_maker");
+    EXPECT_EQ(mm["params"][0], json::parse(R"({"name":"quote_size","default":100,"min":1,"max":1000000000})"));
+    EXPECT_EQ(mm["params"][2]["default"], 100'000'000);
+    EXPECT_EQ(mm["limits"], json::parse(R"({"max_position":500,"max_order_quantity":100,"max_open_orders":2})"));
+    const json& imbalance = j["strategies"][1];
+    EXPECT_EQ(imbalance["kind"], "imbalance");
+    EXPECT_EQ(imbalance["params"][0], json::parse(R"({"name":"threshold","default":3.0,"min":1,"max":null})"));
+    EXPECT_EQ(imbalance["limits"]["max_open_orders"], 1);
+    EXPECT_EQ(j["latency"], json::parse(R"({"order_ns":50000,"report_ns":50000,"max":1000000000000})"));
+    EXPECT_EQ(j["fees"], json::parse(R"({"maker":0,"taker":0,"min":-1000000,"max":1000000,"taker_min":0})"));
+    EXPECT_EQ(j["limit_max"], 1'000'000'000);
+    EXPECT_EQ(j["windows"],
+              json::parse(R"j([{"id":"regular","label":"Regular (feed session)"},)j"
+                          R"j({"id":"full_day","label":"Full day"}])j"));
+    EXPECT_EQ(j["max_days"], 32);
+    EXPECT_EQ(j["max_queued"], 8);
+}
+
+// A finished run reads back from its file as it was written; reproduced is true once a same-code, same-input
+// verification matched, and false once one did not. The listing leaves the results out.
+TEST(ProtocolTest, ARunDocumentReadsBackAsItWasWritten)
+{
+    using namespace std::chrono_literals;
+    RunResult results{.events = 9,
+                      .sim_events = 4,
+                      .pnl = -200,
+                      .position = 100,
+                      .maker_fills = 1,
+                      .filled_shares = 100,
+                      .fill_rate = 0.5,
+                      .digests = {.book = 0xcbf29ce484222325, .execution = 1, .portfolio = 2},
+                      .equity = {{.second = 1'577'716'201, .pnl = 0, .position = 0},
+                                 {.second = 1'577'716'202, .pnl = -200, .position = 100}},
+                      .by_hour = {{9, -200}},
+                      .by_day = {{.date = 2019y / 12 / 30, .pnl = -200, .fills = 1}},
+                      .fills = {{.exchange_ts = 1'577'716'201'500'000'000,
+                                 .order_id = 1,
+                                 .price = Price{100'000},
+                                 .quantity = Quantity{100},
+                                 .liquidity = Liquidity::Maker,
+                                 .rule = FillCause::RuleAExecute,
+                                 .ahead_at_entry = 300,
+                                 .position = 100}}};
+    results.fills_by[0][2] = 1;
+    RunSpec spec = default_spec(SessionStrategyKind::MarketMaker);
+    spec.ticker = ticker("ACME");
+    spec.days = {.day = {2019y / 12 / 30}, .count = 1};
+    server::Run run{.id = "20261018T101500Z-9c2e41d07ab35f18",
+                    .state = RunState::Completed,
+                    .spec = spec,
+                    .provenance = {.build = {.commit = "abc", .source_digest = std::string(64, 'f')},
+                                   .book_capacity = 1'048'576,
+                                   .price_scale = 4,
+                                   .days = {{.date = 2019y / 12 / 30,
+                                             .file = "12302019.NASDAQ_ITCH50.bin",
+                                             .size = 7,
+                                             .hash = std::string(32, 'a'),
+                                             .session = {.open = 1, .close = 2, .source = SessionSource::Feed}}},
+                                   .host = "host",
+                                   .submitted = "2026-10-18T10:15:00Z",
+                                   .wall_ms = 3},
+                    .results = std::make_shared<const RunResult>(results)};
+    const json written = json::parse(encode_run(run));
+    EXPECT_EQ(written["format"], 1);
+    EXPECT_EQ(written["state"], "completed");
+    EXPECT_EQ(written["results"]["digests"]["book"], "cbf29ce484222325");
+    EXPECT_EQ(written["results"]["fills"], 1);
+    EXPECT_EQ(written["results"]["equity"]["t"], json::parse("[1577716201,1577716202]"));
+    EXPECT_EQ(written["results"]["by_hour"], json::parse(R"({"hour":[9],"pnl":[-200]})"));
+    EXPECT_EQ(written["results"]["attribution"]["fills"][0], json::parse("[0,0,1,0,0]"));
+    EXPECT_EQ(written["results"]["fill_list"]["rows"][0],
+              json::parse(R"([1577716201500000000,1,"buy",100000,100,"maker","a_e",300,100])"));
+    EXPECT_EQ(written["spec"]["window"], "regular");
+    EXPECT_EQ(written["reproduced"], nullptr);
+    EXPECT_EQ(written["verifying"], nullptr);
+
+    server::Run read;
+    ASSERT_TRUE(decode_run(encode_run(run), read));
+    EXPECT_EQ(encode_run(read), encode_run(run));
+    EXPECT_EQ(*read.results, results);
+
+    const Verification matched{.outcome = Outcome::Reproduced, .digests = results.digests};
+    run.verifications = {{.outcome = Outcome::DifferentCode}, matched};
+    EXPECT_EQ(json::parse(encode_run(run))["reproduced"], true);
+    run.verifications.push_back({.outcome = Outcome::InputChanged, .changed = {2019y / 12 / 30}});
+    EXPECT_EQ(json::parse(encode_run(run))["reproduced"], true);  // neither proves nor disproves it
+    run.verifications.push_back({.outcome = Outcome::Mismatch});
+    const json verified = json::parse(encode_run(run));
+    EXPECT_EQ(verified["reproduced"], false);
+    EXPECT_EQ(verified["verifications"][2]["changed"], json::parse(R"(["2019-12-30"])"));
+    EXPECT_EQ(verified["verifications"][3]["digests"], nullptr);
+    ASSERT_TRUE(decode_run(encode_run(run), read));
+    EXPECT_EQ(encode_run(read), encode_run(run));
+
+    results.partial = true;
+    run.results = std::make_shared<const RunResult>(results);
+    run.state = RunState::Cancelled;
+    run.progress = 0.25;
+    EXPECT_EQ(json::parse(encode_run(run))["results"]["digests"], nullptr);
+    const json listed = json::parse(encode_runs(std::span{&run, 1}, 3));
+    EXPECT_FALSE(listed["runs"][0].contains("results"));
+    EXPECT_EQ(listed["runs"][0]["progress"], 0.25);
+    EXPECT_EQ(listed["runs"][0]["partial"], true);
+    EXPECT_EQ(listed["runs"][0]["pnl"], -200);
+    EXPECT_EQ(listed["runs"][0]["fills"], 1);
+    EXPECT_EQ(listed["queued"], 3);
+    EXPECT_EQ(listed["max_queued"], 8);
+
+    std::string text = encode_run(run);
+    EXPECT_FALSE(decode_run(text.replace(text.find("\"format\":1"), 10, "\"format\":2"), read));
+    run.state = RunState::Running;
+    EXPECT_FALSE(decode_run(encode_run(run), read));  // a run is saved only once it has finished
+    EXPECT_FALSE(decode_run("{}", read));
 }
 
 }  // namespace

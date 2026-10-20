@@ -1,11 +1,15 @@
 #include "chronos/server/protocol.hpp"
 
 #include <algorithm>
+#include <charconv>
 #include <cinttypes>
 #include <cmath>
 #include <cstdio>
 #include <initializer_list>
 #include <limits>
+#include <memory>
+#include <stdexcept>
+#include <utility>
 
 #include <nlohmann/json.hpp>
 
@@ -22,18 +26,27 @@ constexpr std::uint64_t int64_max = std::numeric_limits<std::int64_t>::max();
 // them (sizes, positions and ticks added to positions and prices; a cooldown added to a timestamp) cannot overflow.
 constexpr std::uint64_t max_param = 1'000'000'000;
 constexpr std::uint64_t max_cooldown_ns = 1'000'000'000'000'000;  // 1e9 ms
+// A Lab run's latencies and fees, capped as the CLI caps them.
+constexpr std::uint64_t max_latency_ns = 1'000'000'000'000;  // 1,000 s
+constexpr std::int64_t max_fee = 1'000'000;                  // ticks a share
 // The longest part of a client's `type` an error echoes.
 constexpr std::size_t max_echoed_type = 32;
+
+// The first key of `object` that is not one of `keys`; "" if there is none.
+std::string unknown_key(const json& object, std::initializer_list<std::string_view> keys)
+{
+    for (const auto& item : object.items()) {
+        if (std::find(keys.begin(), keys.end(), item.key()) == keys.end()) {
+            return item.key();
+        }
+    }
+    return {};
+}
 
 // True if every key of `object` is one of `keys`.
 bool only(const json& object, std::initializer_list<std::string_view> keys)
 {
-    for (const auto& item : object.items()) {
-        if (std::find(keys.begin(), keys.end(), item.key()) == keys.end()) {
-            return false;
-        }
-    }
-    return true;
+    return unknown_key(object, keys).empty();
 }
 
 // Reads `key` as an unsigned integer of at most `max`.
@@ -84,9 +97,26 @@ bool read_optional(const json& object, const char* key, std::uint64_t max, I& va
     return true;
 }
 
-// An optional "days": 1 to max_days dates, YYYY-MM-DD, strictly increasing; absent, the count stays 0.
-bool read_days(const json& j, DayList& days)
+// An absent `key` keeps `value`; a present one must be an integer from `min` to `max`.
+bool read_signed(const json& object, const char* key, std::int64_t min, std::int64_t max, std::int64_t& value)
 {
+    const auto it = object.find(key);
+    if (it == object.end()) {
+        return true;
+    }
+    if (!it->is_number_integer() || (it->is_number_unsigned() && it->get<std::uint64_t>() > int64_max) ||
+        it->get<std::int64_t>() < min || it->get<std::int64_t>() > max) {
+        return false;
+    }
+    value = it->get<std::int64_t>();
+    return true;
+}
+
+// An optional "days": 1 to max_days dates, YYYY-MM-DD, strictly increasing; absent, the count stays 0. False with
+// `field` naming "days", or the first bad date as "days[i]".
+bool read_days(const json& j, DayList& days, std::string& field)
+{
+    field = "days";
     const auto it = j.find("days");
     if (it == j.end()) {
         return true;
@@ -95,6 +125,7 @@ bool read_days(const json& j, DayList& days)
         return false;
     }
     for (const json& day : *it) {
+        field = "days[" + std::to_string(days.count) + "]";
         std::chrono::year_month_day& date = days.day[days.count];
         if (!day.is_string() || !parse_date(day.get<std::string>(), date) ||
             (days.count > 0 && date <= days.day[days.count - 1])) {
@@ -105,10 +136,19 @@ bool read_days(const json& j, DayList& days)
     return true;
 }
 
+// "symbol": 1 to 8 printable ASCII characters, an ITCH ticker.
+bool read_symbol(const json& j, Ticker& ticker)
+{
+    std::string symbol;
+    return read(j, "symbol", symbol) && !symbol.empty() &&
+        std::all_of(symbol.begin(), symbol.end(), [](char c) { return c >= 0x21 && c <= 0x7E; }) &&
+        to_ticker(symbol, ticker);
+}
+
 bool decode_control(const json& j, Control& control)
 {
     std::uint64_t value = 0;
-    std::string symbol;
+    std::string field;
     if (!read(j, "action", control.type)) {
         return false;
     }
@@ -130,10 +170,8 @@ bool decode_control(const json& j, Control& control)
         control.seek_ts = static_cast<Timestamp>(value);
         return true;
     case ControlType::Symbol:
-        return only(j, {"type", "session_id", "generation", "action", "symbol", "days"}) && read(j, "symbol", symbol) &&
-            !symbol.empty() &&
-            std::all_of(symbol.begin(), symbol.end(), [](char c) { return c >= 0x21 && c <= 0x7E; }) &&
-            to_ticker(symbol, control.spec.ticker) && read_days(j, control.spec.days);
+        return only(j, {"type", "session_id", "generation", "action", "symbol", "days"}) &&
+            read_symbol(j, control.spec.ticker) && read_days(j, control.spec.days, field);
     case ControlType::Play:
     case ControlType::Pause:
     case ControlType::Restart:
@@ -164,42 +202,156 @@ bool decode_order(const json& j, Command& c)
     return true;
 }
 
-// The strategy and its params; a param left out keeps its default.
-bool decode_attach(const json& j, Command& c)
+// The strategy and its params, as attach and a Lab run take them: a param left out keeps its default. False with
+// `field` naming "strategy", "params" or the first bad param, e.g. "params.quote_size".
+bool decode_strategy(const json& j, StrategySpec& spec, std::string& field)
 {
-    c.type = CommandType::Attach;
-    StrategySpec& spec = c.strategy;
-    if (!only(j, {"type", "session_id", "generation", "strategy", "params"}) || !read(j, "strategy", spec.kind) ||
-        spec.kind == SessionStrategyKind::None) {
+    field = "strategy";
+    if (!read(j, "strategy", spec.kind) || spec.kind == SessionStrategyKind::None) {
         return false;
     }
     // By reference: copying a client's subtree recurses as deep as the client nested it.
     static const json no_params = json::object();
     const auto found = j.find("params");
     const json& params = found == j.end() ? no_params : *found;
+    field = "params";
     if (!params.is_object()) {
         return false;
     }
+    const auto bad = [&](std::string_view param) {
+        field = "params." + std::string{param};
+        return false;
+    };
     if (spec.kind == SessionStrategyKind::MarketMaker) {
         MarketMakerParams& mm = spec.market_maker;
-        return only(params, {"quote_size", "max_position", "requote_cooldown_ns", "improve_ticks"}) &&
-            read_optional(params, "quote_size", max_param, mm.quote_size) && mm.quote_size > 0 &&
-            read_optional(params, "max_position", max_param, mm.max_position) &&
-            read_optional(params, "requote_cooldown_ns", max_cooldown_ns, mm.requote_cooldown_ns) &&
-            read_optional(params, "improve_ticks", max_param, mm.improve_ticks);
+        if (const std::string key =
+                unknown_key(params, {"quote_size", "max_position", "requote_cooldown_ns", "improve_ticks"});
+            !key.empty()) {
+            return bad(key);
+        }
+        if (!read_optional(params, "quote_size", max_param, mm.quote_size) || mm.quote_size == 0) {
+            return bad("quote_size");
+        }
+        if (!read_optional(params, "max_position", max_param, mm.max_position)) {
+            return bad("max_position");
+        }
+        if (!read_optional(params, "requote_cooldown_ns", max_cooldown_ns, mm.requote_cooldown_ns)) {
+            return bad("requote_cooldown_ns");
+        }
+        return read_optional(params, "improve_ticks", max_param, mm.improve_ticks) || bad("improve_ticks");
     }
     ImbalanceTakerParams& it = spec.imbalance;
+    if (const std::string key = unknown_key(params, {"threshold", "clip", "max_position", "cooldown_ns"});
+        !key.empty()) {
+        return bad(key);
+    }
     if (params.contains("threshold")) {
         const json& threshold = params.at("threshold");
         if (!threshold.is_number() || !std::isfinite(threshold.get<double>()) || threshold.get<double>() < 1.0) {
-            return false;
+            return bad("threshold");
         }
         it.threshold = threshold.get<double>();
     }
-    return only(params, {"threshold", "clip", "max_position", "cooldown_ns"}) &&
-        read_optional(params, "clip", max_param, it.clip) && it.clip > 0 &&
-        read_optional(params, "max_position", max_param, it.max_position) &&
-        read_optional(params, "cooldown_ns", max_cooldown_ns, it.cooldown_ns);
+    if (!read_optional(params, "clip", max_param, it.clip) || it.clip == 0) {
+        return bad("clip");
+    }
+    if (!read_optional(params, "max_position", max_param, it.max_position)) {
+        return bad("max_position");
+    }
+    return read_optional(params, "cooldown_ns", max_cooldown_ns, it.cooldown_ns) || bad("cooldown_ns");
+}
+
+bool decode_attach(const json& j, Command& c)
+{
+    c.type = CommandType::Attach;
+    std::string field;
+    return only(j, {"type", "session_id", "generation", "strategy", "params"}) && decode_strategy(j, c.strategy, field);
+}
+
+// The optional object `key` of `j`, or an empty one; nullptr, naming `field`, if it is not an object or holds a key not
+// in `keys`.
+const json* section(const json& j, const char* key, std::initializer_list<std::string_view> keys, std::string& field)
+{
+    static const json empty = json::object();
+    const auto it = j.find(key);
+    if (it == j.end()) {
+        return &empty;
+    }
+    field = key;
+    if (!it->is_object()) {
+        return nullptr;
+    }
+    if (const std::string unknown = unknown_key(*it, keys); !unknown.empty()) {
+        field += "." + unknown;
+        return nullptr;
+    }
+    return &*it;
+}
+
+// A Lab run's RunSpec (spec §7.2); see decode_run_spec().
+bool spec_from(const json& j, RunSpec& spec, std::string& field)
+{
+    if (const std::string key =
+            unknown_key(j, {"symbol", "days", "strategy", "params", "latency", "fees", "limits", "window"});
+        !key.empty()) {
+        field = key;
+        return false;
+    }
+    StrategySpec strategy;
+    if (!decode_strategy(j, strategy, field)) {
+        return false;
+    }
+    spec = default_spec(strategy.kind);
+    spec.strategy = strategy;
+    spec.limits = default_limits(strategy);
+    field = "symbol";
+    if (!read_symbol(j, spec.ticker)) {
+        return false;
+    }
+    if (!read_days(j, spec.days, field) || spec.days.count == 0) {
+        return false;
+    }
+    const auto bad = [&](const char* name) {
+        field = name;
+        return false;
+    };
+    const json* latency = section(j, "latency", {"order_ns", "report_ns"}, field);
+    if (latency == nullptr) {
+        return false;
+    }
+    if (!read_optional(*latency, "order_ns", max_latency_ns, spec.latency.order_latency)) {
+        return bad("latency.order_ns");
+    }
+    if (!read_optional(*latency, "report_ns", max_latency_ns, spec.latency.report_latency)) {
+        return bad("latency.report_ns");
+    }
+    const json* fees = section(j, "fees", {"maker", "taker"}, field);
+    if (fees == nullptr) {
+        return false;
+    }
+    if (!read_signed(*fees, "maker", -max_fee, max_fee, spec.fees.maker_fee_per_share)) {
+        return bad("fees.maker");
+    }
+    if (!read_signed(*fees, "taker", 0, max_fee, spec.fees.taker_fee_per_share)) {
+        return bad("fees.taker");
+    }
+    const json* limits = section(j, "limits", {"max_position", "max_order_quantity", "max_open_orders"}, field);
+    if (limits == nullptr) {
+        return false;
+    }
+    std::uint64_t order_quantity = spec.limits.max_order_quantity.value();
+    if (!read_optional(*limits, "max_position", max_param, spec.limits.max_position)) {
+        return bad("limits.max_position");
+    }
+    if (!read_optional(*limits, "max_order_quantity", max_param, order_quantity) || order_quantity == 0) {
+        return bad("limits.max_order_quantity");
+    }
+    spec.limits.max_order_quantity = Quantity{order_quantity};
+    if (!read_optional(*limits, "max_open_orders", max_param, spec.limits.max_open_orders) ||
+        spec.limits.max_open_orders == 0) {
+        return bad("limits.max_open_orders");
+    }
+    return !j.contains("window") || read(j, "window", spec.window) || bad("window");
 }
 
 std::string text(const json& j)
@@ -301,14 +453,245 @@ std::string source_error(const Snapshot& s)
     return text + " on " + iso_date(days.day[day]);
 }
 
+// 16 hex digits: a quick check or a digest, which exceed 2^53.
+std::string hex16(std::uint64_t value)
+{
+    char text[17];
+    std::snprintf(text, sizeof text, "%016" PRIx64, value);
+    return text;
+}
+
+std::uint64_t hex16_from(const json& j)
+{
+    const std::string text = j.get<std::string>();
+    std::uint64_t value = 0;
+    const auto [end, error] = std::from_chars(text.data(), text.data() + text.size(), value, 16);
+    if (text.size() != 16 || error != std::errc{} || end != text.data() + text.size()) {
+        throw std::invalid_argument{"not 16 hex digits"};
+    }
+    return value;
+}
+
+// One of E's names; an unknown one throws.
+template <class E>
+E name_from(const json& j)
+{
+    const E value = j.get<E>();
+    if (json(value) != j) {
+        throw std::invalid_argument{"an unknown name"};
+    }
+    return value;
+}
+
+std::chrono::year_month_day date_from(const json& j)
+{
+    std::chrono::year_month_day date{};
+    if (!parse_date(j.get<std::string>(), date)) {
+        throw std::invalid_argument{"not a date"};
+    }
+    return date;
+}
+
 // A day of /api/days; `symbols` counts its stock directory.
 json day_json(const DayHandle& day)
 {
-    char quick_check[17];
-    std::snprintf(quick_check, sizeof quick_check, "%016" PRIx64, day->quick_check);
-    return {{"date", iso_date(day->date)}, {"file", day->file},          {"size", day->size},
-            {"hash", day->hash},           {"quick_check", quick_check}, {"itch50", day->itch50},
-            {"cut_tail", day->cut_tail},   {"session", day->session},    {"symbols", day->symbols.size()}};
+    return {{"date", iso_date(day->date)},
+            {"file", day->file},
+            {"size", day->size},
+            {"hash", day->hash},
+            {"quick_check", hex16(day->quick_check)},
+            {"itch50", day->itch50},
+            {"cut_tail", day->cut_tail},
+            {"session", day->session},
+            {"symbols", day->symbols.size()}};
+}
+
+json digests_json(const Digests& d)
+{
+    return {{"book", hex16(d.book)}, {"execution", hex16(d.execution)}, {"portfolio", hex16(d.portfolio)}};
+}
+
+Digests digests_from(const json& j)
+{
+    return {.book = hex16_from(j.at("book")),
+            .execution = hex16_from(j.at("execution")),
+            .portfolio = hex16_from(j.at("portfolio"))};
+}
+
+json results_json(const RunResult& r)
+{
+    json t = json::array();
+    json pnl = json::array();
+    json position = json::array();
+    for (const Sample& s : r.equity) {
+        t.push_back(s.second);
+        pnl.push_back(s.pnl);
+        position.push_back(s.position);
+    }
+    json hours = json::array();
+    json by_hour = json::array();
+    for (const auto& [hour, change] : r.by_hour) {
+        hours.push_back(hour);
+        by_hour.push_back(change);
+    }
+    json by_day = json::array();
+    for (const DayResult& day : r.by_day) {
+        by_day.push_back({{"date", iso_date(day.date)}, {"pnl", day.pnl}, {"fills", day.fills}});
+    }
+    json rows = json::array();
+    for (const FillRow& f : r.fills) {
+        rows.push_back(json::array({f.exchange_ts, f.order_id, f.side, f.price.ticks, f.quantity.value(), f.liquidity,
+                                    f.rule, f.ahead_at_entry, f.position}));
+    }
+    return {{"partial", r.partial},
+            {"events", r.events},
+            {"sim_events", r.sim_events},
+            {"pnl", r.pnl},
+            {"realised", r.realised},
+            {"unrealised", r.unrealised},
+            {"fees", r.fees},
+            {"position", r.position},
+            {"max_abs_position", r.max_abs_position},
+            {"max_drawdown", r.max_drawdown},
+            {"fills", r.maker_fills + r.taker_fills},
+            {"maker_fills", r.maker_fills},
+            {"taker_fills", r.taker_fills},
+            {"filled_shares", r.filled_shares},
+            {"fill_rate", r.fill_rate},
+            {"digests", r.partial ? json(nullptr) : digests_json(r.digests)},
+            {"equity", {{"granularity", "event_second"}, {"t", t}, {"pnl", pnl}, {"position", position}}},
+            {"by_hour", {{"hour", hours}, {"pnl", by_hour}}},
+            {"by_day", by_day},
+            {"attribution",
+             {{"rules", {"a_e", "a_c", "d_e", "d_c", "c_add", "c_replace"}},
+              {"phases", {"pre_open", "opening_cross", "regular", "closing_cross", "post_close"}},
+              {"fills", r.fills_by},
+              {"anomalies", r.anomalies_by}}},
+            {"fill_list", {{"truncated", r.truncated}, {"rows", rows}}}};
+}
+
+RunResult results_from(const json& j)
+{
+    RunResult r{.partial = j.at("partial").get<bool>(),
+                .events = j.at("events").get<std::uint64_t>(),
+                .sim_events = j.at("sim_events").get<std::uint64_t>(),
+                .pnl = j.at("pnl").get<std::int64_t>(),
+                .realised = j.at("realised").get<std::int64_t>(),
+                .unrealised = j.at("unrealised").get<std::int64_t>(),
+                .fees = j.at("fees").get<std::int64_t>(),
+                .position = j.at("position").get<std::int64_t>(),
+                .max_abs_position = j.at("max_abs_position").get<std::int64_t>(),
+                .max_drawdown = j.at("max_drawdown").get<std::int64_t>(),
+                .maker_fills = j.at("maker_fills").get<std::uint64_t>(),
+                .taker_fills = j.at("taker_fills").get<std::uint64_t>(),
+                .filled_shares = j.at("filled_shares").get<std::uint64_t>(),
+                .fill_rate = j.at("fill_rate").get<double>(),
+                .fills_by = j.at("attribution").at("fills").get<FillAttribution>(),
+                .anomalies_by = j.at("attribution").at("anomalies").get<FillAttribution>(),
+                .truncated = j.at("fill_list").at("truncated").get<bool>()};
+    if (!r.partial) {
+        r.digests = digests_from(j.at("digests"));
+    }
+    const json& equity = j.at("equity");
+    for (std::size_t i = 0; i < equity.at("t").size(); ++i) {
+        r.equity.push_back({.second = equity.at("t").at(i).get<std::int64_t>(),
+                            .pnl = equity.at("pnl").at(i).get<std::int64_t>(),
+                            .position = equity.at("position").at(i).get<std::int64_t>()});
+    }
+    const json& by_hour = j.at("by_hour");
+    for (std::size_t i = 0; i < by_hour.at("hour").size(); ++i) {
+        r.by_hour[by_hour.at("hour").at(i).get<int>()] = by_hour.at("pnl").at(i).get<std::int64_t>();
+    }
+    for (const json& day : j.at("by_day")) {
+        r.by_day.push_back({.date = date_from(day.at("date")),
+                            .pnl = day.at("pnl").get<std::int64_t>(),
+                            .fills = day.at("fills").get<std::uint64_t>()});
+    }
+    for (const json& row : j.at("fill_list").at("rows")) {
+        r.fills.push_back({.exchange_ts = row.at(0).get<Timestamp>(),
+                           .order_id = row.at(1).get<OrderId>(),
+                           .side = name_from<Side>(row.at(2)),
+                           .price = Price{row.at(3).get<std::int64_t>()},
+                           .quantity = Quantity{row.at(4).get<std::uint64_t>()},
+                           .liquidity = name_from<Liquidity>(row.at(5)),
+                           .rule = name_from<FillCause>(row.at(6)),
+                           .ahead_at_entry = row.at(7).get<std::uint64_t>(),
+                           .position = row.at(8).get<std::int64_t>()});
+    }
+    return r;
+}
+
+// Spec §5.5: true once a verification on the same code and inputs has run and every such one matched; null before.
+json reproduced(const Run& run)
+{
+    json verdict = nullptr;
+    for (const Verification& v : run.verifications) {
+        if (v.outcome == Outcome::Reproduced || v.outcome == Outcome::Mismatch) {
+            verdict = (verdict.is_null() || verdict.get<bool>()) && v.outcome == Outcome::Reproduced;
+        }
+    }
+    return verdict;
+}
+
+// A run, with its results or, for a listing, without them.
+json run_json(const Run& run, bool with_results)
+{
+    const Provenance& p = run.provenance;
+    json days = json::array();
+    for (const RunDay& day : p.days) {
+        days.push_back({{"date", iso_date(day.date)},
+                        {"file", day.file},
+                        {"size", day.size},
+                        {"hash", day.hash},
+                        {"session", day.session}});
+    }
+    json verifications = json::array();
+    for (const Verification& v : run.verifications) {
+        json changed = json::array();
+        for (const std::chrono::year_month_day date : v.changed) {
+            changed.push_back(iso_date(date));
+        }
+        verifications.push_back({{"finished", v.finished},
+                                 {"outcome", v.outcome},
+                                 {"digests", v.digests ? digests_json(*v.digests) : json(nullptr)},
+                                 {"source_digest", v.source_digest},
+                                 {"changed", changed}});
+    }
+    json j = {{"format", 1},
+              {"id", run.id},
+              {"state", run.state},
+              {"reason", run.reason},
+              {"warning", run.warning},
+              {"spec", spec_json(run.spec)},
+              {"provenance",
+               {{"build",
+                 {{"commit", p.build.commit},
+                  {"dirty", p.build.dirty},
+                  {"source_digest", p.build.source_digest},
+                  {"compiler", p.build.compiler},
+                  {"build_type", p.build.build_type},
+                  {"sanitize", p.build.sanitize},
+                  {"platform", p.build.platform}}},
+                {"engine",
+                 {{"book_capacity", p.book_capacity},
+                  {"price_scale", p.price_scale},
+                  {"quantity_scale", p.quantity_scale},
+                  {"check_invariants_every", p.check_invariants_every}}},
+                {"allow_truncated_tail", p.allow_truncated_tail},
+                {"days", days},
+                {"host", p.host},
+                {"submitted", p.submitted},
+                {"started", p.started},
+                {"finished", p.finished},
+                {"wall_ms", p.wall_ms},
+                {"cpu_ms", p.cpu_ms}}},
+              {"verifying", run.verifying ? json(*run.verifying) : json(nullptr)},
+              {"verifications", verifications},
+              {"reproduced", reproduced(run)}};
+    if (with_results) {
+        j["results"] = run.results ? results_json(*run.results) : json(nullptr);
+    }
+    return j;
 }
 
 template <class T, class F>
@@ -553,6 +936,134 @@ std::string encode_history(std::string_view session_id, std::uint64_t generation
                  {"generation", generation},
                  {"candles", array_of(candles, candle_json)},
                  {"trades", array_of(trades, trade_json)}});
+}
+
+bool decode_run_spec(std::string_view text, RunSpec& spec, std::string& field)
+{
+    field.clear();
+    const json j = json::parse(text, nullptr, false);
+    return j.is_object() && spec_from(j, spec, field);
+}
+
+std::string encode_strategies()
+{
+    const auto param = [](const char* name, const json& value, const json& min, const json& max) {
+        return json{{"name", name}, {"default", value}, {"min", min}, {"max", max}};
+    };
+    const RunSpec mm = default_spec(SessionStrategyKind::MarketMaker);
+    const RunSpec it = default_spec(SessionStrategyKind::ImbalanceTaker);
+    const MarketMakerParams& m = mm.strategy.market_maker;
+    const ImbalanceTakerParams& i = it.strategy.imbalance;
+    const json strategies =
+        json::array({{{"kind", SessionStrategyKind::MarketMaker},
+                      {"params",
+                       json::array({param("quote_size", m.quote_size, 1, max_param),
+                                    param("max_position", m.max_position, 0, max_param),
+                                    param("requote_cooldown_ns", m.requote_cooldown_ns, 0, max_cooldown_ns),
+                                    param("improve_ticks", m.improve_ticks, 0, max_param)})},
+                      {"limits", limits_json(mm)}},
+                     {{"kind", SessionStrategyKind::ImbalanceTaker},
+                      {"params",
+                       json::array({param("threshold", i.threshold, 1, nullptr), param("clip", i.clip, 1, max_param),
+                                    param("max_position", i.max_position, 0, max_param),
+                                    param("cooldown_ns", i.cooldown_ns, 0, max_cooldown_ns)})},
+                      {"limits", limits_json(it)}}});
+    return text(
+        {{"strategies", strategies},
+         {"latency",
+          {{"order_ns", mm.latency.order_latency}, {"report_ns", mm.latency.report_latency}, {"max", max_latency_ns}}},
+         {"fees", {{"maker", 0}, {"taker", 0}, {"min", -max_fee}, {"max", max_fee}, {"taker_min", 0}}},
+         {"limit_max", max_param},
+         {"windows",
+          json::array({{{"id", TradingWindow::Regular}, {"label", "Regular (feed session)"}},
+                       {{"id", TradingWindow::FullDay}, {"label", "Full day"}}})},
+         {"max_days", max_days},
+         {"max_queued", max_queued}});
+}
+
+std::string encode_run(const Run& run)
+{
+    return text(run_json(run, true));
+}
+
+bool decode_run(std::string_view text, Run& run)
+{
+    const json j = json::parse(text, nullptr, false);
+    Run r;
+    std::string field;
+    try {
+        if (!j.is_object() || j.at("format") != 1 || !spec_from(j.at("spec"), r.spec, field)) {
+            return false;
+        }
+        r.id = j.at("id").get<std::string>();
+        r.state = name_from<RunState>(j.at("state"));
+        r.reason = j.at("reason").get<std::string>();
+        r.warning = j.at("warning").get<std::string>();
+        const json& p = j.at("provenance");
+        const json& build = p.at("build");
+        const json& engine = p.at("engine");
+        r.provenance = {.build = {.commit = build.at("commit").get<std::string>(),
+                                  .dirty = build.at("dirty").get<bool>(),
+                                  .source_digest = build.at("source_digest").get<std::string>(),
+                                  .compiler = build.at("compiler").get<std::string>(),
+                                  .build_type = build.at("build_type").get<std::string>(),
+                                  .sanitize = build.at("sanitize").get<std::string>(),
+                                  .platform = build.at("platform").get<std::string>()},
+                        .book_capacity = engine.at("book_capacity").get<std::size_t>(),
+                        .price_scale = engine.at("price_scale").get<std::uint8_t>(),
+                        .quantity_scale = engine.at("quantity_scale").get<std::uint8_t>(),
+                        .check_invariants_every = engine.at("check_invariants_every").get<std::uint64_t>(),
+                        .allow_truncated_tail = p.at("allow_truncated_tail").get<bool>(),
+                        .host = p.at("host").get<std::string>(),
+                        .submitted = p.at("submitted").get<std::string>(),
+                        .started = p.at("started").get<std::string>(),
+                        .finished = p.at("finished").get<std::string>(),
+                        .wall_ms = p.at("wall_ms").get<std::int64_t>(),
+                        .cpu_ms = p.at("cpu_ms").get<std::int64_t>()};
+        for (const json& day : p.at("days")) {
+            r.provenance.days.push_back({.date = date_from(day.at("date")),
+                                         .file = day.at("file").get<std::string>(),
+                                         .size = day.at("size").get<std::uint64_t>(),
+                                         .hash = day.at("hash").get<std::string>(),
+                                         .session = day.at("session").get<FeedSession>()});
+        }
+        if (!j.at("results").is_null()) {
+            r.results = std::make_shared<const RunResult>(results_from(j.at("results")));
+        }
+        for (const json& v : j.at("verifications")) {
+            Verification& verification =
+                r.verifications.emplace_back(Verification{.finished = v.at("finished").get<std::string>(),
+                                                          .outcome = name_from<Outcome>(v.at("outcome")),
+                                                          .source_digest = v.at("source_digest").get<std::string>()});
+            if (!v.at("digests").is_null()) {
+                verification.digests = digests_from(v.at("digests"));
+            }
+            for (const json& date : v.at("changed")) {
+                verification.changed.push_back(date_from(date));
+            }
+        }
+    } catch (const std::exception&) {  // nlohmann's, or a name, date or digest that does not parse
+        return false;
+    }
+    if (r.state == RunState::Queued || r.state == RunState::Running) {
+        return false;
+    }
+    run = std::move(r);
+    return true;
+}
+
+std::string encode_runs(std::span<const Run> runs, std::size_t queued)
+{
+    json list = json::array();
+    for (const Run& run : runs) {
+        json entry = run_json(run, false);
+        entry["progress"] = run.progress;
+        entry["partial"] = run.results != nullptr && run.results->partial;
+        entry["pnl"] = run.results ? json(run.results->pnl) : json(nullptr);
+        entry["fills"] = run.results ? json(run.results->maker_fills + run.results->taker_fills) : json(nullptr);
+        list.push_back(std::move(entry));
+    }
+    return text({{"runs", list}, {"queued", queued}, {"max_queued", max_queued}});
 }
 
 }  // namespace simulator::server
