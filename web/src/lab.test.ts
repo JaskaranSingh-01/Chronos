@@ -1,15 +1,20 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   actions,
+  align,
+  cards,
   createLab,
   defaults,
+  drawdown,
   fromSpec,
   page,
   refusalText,
+  timeOfRun,
   toBody,
   type Form,
   type Run,
   type RunListing,
+  type Results,
   type RunSpecBody,
   type Strategies,
   type Verification,
@@ -190,6 +195,45 @@ describe('the run form', () => {
   it('allows Cancel only while a run is queued or running', () => {
     const states = ['queued', 'running', 'completed', 'failed', 'cancelled'] as const;
     expect(states.map((state) => actions(listed('a', { state })).cancel)).toEqual([true, true, false, false, false]);
+  });
+});
+
+describe('results', () => {
+  it('shows the stat cards: PnL and fees signed and coloured, money in dollars, the fill rate in percent', () => {
+    const r = {
+      pnl: -2_004_400,
+      fills: 12_843,
+      fill_rate: 0.1974,
+      max_drawdown: 5_155_600,
+      fees: -21_117_100,
+      max_abs_position: 500,
+    } as Results;
+    expect(cards(r, 4)).toEqual([
+      ['Total PnL', '-$200.44', 'sell'],
+      ['Fills', '12,843', ''],
+      ['Fill rate', '19.7%', ''],
+      ['Max drawdown', '$515.56', ''],
+      ['Fees / rebates', '+$2,111.71', 'buy'],
+      ['Max |position|', '500', ''],
+    ]);
+  });
+
+  it('draws the drawdown as the peak so far, from 0, minus the PnL', () => {
+    expect(drawdown([-5, 10, 4, 12, 12, 7])).toEqual([5, 0, 6, 0, 0, 5]);
+  });
+
+  it('lines samples up by day index and New York time of day, across a daylight-saving change, and labels them', () => {
+    const at = (iso: string) => Date.parse(iso) / 1_000;
+    expect(align([at('2019-12-27T14:30:01Z'), at('2019-12-30T14:30:02Z')], ['2019-12-27', '2019-12-30'])).toEqual([
+      34_201,
+      86_400 + 34_202,
+    ]);
+    // Friday in standard time, Monday in daylight time: 09:30 either way.
+    expect(align([at('2019-03-08T14:30:00Z'), at('2019-03-11T13:30:00Z')], ['2019-03-08', '2019-03-11'])).toEqual([
+      34_200,
+      86_400 + 34_200,
+    ]);
+    expect([timeOfRun(34_201, 1), timeOfRun(86_400 + 57_599, 2)]).toEqual(['09:30:01', 'day 2 15:59:59']);
   });
 });
 

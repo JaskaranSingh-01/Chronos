@@ -1,5 +1,5 @@
 import { useSyncExternalStore } from 'react';
-import { px } from './format';
+import { dayTs, money, px, signed, tone } from './format';
 import { signedTicks } from './order';
 import type { Day, Digests, FillRule, Outcome, Spec } from './protocol';
 import { tokenKey, type Env } from './store';
@@ -246,6 +246,51 @@ export function refusalText(r: LabError, symbol: string): string {
   if (r.error === 'queue_full') return 'Refused: the queue is full';
   if (r.error === 'unreachable') return 'chronos-serve does not answer';
   return `Refused: ${r.error}`;
+}
+
+const counts = new Intl.NumberFormat('en-US');
+
+// The stats of a run's results, each with how it reads: signed money for a PnL, money, a count, or a percentage.
+const stats: [name: string, of: (r: Results) => number, kind: 'pnl' | 'money' | 'count' | 'percent'][] = [
+  ['Total PnL', (r) => r.pnl, 'pnl'],
+  ['Fills', (r) => r.fills, 'count'],
+  ['Fill rate', (r) => r.fill_rate * 100, 'percent'],
+  ['Max drawdown', (r) => r.max_drawdown, 'money'],
+  ['Fees / rebates', (r) => -r.fees, 'pnl'],
+  ['Max |position|', (r) => r.max_abs_position, 'count'],
+];
+
+// A run's stat cards as [name, value, tone], money at `digits` decimals.
+export const cards = (r: Results, digits: number) =>
+  stats.map(([name, of, kind]): [string, string, string] => {
+    const n = of(r);
+    if (kind === 'pnl') return [name, signed(n, digits), tone(n)];
+    if (kind === 'money') return [name, money(n, digits), ''];
+    return [name, kind === 'count' ? counts.format(n) : `${n.toFixed(1)}%`, ''];
+  });
+
+// Peak-to-date minus PnL at each sample; the peak starts at 0, as the Portfolio's does.
+export function drawdown(pnl: number[]): number[] {
+  let peak = 0;
+  return pnl.map((p) => (peak = Math.max(peak, p)) - p);
+}
+
+// Sample times (epoch seconds) as day index x 86,400 plus the New York second of the day, so that runs over the same
+// days line up exactly, and others by day and time of day.
+export function align(t: number[], days: string[]): number[] {
+  const midnights = days.map((day) => dayTs(day, '00:00') / 1e9);
+  let day = 0;
+  return t.map((s) => {
+    while (day + 1 < midnights.length && s >= midnights[day + 1]) day++;
+    return day * 86_400 + s - midnights[day];
+  });
+}
+
+// An aligned time as the chart shows it: New York time, after the day's number when the runs span days.
+export function timeOfRun(t: number, days: number): string {
+  const s = t % 86_400;
+  const hms = [s / 3_600, (s / 60) % 60, s % 60].map((n) => String(Math.floor(n)).padStart(2, '0')).join(':');
+  return days > 1 ? `day ${Math.floor(t / 86_400) + 1} ${hms}` : hms;
 }
 
 // What a listed run allows.

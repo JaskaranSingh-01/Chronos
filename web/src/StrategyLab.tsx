@@ -16,6 +16,7 @@ import {
   type StrategyKind,
   type Window,
 } from './lab';
+import { RunResults } from './LabResults';
 import { useStore } from './store';
 import { DayPicker, Switch, Symbols } from './TopBar';
 
@@ -234,7 +235,9 @@ export function StrategyLab() {
         <section className="col">
           {form && <RunForm key={copies} form={form} setForm={setForm} digits={digits} />}
         </section>
-        <section className="col" />
+        <section className="col">
+          <RunResults />
+        </section>
         <section className="col">
           <Runs
             edit={(r) => {
