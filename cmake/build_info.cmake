@@ -1,9 +1,11 @@
-# cmake -DSOURCE_DIR=... -DOUTPUT=... -DBUILD_TYPE=... -P build_info.cmake
+# cmake -DSOURCE_DIR=... -DOUTPUT=... -DBUILD_TYPE=... [-DCOMPILER=... -DSANITIZE=...
+#       -DPLATFORM=...] -P build_info.cmake
 #
 # Writes OUTPUT, a header with the commit SOURCE_DIR is at, whether tracked
-# files differ from it (untracked files, e.g. bench results, do not count), and
-# the source digest. Runs on every build; file(CONFIGURE) rewrites OUTPUT only
-# when it changes.
+# files differ from it (untracked files, e.g. bench results, do not count), the
+# source digest, and the build type, compiler, sanitizers and platform it is
+# given. Runs on every build; file(CONFIGURE) rewrites OUTPUT only when it
+# changes.
 
 execute_process(COMMAND git -C "${SOURCE_DIR}" rev-parse HEAD
     OUTPUT_VARIABLE commit OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET RESULT_VARIABLE failed)
@@ -46,4 +48,7 @@ inline constexpr const char* build_commit = "@commit@";
 inline constexpr bool build_dirty = @dirty@;
 inline constexpr const char* build_type = "@BUILD_TYPE@";
 inline constexpr const char* build_source_digest = "@source_digest@";
+inline constexpr const char* build_compiler = "@COMPILER@";
+inline constexpr const char* build_sanitize = "@SANITIZE@";
+inline constexpr const char* build_platform = "@PLATFORM@";
 ]])

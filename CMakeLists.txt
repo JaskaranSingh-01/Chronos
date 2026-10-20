@@ -91,11 +91,15 @@ if(NOT CHRONOS_COUNT_ALLOCATIONS)
 endif()
 
 # generated/build_info.hpp: the commit, dirty flag and build type for
-# `replay --json`. Checked on every build, rewritten only when it changes.
+# `replay --json`, and a Lab run's provenance. Checked on every build,
+# rewritten only when it changes.
 add_custom_target(build_info
     COMMAND ${CMAKE_COMMAND} -DSOURCE_DIR=${PROJECT_SOURCE_DIR}
             -DOUTPUT=${PROJECT_BINARY_DIR}/generated/build_info.hpp
             -DBUILD_TYPE=${CMAKE_BUILD_TYPE}
+            "-DCOMPILER=${CMAKE_CXX_COMPILER_ID} ${CMAKE_CXX_COMPILER_VERSION}"
+            -DSANITIZE=${CHRONOS_SANITIZE}
+            "-DPLATFORM=${CMAKE_SYSTEM_NAME} ${CMAKE_SYSTEM_PROCESSOR}"
             -P ${PROJECT_SOURCE_DIR}/cmake/build_info.cmake
     BYPRODUCTS ${PROJECT_BINARY_DIR}/generated/build_info.hpp
     VERBATIM
@@ -376,6 +380,11 @@ endfunction()
 
 chronos_serve_message_test(NoStockDirectoryExitsTwo ": no stock directory")
 chronos_serve_message_test(DateWithoutADayFileExitsTwo "no day file for 2019-12-27" --date 2019-12-27)
+
+# Review gate 2: build_info.cmake's source digest tells two trees at one commit apart (needs git).
+add_test(NAME BuildInfoTest.DirtyTreesAtOneCommitGetTheirOwnSourceDigest
+         COMMAND ${CMAKE_COMMAND} -DBUILD_INFO=${PROJECT_SOURCE_DIR}/cmake/build_info.cmake
+                 -DWORK=${PROJECT_BINARY_DIR}/build-info-test -P ${PROJECT_SOURCE_DIR}/tests/build_info_test.cmake)
 
 
 # -------------------------
