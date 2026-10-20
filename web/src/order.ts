@@ -7,13 +7,19 @@ export interface Ticket {
   qty: string;
 }
 
-// A dollar price as ticks at `digits` decimals ('10.' and '.5' read as 10 and 0.5); NaN unless it is a positive safe
-// integer of ticks with at most that many decimals, trailing zeros included.
+// A dollar amount as ticks at `digits` decimals ('10.' and '.5' read as 10 and 0.5, '-0.002' as -20 at 4); NaN unless
+// it is a safe integer of ticks with at most that many decimals, trailing zeros included.
+export function signedTicks(text: string, digits: number): number {
+  const m = /^(-?)(\d*)(?:\.(\d*))?$/.exec(text.trim());
+  if (!m || !/\d/.test(text) || (m[3] ?? '').length > digits) return NaN;
+  const ticks = Number(m[2]) * 10 ** digits + Number((m[3] ?? '').padEnd(digits, '0'));
+  return Number.isSafeInteger(ticks) ? (m[1] ? -ticks : ticks) : NaN;
+}
+
+// A dollar price as ticks: signedTicks, and positive.
 export function parseTicks(text: string, digits: number): number {
-  const m = /^(\d*)(?:\.(\d*))?$/.exec(text.trim());
-  if (!m || (m[2] ?? '').length > digits) return NaN;
-  const ticks = Number(m[1]) * 10 ** digits + Number((m[2] ?? '').padEnd(digits, '0'));
-  return Number.isSafeInteger(ticks) && ticks > 0 ? ticks : NaN;
+  const ticks = signedTicks(text, digits);
+  return ticks > 0 ? ticks : NaN;
 }
 
 // The order the ticket describes, or why it would be refused; the server checks again, in Portfolio::reserve's order.

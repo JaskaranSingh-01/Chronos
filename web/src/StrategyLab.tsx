@@ -1,6 +1,175 @@
+import { useEffect, useState } from 'react';
 import { signed } from './format';
-import { lab, moneyDigits, strategyNames, useLab, type RunListing } from './lab';
-import { Switch } from './TopBar';
+import {
+  actions,
+  defaults,
+  fromSpec,
+  lab,
+  moneyDigits,
+  refusalText,
+  strategyNames,
+  toBody,
+  useLab,
+  windowLabels,
+  type Form,
+  type RunListing,
+  type StrategyKind,
+  type Window,
+} from './lab';
+import { useStore } from './store';
+import { DayPicker, Switch, Symbols } from './TopBar';
+
+const none = { field: '', text: '' };
+
+// The run form: defaults and caps from /api/strategies, fees in dollars; a field past its cap, or one chronos-serve
+// refused, is marked.
+function RunForm({ form, setForm, digits }: { form: Form; setForm(f: Form): void; digits: number }) {
+  const strategies = useLab((l) => l.strategies)!;
+  const days = useLab((l) => l.days);
+  const symbols = useLab((l) => l.symbols);
+  const [refusal, setRefusal] = useState(none); // why the last Run was refused, until an edit
+  const picked = form.days.join(',');
+  useEffect(() => {
+    if (picked) void lab.loadSymbols(picked.split(','));
+  }, [picked]);
+  const kind = strategies.strategies.find((k) => k.kind === form.strategy)!;
+  const edit = (f: Form) => {
+    setRefusal(none);
+    setForm(f);
+  };
+  const field = (name: string, label: string, value: string, change: (value: string) => void, placeholder = '') => (
+    <label className="kv" key={name}>
+      {label}
+      <input
+        aria-label={name}
+        aria-invalid={refusal.field === name}
+        value={value}
+        placeholder={placeholder}
+        onChange={(e) => change(e.target.value)}
+      />
+    </label>
+  );
+  return (
+    <form
+      className="panel form"
+      onSubmit={async (e) => {
+        e.preventDefault();
+        const body = toBody(form, strategies, digits);
+        if (typeof body === 'string') return setRefusal({ field: body, text: `Check ${body}` });
+        const r = await lab.submit(body);
+        const named = r?.field ?? (r?.error === 'symbol_missing' ? 'symbol' : '');
+        setRefusal(r ? { field: named, text: refusalText(r, body.symbol) } : none);
+      }}
+    >
+      <div className="title">New run</div>
+      <label className="kv">
+        Strategy
+        <select
+          aria-label="strategy"
+          value={form.strategy}
+          onChange={(e) =>
+            edit({ ...defaults(strategies, e.target.value as StrategyKind, digits, form.days), symbol: form.symbol })
+          }
+        >
+          {strategies.strategies.map((k) => (
+            <option key={k.kind} value={k.kind}>
+              {strategyNames[k.kind]}
+            </option>
+          ))}
+        </select>
+      </label>
+      <label className="kv">
+        Symbol
+        <input
+          aria-label="symbol"
+          aria-invalid={refusal.field === 'symbol'}
+          list="lab-symbols"
+          value={form.symbol}
+          onChange={(e) => edit({ ...form, symbol: e.target.value })}
+        />
+      </label>
+      <Symbols id="lab-symbols" symbols={symbols} />
+      <div className={`kv${refusal.field.startsWith('days') ? ' bad' : ''}`}>
+        Days
+        <DayPicker
+          days={days}
+          load={lab.loadDays}
+          picked={form.days}
+          pick={(d) => edit({ ...form, days: d })}
+          disabled={false}
+        />
+      </div>
+      <label className="kv">
+        Window
+        <select
+          aria-label="window"
+          value={form.window}
+          onChange={(e) => edit({ ...form, window: e.target.value as Window })}
+        >
+          {Object.entries(windowLabels).map(([id, label]) => (
+            <option key={id} value={id}>
+              {label}
+            </option>
+          ))}
+        </select>
+      </label>
+      <div className="title">Parameters</div>
+      {kind.params.map((p) =>
+        field(`params.${p.name}`, p.name.replaceAll('_', ' '), form.params[p.name] ?? '', (v) =>
+          edit({ ...form, params: { ...form.params, [p.name]: v } }),
+        ),
+      )}
+      <div className="title">Execution</div>
+      {field('latency.order_ns', 'order latency ns', form.latency.order_ns, (order_ns) =>
+        edit({ ...form, latency: { ...form.latency, order_ns } }),
+      )}
+      {field('latency.report_ns', 'report latency ns', form.latency.report_ns, (report_ns) =>
+        edit({ ...form, latency: { ...form.latency, report_ns } }),
+      )}
+      {field('fees.maker', 'maker fee $ a share', form.fees.maker, (maker) =>
+        edit({ ...form, fees: { ...form.fees, maker } }),
+      )}
+      {field('fees.taker', 'taker fee $ a share', form.fees.taker, (taker) =>
+        edit({ ...form, fees: { ...form.fees, taker } }),
+      )}
+      <div className="title">Limits · empty follows the params</div>
+      {(['max_position', 'max_order_quantity', 'max_open_orders'] as const).map((name) =>
+        field(
+          `limits.${name}`,
+          name.replaceAll('_', ' '),
+          form.limits[name],
+          (v) => edit({ ...form, limits: { ...form.limits, [name]: v } }),
+          String(kind.limits[name]),
+        ),
+      )}
+      <button className="place run">▶ Run backtest</button>
+      <div className="sell">{refusal.text}</div>
+    </form>
+  );
+}
+
+// What the run shown allows: its settings as a new run, Cancel while it is queued or running, and Delete, confirmed
+// here rather than by a dialog.
+function RunActions({ run, n, edit }: { run: RunListing; n: number; edit(): void }) {
+  const [confirming, setConfirming] = useState(false);
+  return (
+    <div className="actions">
+      <span className="muted">#{n}</span>
+      <button onClick={edit}>Edit as new</button>
+      {actions(run).cancel && <button onClick={() => void lab.cancel(run.id)}>Cancel run</button>}
+      {confirming ? (
+        <>
+          <button className="sell" onClick={() => void lab.remove(run.id)}>
+            Confirm delete
+          </button>
+          <button onClick={() => setConfirming(false)}>Keep</button>
+        </>
+      ) : (
+        <button onClick={() => setConfirming(true)}>Delete</button>
+      )}
+    </div>
+  );
+}
 
 // A listed run's state while it is queued or running or ended without results, else its PnL.
 function result(r: RunListing): string {
@@ -10,9 +179,10 @@ function result(r: RunListing): string {
 }
 
 // Every run, newest first, numbered in the order they were queued; a click shows one.
-function Runs() {
+function Runs({ edit }: { edit(r: RunListing): void }) {
   const runs = useLab((l) => l.runs);
   const selected = useLab((l) => l.selected);
+  const shown = runs.findIndex((r) => r.id === selected);
   return (
     <div className="panel runs">
       <div className="title">Runs</div>
@@ -38,6 +208,7 @@ function Runs() {
             .reverse()}
         </tbody>
       </table>
+      {shown >= 0 && <RunActions key={selected} run={runs[shown]} n={shown + 1} edit={() => edit(runs[shown])} />}
     </div>
   );
 }
@@ -45,17 +216,32 @@ function Runs() {
 // The Strategy Lab: a run's settings on the left, its results in the middle, the runs on the right.
 export function StrategyLab() {
   const offline = useLab((l) => l.offline);
+  const notice = useLab((l) => l.notice);
+  const strategies = useLab((l) => l.strategies);
+  const start = useLab((l) => l.start);
+  const digits = useStore((s) => s.hello?.price_scale ?? 4); // ITCH 5.0's, before hello
+  const [typed, setForm] = useState<Form | null>(null);
+  const [copies, setCopies] = useState(0); // each Edit as new starts the form afresh, without the last refusal
+  // The defaults over the starting day until the form is edited.
+  const form = typed ?? (strategies && start ? defaults(strategies, 'market_maker', digits, [start]) : null);
   return (
     <>
       <header className="bar">
         <Switch lab />
-        <span className="notice">{offline ? 'chronos-serve does not answer: retrying' : ''}</span>
+        <span className="notice">{offline ? 'chronos-serve does not answer: retrying' : notice}</span>
       </header>
       <main className="lab">
-        <section className="col" />
+        <section className="col">
+          {form && <RunForm key={copies} form={form} setForm={setForm} digits={digits} />}
+        </section>
         <section className="col" />
         <section className="col">
-          <Runs />
+          <Runs
+            edit={(r) => {
+              setForm(fromSpec(r.spec, digits));
+              setCopies(copies + 1);
+            }}
+          />
         </section>
       </main>
     </>

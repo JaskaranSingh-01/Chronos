@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { cost, parseTicks, validate, type Ticket } from './order';
+import { cost, parseTicks, signedTicks, validate, type Ticket } from './order';
 import type { Hello, MyOrder } from './protocol';
 
 const hello: Hello = {
@@ -57,6 +57,15 @@ describe('parseTicks', () => {
     for (const bad of ['10.5', '10.0', '0']) expect(parseTicks(bad, 0)).toBeNaN();
     expect(parseTicks('0.01', 2)).toBe(1);
     expect(parseTicks('10.011', 2)).toBeNaN();
+  });
+});
+
+describe('signedTicks', () => {
+  it('reads a dollar amount of either sign exactly, for fees, and refuses one finer than a tick', () => {
+    expect([signedTicks('-0.002', 4), signedTicks('0.003', 4), signedTicks('0', 4), signedTicks('.5', 4)]).toEqual([
+      -20, 30, 0, 5_000,
+    ]);
+    for (const bad of ['', '-', '.', '0.00001', '+1', '1e3', '--1']) expect(signedTicks(bad, 4)).toBeNaN();
   });
 });
 

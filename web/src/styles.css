@@ -88,6 +88,13 @@ main.lab { grid-template-columns: 0.95fr 2.6fr 1.05fr; }
 .kv { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-top: 4px; }
 .tabs { height: 150px; overflow: auto; }
 .runs { flex: 1; overflow: auto; }
+.form { flex: 1; overflow: auto; }
+.form .kv input { width: 10em; text-align: right; }
+.form .kv select { width: 13em; }
+.form .title { margin-top: 8px; }
+[aria-invalid='true'], .bad summary { outline: 1px solid var(--sell); }
+.place.run { background: #1f6feb; color: #fff; }
+.actions { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-top: 8px; }
 .runs tr:not(.muted) { cursor: pointer; }
 tr.on { background: #1f6feb22; }
 table { width: 100%; border-collapse: collapse; }

@@ -353,9 +353,9 @@ session can be reproduced. The first line on stdout names the URL and that log; 
   terminal asks for it once per browser tab.
 
 **Developing the UI.** Vite serves `web/src` with hot reload. It proxies `/api` and `/ws` to `chronos-serve` and
-rewrites `Host` to `127.0.0.1:<port>`, and the WebSocket's `Origin` too when the page itself is on `localhost` or
-`127.0.0.1`: without a token, that is all `chronos-serve` accepts. Any other site's `Origin` goes through unchanged and
-is refused.
+rewrites `Host` to `127.0.0.1:<port>`, and the `Origin` of the WebSocket and of the Lab's POSTs and DELETEs too when the
+page itself is on `localhost` or `127.0.0.1`: without a token, that is all `chronos-serve` accepts. Any other site's
+`Origin` goes through unchanged and is refused.
 
 ```bash
 ./build/chronos-serve --data data/itch --date 2019-12-30 --port 8080

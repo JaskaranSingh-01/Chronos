@@ -1,5 +1,6 @@
 import { memo, useEffect, useRef, useState } from 'react';
 import { dateOf, dayLabel, dayTs, signed, stamp } from './format';
+import type { Day } from './protocol';
 import { selectFirstRun, store, useStore } from './store';
 
 const speeds: [number, string][] = [
@@ -9,11 +10,10 @@ const speeds: [number, string][] = [
   [0, 'Max'],
 ];
 
-// The day's symbols, apart from TopBar: a snapshot re-renders the bar, and these are thousands of options.
-const Symbols = memo(function Symbols() {
-  const symbols = useStore((s) => s.symbols);
+// The day's symbols, memoised: a snapshot re-renders the bar, and these are thousands of options.
+export const Symbols = memo(function Symbols({ id, symbols }: { id: string; symbols: string[] }) {
   return (
-    <datalist id="symbols">
+    <datalist id={id}>
       {symbols.map((s) => (
         <option key={s} value={s} />
       ))}
@@ -35,11 +35,22 @@ export function Switch({ lab }: { lab: boolean }) {
   );
 }
 
-// The days a load replays, found again each time the list opens; a day that is not ITCH 5.0 cannot be ticked.
-function DayPicker({ picked, pick, disabled }: { picked: string[]; pick(days: string[]): void; disabled: boolean }) {
-  const days = useStore((s) => s.days);
+// The days a load or a run replays, found again each time the list opens; a day not ITCH 5.0 cannot be ticked.
+export function DayPicker({
+  days,
+  load,
+  picked,
+  pick,
+  disabled,
+}: {
+  days: Day[];
+  load(): Promise<void>;
+  picked: string[];
+  pick(days: string[]): void;
+  disabled: boolean;
+}) {
   return (
-    <details className="days" onToggle={(e) => e.currentTarget.open && void store.loadDays()}>
+    <details className="days" onToggle={(e) => e.currentTarget.open && void load()}>
       <summary>{picked.length > 1 ? `${picked.length} days` : (picked[0] ?? 'Days')}</summary>
       <div>
         {days.map((day) => (
@@ -71,6 +82,8 @@ export function TopBar() {
   const seekAt = useStore((s) => s.seekAt);
   const notice = useStore((s) => s.notice);
   const genDays = useStore((s) => s.genDays);
+  const symbols = useStore((s) => s.symbols);
+  const days = useStore((s) => s.days);
   const fresh = useStore(selectFirstRun);
   const [typed, setTyped] = useState('');
   const [picked, setPicked] = useState<string[]>([]);
@@ -105,7 +118,6 @@ export function TopBar() {
           // The server takes a directory entry exactly: send the entry itself, found whatever the case typed.
           const name = typed.trim();
           if (!name) return;
-          const { symbols } = store.get();
           const entry = symbols.find((s) => s === name) ?? symbols.find((s) => s.toUpperCase() === name.toUpperCase());
           if (entry === undefined)
             store.notify(picked.length > 1 ? `${name} is not listed on every day picked` : `unknown symbol ${name}`);
@@ -125,8 +137,8 @@ export function TopBar() {
           disabled={viewer}
           onChange={(e) => setTyped(e.target.value)}
         />
-        <Symbols />
-        <DayPicker picked={picked} pick={setPicked} disabled={viewer} />
+        <Symbols id="symbols" symbols={symbols} />
+        <DayPicker days={days} load={store.loadDays} picked={picked} pick={setPicked} disabled={viewer} />
         <button disabled={viewer || !typed.trim()}>Load</button>
       </form>
       <button disabled={idle} onClick={() => store.control({ action: 'restart' })}>
