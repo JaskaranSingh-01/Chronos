@@ -1,0 +1,168 @@
+import { test as base, expect, type Page } from '@playwright/test';
+import { readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { fixture, serve } from './serve';
+
+// Each test gets its own chronos-serve on the Lab's fixture days. On both, ACME gives the default market maker $1 a
+// cycle, buying by rule (a) and selling by rule (c): two cycles on 2019-12-27 and three on 2019-12-30, whose stock
+// directory alone lists ZETA.
+const test = base.extend<{ data: string; url: string }>({
+  data: async ({}, use) => {
+    const dir = fixture(true);
+    try {
+      await use(dir);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  },
+  url: async ({ data }, use) => {
+    const server = await serve(['--data', data]);
+    try {
+      await use(server.url);
+    } finally {
+      await server.stop();
+    }
+  },
+});
+
+// Queues the default market maker on ACME over the starting day, 2019-12-30, and `also`, its form edited by `edit`.
+async function runAcme(page: Page, also: string[] = [], edit = async () => {}) {
+  await page.getByLabel('symbol', { exact: true }).fill('ACME');
+  if (also.length > 0) {
+    await page.locator('.form .days summary').click();
+    for (const day of also) await page.getByLabel(day).check();
+    await page.locator('.form .days summary').click();
+  }
+  await edit();
+  await page.getByRole('button', { name: '▶ Run backtest' }).click();
+}
+
+const card = (page: Page, name: string) => page.locator('.card', { hasText: name }).locator('b');
+const rows = (page: Page) => page.locator('.lab-tabs tbody tr:not(.muted)');
+
+test('a one-day run completes with its stat cards and its fills by rule', async ({ page, url }) => {
+  await page.goto(`${url}#lab`);
+  await expect(page.getByLabel('window')).toHaveValue('regular');
+  await expect(page.getByLabel('window').locator('option:checked')).toHaveText('Regular (feed session)');
+  await runAcme(page);
+  await expect(card(page, 'Total PnL')).toHaveText('+$3.00');
+  await expect(card(page, 'Fills')).toHaveText('6');
+  await expect(card(page, 'Max drawdown')).toHaveText('$1.00');
+  await expect(page.locator('.runs > table tr:not(.muted)')).toHaveText([/1Market makerACME1\+\$3\.00/]);
+  await expect(rows(page)).toHaveCount(6);
+  await expect(rows(page).first()).toHaveText('09:30:02.000buy10.00100maker(a) E300+100');
+  await expect(rows(page).nth(1)).toHaveText('09:30:04.000sell10.01100maker(c) Add3000');
+  await page.getByRole('button', { name: 'Fill attribution' }).click();
+  await expect(rows(page).first()).toHaveText('(a) E0/00/03/30/00/0');
+  await expect(rows(page).nth(4)).toHaveText('(c) Add0/00/03/00/00/0');
+});
+
+test("a two-day run shows each day's PnL, and Compare flags it against a one-day run", async ({ page, url }) => {
+  await page.goto(`${url}#lab`);
+  await runAcme(page);
+  await expect(card(page, 'Total PnL')).toHaveText('+$3.00');
+  await runAcme(page, ['2019-12-27']);
+  await expect(card(page, 'Total PnL')).toHaveText('+$5.00');
+  await page.getByRole('button', { name: 'Per-day PnL' }).click();
+  await expect(rows(page)).toHaveText(['2019-12-27+$2.004', '2019-12-30+$3.006']);
+  // Two runs queued within a second are listed in either order.
+  await page.getByLabel('compare #1').check();
+  await page.getByLabel('compare #2').check();
+  await page.getByRole('button', { name: 'Compare #1 vs #2' }).click();
+  await expect(page.getByText('not like-for-like: another symbol or other days')).toBeVisible();
+  await expect(rows(page).first()).toHaveText(/^Total PnL(\+\$3\.00\+\$5\.00\+\$2\.00|\+\$5\.00\+\$3\.00-\$2\.00)$/);
+  await expect(page.locator('tr.diff')).toHaveText([
+    /^days2019-12-(30|27, 2019-12-30)2019-12-(27, 2019-12-30|30)differs$/,
+  ]);
+});
+
+test("Watch in Terminal prices the ticket by the run's fees, plays at Max and shows the run reproduced", async ({
+  page,
+  url,
+}) => {
+  await page.goto(`${url}#lab`);
+  await runAcme(page, [], () => page.getByLabel('fees.maker').fill('-0.002'));
+  await expect(card(page, 'Total PnL')).toHaveText('+$4.20'); // $3.00 and 600 shares' $0.002 rebates
+  // Another tab is a viewer: it may not Watch, and says why.
+  const viewer = await page.context().newPage();
+  await viewer.goto(`${url}#lab`);
+  await viewer.locator('.runs > table tr:not(.muted)').click();
+  await expect(viewer.getByRole('button', { name: 'Watch in Terminal' })).toBeDisabled();
+  await expect(viewer.getByText('Another tab holds control')).toBeVisible();
+  await page.getByRole('button', { name: 'Watch in Terminal' }).click();
+  await expect(page.getByTestId('watch')).toContainText('Watching run #1');
+  await expect(page.getByTestId('session')).toContainText('ACME · gen 2 · paused');
+  await page.getByLabel('Price').fill('10.00');
+  await expect(page.locator('.ticket')).toContainText('Est. rebate+$0.20'); // the run's maker fee, not hello's 0
+  await page.getByRole('button', { name: 'Max', exact: true }).click();
+  await page.getByRole('button', { name: '▶ Play' }).click();
+  await expect(page.getByTestId('watch')).toHaveText('Watching run #1 · ✓ reproduced', { timeout: 15_000 });
+  await expect(page.getByTestId('session')).toContainText('ACME · gen 2 · ended');
+});
+
+test('Verify shows the run reproduced, Export saves its JSON, and Delete removes it once confirmed', async ({
+  page,
+  url,
+}) => {
+  await page.goto(`${url}#lab`);
+  await runAcme(page);
+  await expect(card(page, 'Total PnL')).toHaveText('+$3.00');
+  await page.getByRole('button', { name: 'Verify', exact: true }).click();
+  await expect(page.locator('.prov .title').nth(1)).toHaveText('Verifications · ✓ reproduced');
+  await expect(page.locator('.prov b.buy')).toHaveText(['✓ reproduced']);
+  const saved = page.waitForEvent('download');
+  await page.getByRole('button', { name: 'Export JSON' }).click();
+  const download = await saved;
+  const run = JSON.parse(readFileSync(await download.path(), 'utf8'));
+  expect(download.suggestedFilename()).toBe(`${run.id}.json`);
+  expect([run.results.pnl, run.verifications.map((v: { outcome: string }) => v.outcome)]).toEqual([
+    30_000,
+    ['reproduced'],
+  ]);
+  // A double click on Delete only arms it: the second click lands on Confirm delete and is ignored.
+  await page.getByRole('button', { name: 'Delete', exact: true }).dblclick();
+  await expect(page.getByRole('button', { name: 'Confirm delete' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Keep' })).toBeVisible();
+  await expect(page.locator('.runs > table tr:not(.muted)')).toHaveCount(1);
+  await page.getByRole('button', { name: 'Confirm delete' }).click();
+  await expect(page.locator('.runs > table tr:not(.muted)')).toHaveCount(0);
+  await expect(page.getByText('Run a backtest, or pick one from the runs.')).toBeVisible();
+});
+
+test('a symbol missing on one day is refused, naming the day', async ({ page, url }) => {
+  await page.goto(`${url}#lab`);
+  await page.getByLabel('symbol', { exact: true }).fill('ZETA');
+  await page.locator('.form .days summary').click();
+  await page.getByLabel('2019-12-27').check();
+  await page.locator('.form .days summary').click();
+  await page.getByRole('button', { name: '▶ Run backtest' }).click();
+  await expect(page.locator('.form .sell')).toHaveText('ZETA is not listed on 2019-12-27');
+  await expect(page.getByLabel('symbol', { exact: true })).toHaveAttribute('aria-invalid', 'true');
+  await expect(page.locator('.runs > table tr:not(.muted)')).toHaveCount(0);
+});
+
+test('a day edited in place since its run: Verify and Watch say input changed, not a failure', async ({
+  page,
+  url,
+  data,
+}) => {
+  await page.goto(`${url}#lab`);
+  await runAcme(page);
+  await expect(card(page, 'Total PnL')).toHaveText('+$3.00');
+  // One byte of Monday, ZETA's market category, changes in place. Nothing lists the days again, so chronos-serve keeps
+  // the hash it cached and admits Verify and Watch; only their full re-hash sees the edit.
+  const file = join(data, '12302019.NASDAQ_ITCH50.bin');
+  const bytes = readFileSync(file);
+  bytes[bytes.indexOf('ZETA    ') + 8] = 'Q'.charCodeAt(0);
+  writeFileSync(file, bytes);
+  await page.getByRole('button', { name: 'Verify', exact: true }).click();
+  await expect(page.locator('.prov b')).toHaveText(['input changed']);
+  await expect(page.locator('.prov b')).toHaveClass('muted');
+  await expect(page.locator('.prov')).toContainText('changed 2019-12-30');
+  await expect(page.locator('.prov .title').nth(1)).toHaveText('Verifications · none on this code and days yet');
+  await page.getByRole('button', { name: 'Watch in Terminal' }).click();
+  await expect(page.getByTestId('session')).toContainText('ACME · gen 2 · paused');
+  await page.getByRole('button', { name: 'Max', exact: true }).click();
+  await page.getByRole('button', { name: '▶ Play' }).click();
+  await expect(page.getByTestId('watch')).toHaveText('Watching run #1 · input changed', { timeout: 15_000 });
+});

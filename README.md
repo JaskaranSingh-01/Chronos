@@ -365,7 +365,7 @@ page itself is on `localhost` or `127.0.0.1`: without a token, that is all `chro
 **Tests.** From `web/`:
 
 ```bash
-npm run typecheck && npm test                  # Vitest: the store, candles, order checks and formatting
+npm run typecheck && npm test                  # Vitest: the stores, candles, order checks, the Lab and formatting
 npx playwright install chromium                # once
 npm run e2e                                    # builds web/dist, then Playwright; needs the build's two binaries
 ```
@@ -375,6 +375,12 @@ temp directory. The tests place an order and see it fill; drop the WebSocket in 
 the terminal ends on the new generation and sends nothing stale; seek to a New York time; load both days and play across
 the night; and connect to a server that wants a token. The binaries are `chronos-serve` and `chronos-e2e-fixture`, from
 `build/` or the directory `CHRONOS_BUILD` names.
+
+The Lab's tests run on the days `chronos-e2e-fixture DIR --lab` writes: on each, the default market maker makes $1 a
+cycle on ACME, buying by rule (a) and selling by rule (c), two cycles on 2019-12-27 and three on 2019-12-30, whose
+directory alone lists ZETA. They run one day and two, compare the two, Watch a run in the terminal at Max and see it
+reproduced, Verify, Export and Delete a run, see ZETA refused on 2019-12-27, and edit a day in place after its run to
+see Verify and Watch report the input changed.
 
 **Interactive benchmark** (`chronos-serve` at max speed, with the terminal attached and trading):
 
@@ -401,10 +407,27 @@ the run took 19.6 to 20.3 s while the terminal played, 21.4 to 22.6 s on the idl
 beyond the runs' own spread. Both read the same file, so they share the page cache; a run over other days would
 compete for the disk.
 
-### Strategy Lab (server)
+### Strategy Lab
 
 `chronos-serve` also runs backtests in the background, one at a time on a worker thread, while the terminal plays:
-a built-in strategy over one symbol and one or more days, at full speed. Its HTTP API (the Lab page comes later):
+a built-in strategy over one symbol and one or more days, at full speed. The **Strategy Lab** page, at
+`http://127.0.0.1:8080/#lab` or through the switch in the top bar, runs and studies them:
+
+- **New run** (left): the strategy and its params, the symbol, the days (a day whose regular hours are the 09:30-16:00
+  fallback is marked), the window, latencies, fees in dollars a share, and limits; an empty limit follows the params.
+  The defaults and caps are the server's. A value past its cap, or one the server refuses, is marked, and a symbol a day
+  does not list names the day.
+- **Results** (middle): total PnL, fills, fill rate, max drawdown, fees and rebates, max |position|; the PnL at every
+  second with a market event, its drawdown below; the fills with their rule and queue ahead at entry, the fill
+  attribution, the PnL by hour and, over several days, by day. A failed or cancelled run's figures are marked partial.
+- **Runs** (right): each run's state, progress or PnL. Tick two to **Compare**: their PnL overlaid, the second
+  dashed and lined up by day and time of day, their stats side by side, every setting that differs marked, and runs
+  over another symbol or other days flagged. For the run picked: **Watch in Terminal** replays it in the terminal,
+  paced, and says when the replay ends whether it reproduced; **Verify** re-runs it on the server; **Export JSON**
+  saves it; **Edit as new** copies its settings into the form; **Cancel** and **Delete**. Its provenance lists the
+  build, each day's hash and hours, the engine, the timings, the digests and every verification.
+
+The page polls the runs about once a second while one is queued or running. Its HTTP API:
 
 | Endpoint | Does |
 |---|---|

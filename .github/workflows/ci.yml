@@ -10,8 +10,8 @@
 # - isolation: the engine (include/, src/, app/) never includes server or web code, and
 #   simulator_lib links only the standard library.
 # - server-tsan: chronos_server_tests under ThreadSanitizer (Linux clang; TSan does not start on macOS 27).
-# - web: the Trading Terminal (web/): typecheck, build and Vitest, then the Playwright end-to-end tests against a
-#   Release chronos-serve on the fixture days chronos-e2e-fixture writes.
+# - web: the Trading Terminal and the Strategy Lab (web/): typecheck, build and Vitest, then the Playwright end-to-end
+#   tests against a Release chronos-serve on the fixture days chronos-e2e-fixture writes (with --lab, the Lab's).
 name: CI
 
 on: [push, pull_request]
