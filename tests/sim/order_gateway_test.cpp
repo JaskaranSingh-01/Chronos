@@ -91,6 +91,38 @@ TEST(OrderGatewayTest, SendThenCancelInOneCallbackArriveInCallOrder)
     EXPECT_EQ(f.queue.top().order_id, id);
 }
 
+// A closed gateway refuses every order before the risk check, reserving, queuing and numbering nothing; its cancels
+// and timers still go out, and once reopened it sends again from the next id.
+TEST(OrderGatewayTest, AClosedGatewayRefusesOrdersButNotCancelsOrTimers)
+{
+    Fixture f;
+    f.gateway.set_now(1'000);
+    f.gateway.set_open(false);
+
+    OrderId id{77};
+    EXPECT_EQ(f.gateway.send(Side::Buy, Price{100}, Quantity{10}, TimeInForce::Day, id), RiskCheck::Closed);
+    EXPECT_EQ(f.gateway.send(Side::Sell, Price{100}, Quantity{0}, TimeInForce::Ioc, id), RiskCheck::Closed);
+    EXPECT_EQ(id, 77u);
+    EXPECT_TRUE(f.queue.empty());
+    EXPECT_EQ(f.portfolio.open_orders(), 0u);
+    EXPECT_EQ(f.portfolio.open_quantity(Side::Buy), 0u);
+
+    f.gateway.cancel(5);
+    EXPECT_TRUE(f.gateway.set_timer(30'000, 9));
+    ASSERT_FALSE(f.queue.empty());
+    EXPECT_EQ(f.queue.top().type, SimEventType::CancelArrive);
+    EXPECT_EQ(f.queue.top().order_id, 5u);
+    f.queue.pop();
+    ASSERT_FALSE(f.queue.empty());
+    EXPECT_EQ(f.queue.top().type, SimEventType::Timer);
+    f.queue.pop();
+
+    f.gateway.set_open(true);
+    EXPECT_EQ(f.gateway.send(Side::Buy, Price{100}, Quantity{10}, TimeInForce::Day, id), RiskCheck::Accepted);
+    EXPECT_EQ(id, 1u);
+    EXPECT_EQ(f.portfolio.open_quantity(Side::Buy), 10u);
+}
+
 TEST(OrderGatewayTest, TimersAreNeverInThePast)
 {
     Fixture f;

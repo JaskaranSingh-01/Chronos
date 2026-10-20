@@ -18,16 +18,21 @@ private:
     Timestamp now_{0};
     OrderId next_id_{1};
     bool timers_open_{true};
+    bool open_{true};
 
 public:
     OrderGateway(SimQueue& queue, Portfolio& portfolio, LatencyConfig latency) noexcept
         : queue_(queue), portfolio_(portfolio), latency_(latency)
     {}
 
-    // Runs Portfolio::reserve; if Accepted, sets `id` and queues OrderArrive at now + order_latency.
+    // Closed while the gateway is closed; else runs Portfolio::reserve, and if Accepted
+    // sets `id` and queues OrderArrive at now + order_latency.
     // Otherwise nothing is reserved or queued and `id` is untouched.
     RiskCheck send(Side side, Price price, Quantity quantity, TimeInForce tif, OrderId& id) noexcept
     {
+        if (!open_) {
+            return RiskCheck::Closed;
+        }
         const RiskCheck check = portfolio_.reserve(side, quantity);
         if (check != RiskCheck::Accepted) {
             return check;
@@ -65,6 +70,12 @@ public:
     void set_now(Timestamp now) noexcept
     {
         now_ = now;
+    }
+
+    // A closed gateway refuses every send(); cancel() and timers are unaffected.
+    void set_open(bool open) noexcept
+    {
+        open_ = open;
     }
 
     // Makes every later set_timer fail; called at the end of the market stream.

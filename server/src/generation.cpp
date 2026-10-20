@@ -20,6 +20,8 @@ ErrorCode risk_error(RiskCheck check) noexcept
         return ErrorCode::RiskPositionLimit;
     case RiskCheck::TooManyOpenOrders:
         return ErrorCode::RiskTooManyOpenOrders;
+    case RiskCheck::Closed:  // only an attached strategy's window closes the gateway
+        return ErrorCode::NotReady;
     }
     return ErrorCode::BadRequest;
 }

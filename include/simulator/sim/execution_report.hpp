@@ -94,7 +94,8 @@ enum class RiskCheck : std::uint8_t {
     InvalidOrder,
     OrderTooLarge,
     PositionLimit,
-    TooManyOpenOrders
+    TooManyOpenOrders,
+    Closed  // OrderGateway::send while the gateway is closed, before any check
 };
 
 } // namespace simulator
