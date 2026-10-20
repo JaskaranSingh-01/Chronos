@@ -135,6 +135,9 @@ TEST(LabTest, RunsItsJobsInOrderAndRefusesANinthWaitingOne)
         return std::count(now.begin(), now.end(), "completed") == 9;
     }));
     EXPECT_TRUE(ordered);
+    for (std::size_t i = 2; i < ids.size(); ++i) {  // the same run, wherever it waited in the queue
+        EXPECT_EQ(run(lab, ids[i])["results"]["digests"], run(lab, ids[1])["results"]["digests"]);
+    }
 }
 
 // A queued run is cancelled at once; a running one stops at its next market event and keeps what it had. An ended run
@@ -244,9 +247,11 @@ TEST(LabTest, ARunIsSavedAsItFinishesAndReloadedAfterARestart)
         id = days.submit(lab, true);
         bool early = false;  // a file while the job still runs
         ASSERT_TRUE(eventually([&] {
+            // The file first: the state only moves on, so a file seen before a later "not done" was written early.
+            const bool file = std::filesystem::exists(days.runs / (id + ".json"));
             const std::string s = state(lab, id);
             const bool done = s == "completed" || (s == "running" && progress(lab, id) == 1);
-            early = early || (!done && std::filesystem::exists(days.runs / (id + ".json")));
+            early = early || (file && !done);
             return s == "completed";
         }));
         EXPECT_FALSE(early);

@@ -40,18 +40,19 @@ std::string write_file(const std::filesystem::path& path, const std::string& tex
 {
     const std::filesystem::path temp = path.string() + ".tmp";
     std::error_code error;
+    std::error_code ignored;  // a cleanup's own, so it never clears `error`
     {
         std::ofstream out{temp, std::ios::binary};
         out << text;
         out.close();
         if (!out) {
-            std::filesystem::remove(temp, error);
+            std::filesystem::remove(temp, ignored);
             return "cannot write " + temp.string();
         }
     }
     std::filesystem::rename(temp, path, error);
     if (error) {
-        std::filesystem::remove(temp, error);
+        std::filesystem::remove(temp, ignored);
         return error.message();
     }
     return {};
@@ -158,6 +159,7 @@ Refusal Backtester::cancel(std::string_view id)
         }
         std::erase_if(queue_, [&](const Job& job) { return job.id == id; });
         entry.run.state = RunState::Cancelled;
+        entry.run.progress = 1;
         entry.run.provenance.finished = utc_now();
         entry.run.results = std::make_shared<const RunResult>(RunResult{.partial = true, .cancelled = true});
         entry.busy = true;
@@ -266,6 +268,8 @@ void Backtester::work()
             result = RunResult{.partial = true, .reason = "out_of_memory"};
         } catch (const std::exception& e) {
             result = RunResult{.partial = true, .reason = e.what()};
+        } catch (...) {
+            result = RunResult{.partial = true, .reason = "unknown_error"};
         }
         finish(job, std::move(result));
     }
@@ -309,7 +313,13 @@ void Backtester::finish(const Job& job, RunResult result)
 void Backtester::save(Run run)
 {
     const std::string id = run.id;
-    if (const std::string error = write_file(file(id), encode_run(run)); !error.empty()) {
+    std::string error;
+    try {
+        error = write_file(file(id), encode_run(run));
+    } catch (...) {  // the worker's thread must not end on an exception (spec §9)
+        error = "cannot encode the run";
+    }
+    if (!error.empty()) {
         run.warning = "not saved: " + error;
     }
     {

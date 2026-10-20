@@ -128,7 +128,8 @@ private:
     std::filesystem::path dir_;
     mutable std::mutex mutex_;
     std::condition_variable wake_;
-    // ponytail: every run's results stay in memory, up to ~3 MB each; read them from their files past a few hundred.
+    // ponytail: every run's results stay in memory, ~3 MB of fills plus ~1 MB of equity a day, up to 32 days a run;
+    // read them from their files past a few hundred runs.
     std::map<std::string, Entry, std::less<>> runs_;
     std::deque<Job> queue_;
     std::string running_;  // the id of the run whose job is running; "" if none
