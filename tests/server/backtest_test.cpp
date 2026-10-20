@@ -130,6 +130,7 @@ TEST(BacktestTest, AOneDayFullDayRunEqualsTheHeadlessBacktestForBothStrategies)
         EXPECT_EQ(r.fees, portfolio.fees());
         EXPECT_EQ(r.position, portfolio.position());
         EXPECT_EQ(r.max_drawdown, portfolio.max_drawdown());
+        EXPECT_EQ(r.max_abs_position, portfolio.max_abs_position());
         EXPECT_EQ(r.maker_fills, execution.statistics().maker_fills);
         EXPECT_EQ(r.taker_fills, execution.statistics().taker_fills);
         EXPECT_EQ(r.fills_by, execution.statistics().fills_by);
@@ -209,6 +210,8 @@ TEST(BacktestTest, TheDaysHoursAndCurveAddUpToThePnlWithOneSamplePerEventSecond)
     finish(straight);
     EXPECT_EQ(r.max_drawdown, straight.portfolio.max_drawdown());
     EXPECT_EQ(r.digests, digests(straight));
+    EXPECT_EQ(r.fills_by, straight.execution.statistics().fills_by);  // phases under each day's own midnight
+    EXPECT_LT(r.by_hour.rbegin()->first, 24);
 }
 
 // A run lists its first 50,000 fills, and counts them all: here the imbalance taker buys 1 share at every event.
@@ -296,6 +299,7 @@ TEST(BacktestTest, ACancelLandsBeforeTheNextEventAndAFailedRunKeepsItsAggregates
                                    std::span{invalid}.last(1), false, checked);
     EXPECT_EQ(crossing.reason, "invariant_violation");
     EXPECT_TRUE(crossing.partial);
+    EXPECT_EQ(crossing.digests, Digests{});
 }
 
 // The same identity run twice gives the same results, timings aside. Hash as read changes nothing but adds each day's

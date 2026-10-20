@@ -15,6 +15,7 @@
 namespace simulator::server {
 
 // The most fills a run lists; its counters count every fill.
+// ponytail: 50k rows (~2.8 MB) per run kept in memory; load results on demand past a few hundred runs.
 inline constexpr std::size_t max_fill_rows = 50'000;
 
 // `simulator backtest`'s risk limits for `strategy`: its own max position and order size, and one IOC or two quotes
@@ -94,7 +95,8 @@ struct RunResult
     bool operator==(const RunResult&) const = default;
 };
 
-// Runs `spec` over `days` to the end, or to `cancel`; bytes_read reports progress. No threads, no ReplaySession.
+// Runs `spec` over `days` (the days spec.days names, in order) to the end, or to `cancel`; bytes_read reports
+// progress. No threads, no ReplaySession.
 RunResult backtest(const SessionConfig& config, const RunSpec& spec, std::span<const DayHandle> days, bool hash_as_read,
                    const std::atomic<bool>& cancel, std::atomic<std::uint64_t>& bytes_read);
 

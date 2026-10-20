@@ -192,6 +192,7 @@ RunResult backtest(const SessionConfig& config, const RunSpec& spec, std::span<c
     bytes_read.store(source.position(), std::memory_order_relaxed);
     if (hash_as_read && !r.cancelled) {
         r.hashes = source.hashes();
+        // ponytail: re-reads each unread day whole and blind to cancel; check cancel here if long chains make it slow.
         for (std::size_t i = r.hashes.size(); i < days.size(); ++i) {
             r.hashes.push_back(file_hash(days[i]->path));  // the replay stopped before it read the whole day
         }
