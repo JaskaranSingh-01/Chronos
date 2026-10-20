@@ -258,7 +258,7 @@ const stats: [name: string, of: (r: Results) => number, kind: 'pnl' | 'money' | 
   ['Fills', (r) => r.fills, 'count'],
   ['Fill rate', (r) => r.fill_rate * 100, 'percent'],
   ['Max drawdown', (r) => r.max_drawdown, 'money'],
-  ['Fees / rebates', (r) => -r.fees, 'pnl'],
+  ['Fees / rebates', (r) => -r.fees, 'pnl'], // as their effect on PnL, so a rebate is positive
   ['Max |position|', (r) => r.max_abs_position, 'count'],
 ];
 

@@ -44,7 +44,13 @@ export function Equity({ runs }: { runs: Run[] }) {
       },
       grid: { vertLines: { color: '#1c2533' }, horzLines: { color: '#1c2533' } },
       localization: { timeFormatter: label },
-      timeScale: { timeVisible: true, secondsVisible: true, tickMarkFormatter: tick },
+      timeScale: {
+        timeVisible: true,
+        secondsVisible: true,
+        fixLeftEdge: true,
+        fixRightEdge: true,
+        tickMarkFormatter: tick,
+      },
     });
     runs.forEach((run, i) => {
       const r = run.results;
@@ -122,7 +128,8 @@ function ResultTabs({ run, r }: { run: Run; r: Results }) {
             {r.fills > fillRows && (
               <tr className="muted">
                 <td colSpan={8}>
-                  The first {fillRows} of {r.fills} fills{r.fill_list.truncated ? '; the run kept 50,000' : ''}
+                  The first {fillRows} of {r.fills.toLocaleString('en-US')} fills
+                  {r.fill_list.truncated ? '; the run kept 50,000' : ''}
                 </td>
               </tr>
             )}

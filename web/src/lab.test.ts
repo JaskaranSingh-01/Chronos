@@ -262,6 +262,10 @@ describe('results', () => {
       34_201,
       86_400 + 34_202,
     ]);
+    // A listed day without samples still takes its place.
+    expect(
+      align([at('2019-12-26T14:30:01Z'), at('2019-12-30T14:30:02Z')], ['2019-12-26', '2019-12-27', '2019-12-30']),
+    ).toEqual([34_201, 2 * 86_400 + 34_202]);
     // Friday in standard time, Monday in daylight time: 09:30 either way.
     expect(align([at('2019-03-08T14:30:00Z'), at('2019-03-11T13:30:00Z')], ['2019-03-08', '2019-03-11'])).toEqual([
       34_200,
