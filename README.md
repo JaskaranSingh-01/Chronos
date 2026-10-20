@@ -393,6 +393,14 @@ second and the server dropped none (`dropped_snapshots`), the command queue was 
 frames a second, its slowest frame 17 ms. The snapshot metrics carry no per-event latency, so there is no p50 or p99
 per event yet.
 
+**Configuration 4** (a Lab run in flight): `CHRONOS_BENCH_LAB=SPY:market_maker` also queues that Lab run, over the same
+day with a Full-day window, as the replay starts, and runs it again on the idle server once the replay has ended; the
+summary adds both wall times. Three back-to-back pairs on 2026-10-20, as above (load average 3 to 6): AAPL replayed at
+73,773 to 77,427 events a second without a Lab run and 74,519 to 76,875 with the SPY market maker's day in flight, and
+the run took 19.6 to 20.3 s while the terminal played, 21.4 to 22.6 s on the idle server. Neither slowed the other
+beyond the runs' own spread. Both read the same file, so they share the page cache; a run over other days would
+compete for the disk.
+
 ### Strategy Lab (server)
 
 `chronos-serve` also runs backtests in the background, one at a time on a worker thread, while the terminal plays:

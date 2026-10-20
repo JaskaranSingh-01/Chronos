@@ -1,14 +1,37 @@
-import { expect, test } from '@playwright/test';
+import { type APIRequestContext, expect, test } from '@playwright/test';
 import { mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { serve } from './serve';
 
-// Spec §9, configuration 3: chronos-serve at max speed with this page attached and trading. CHRONOS_BENCH_FILE names
-// an ITCH day (a cut slice works); the summary is printed, and written to CHRONOS_BENCH_OUT if set.
+// Spec §9, configuration 3: chronos-serve at max speed with this page attached and trading. With CHRONOS_BENCH_LAB,
+// SYMBOL:strategy, configuration 4 (UI-2 spec §10): that Lab run over the same day is in flight as the page plays, and
+// then runs again on the idle server. CHRONOS_BENCH_FILE names an ITCH day (a cut slice works); the summary is printed,
+// and written to CHRONOS_BENCH_OUT if set.
 const file = process.env.CHRONOS_BENCH_FILE;
 const date = process.env.CHRONOS_BENCH_DATE ?? '2019-12-30';
 const symbol = process.env.CHRONOS_BENCH_SYMBOL ?? 'AAPL';
+const lab = process.env.CHRONOS_BENCH_LAB;
+
+// Queues the Lab run as the Lab page does: JSON, from the page's origin.
+async function postRun(request: APIRequestContext, url: string): Promise<string> {
+  const [labSymbol, strategy] = lab!.split(':');
+  const response = await request.post(`${url}api/backtests`, {
+    data: { symbol: labSymbol, days: [date], strategy, window: 'full_day' },
+    headers: { Origin: url.slice(0, -1) },
+  });
+  expect(response.status()).toBe(202);
+  return (await response.json()).id;
+}
+
+// The run's wall time in ms, once it has finished.
+async function wallMs(request: APIRequestContext, url: string, id: string): Promise<number> {
+  for (;;) {
+    const run = await (await request.get(`${url}api/backtests/${id}`)).json();
+    if (run.state !== 'queued' && run.state !== 'running') return run.provenance.wall_ms;
+    await new Promise((done) => setTimeout(done, 500));
+  }
+}
 
 test.skip(!file, 'set CHRONOS_BENCH_FILE to run the interactive benchmark');
 
@@ -48,6 +71,7 @@ test('interactive benchmark', async ({ page }) => {
       requestAnimationFrame(frame);
     });
     const start = Date.now();
+    const busyRun = lab ? await postRun(page.request, server.url) : undefined;
     await page.getByRole('button', { name: '▶ Play' }).click();
     // Trade by hand while it replays: alternate 1-share market buys and sells, as fast as the ticket takes them.
     let orders = 0;
@@ -63,6 +87,12 @@ test('interactive benchmark', async ({ page }) => {
     const ui = await page.evaluate(
       () => (window as unknown as { fps: { frames: number; worst: number; first: number; last: number } }).fps,
     );
+
+    const labRun = lab && {
+      run: lab,
+      wall_ms_while_playing: await wallMs(page.request, server.url, busyRun!),
+      wall_ms_idle: await wallMs(page.request, server.url, await postRun(page.request, server.url)),
+    };
 
     const playing = seen.filter((s) => s.playing);
     const eps = playing.map((s) => s.eps).sort((a, b) => a - b);
@@ -82,6 +112,7 @@ test('interactive benchmark', async ({ page }) => {
       orders_sent: orders,
       ui_frames_per_second: Number(((1_000 * ui.frames) / (ui.last - ui.first)).toFixed(1)),
       ui_worst_frame_ms: Math.round(ui.worst),
+      lab: labRun,
     };
     console.log(JSON.stringify(summary, null, 2));
     if (process.env.CHRONOS_BENCH_OUT)
