@@ -1,5 +1,5 @@
 import { test as base, expect, type Page } from '@playwright/test';
-import { readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { closeSync, openSync, readFileSync, rmSync, writeSync } from 'node:fs';
 import { join } from 'node:path';
 import { fixture, serve } from './serve';
 
@@ -39,6 +39,7 @@ async function runAcme(page: Page, also: string[] = [], edit = async () => {}) {
 
 const card = (page: Page, name: string) => page.locator('.card', { hasText: name }).locator('b');
 const rows = (page: Page) => page.locator('.lab-tabs tbody tr:not(.muted)');
+const runs = (page: Page) => page.locator('.runs > table tr:not(.muted)');
 
 test('a one-day run completes with its stat cards and its fills by rule', async ({ page, url }) => {
   await page.goto(`${url}#lab`);
@@ -48,7 +49,7 @@ test('a one-day run completes with its stat cards and its fills by rule', async 
   await expect(card(page, 'Total PnL')).toHaveText('+$3.00');
   await expect(card(page, 'Fills')).toHaveText('6');
   await expect(card(page, 'Max drawdown')).toHaveText('$1.00');
-  await expect(page.locator('.runs > table tr:not(.muted)')).toHaveText([/1Market makerACME1\+\$3\.00/]);
+  await expect(runs(page)).toHaveText([/1Market makerACME1\+\$3\.00/]);
   await expect(rows(page)).toHaveCount(6);
   await expect(rows(page).first()).toHaveText('09:30:02.000buy10.00100maker(a) E300+100');
   await expect(rows(page).nth(1)).toHaveText('09:30:04.000sell10.01100maker(c) Add3000');
@@ -86,7 +87,7 @@ test("Watch in Terminal prices the ticket by the run's fees, plays at Max and sh
   // Another tab is a viewer: it may not Watch, and says why.
   const viewer = await page.context().newPage();
   await viewer.goto(`${url}#lab`);
-  await viewer.locator('.runs > table tr:not(.muted)').click();
+  await runs(viewer).click();
   await expect(viewer.getByRole('button', { name: 'Watch in Terminal' })).toBeDisabled();
   await expect(viewer.getByText('Another tab holds control')).toBeVisible();
   await page.getByRole('button', { name: 'Watch in Terminal' }).click();
@@ -123,9 +124,9 @@ test('Verify shows the run reproduced, Export saves its JSON, and Delete removes
   await page.getByRole('button', { name: 'Delete', exact: true }).dblclick();
   await expect(page.getByRole('button', { name: 'Confirm delete' })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Keep' })).toBeVisible();
-  await expect(page.locator('.runs > table tr:not(.muted)')).toHaveCount(1);
+  await expect(runs(page)).toHaveCount(1);
   await page.getByRole('button', { name: 'Confirm delete' }).click();
-  await expect(page.locator('.runs > table tr:not(.muted)')).toHaveCount(0);
+  await expect(runs(page)).toHaveCount(0);
   await expect(page.getByText('Run a backtest, or pick one from the runs.')).toBeVisible();
 });
 
@@ -138,7 +139,7 @@ test('a symbol missing on one day is refused, naming the day', async ({ page, ur
   await page.getByRole('button', { name: '▶ Run backtest' }).click();
   await expect(page.locator('.form .sell')).toHaveText('ZETA is not listed on 2019-12-27');
   await expect(page.getByLabel('symbol', { exact: true })).toHaveAttribute('aria-invalid', 'true');
-  await expect(page.locator('.runs > table tr:not(.muted)')).toHaveCount(0);
+  await expect(runs(page)).toHaveCount(0);
 });
 
 test('a day edited in place since its run: Verify and Watch say input changed, not a failure', async ({
@@ -152,9 +153,11 @@ test('a day edited in place since its run: Verify and Watch say input changed, n
   // One byte of Monday, ZETA's market category, changes in place. Nothing lists the days again, so chronos-serve keeps
   // the hash it cached and admits Verify and Watch; only their full re-hash sees the edit.
   const file = join(data, '12302019.NASDAQ_ITCH50.bin');
-  const bytes = readFileSync(file);
-  bytes[bytes.indexOf('ZETA    ') + 8] = 'Q'.charCodeAt(0);
-  writeFileSync(file, bytes);
+  const at = readFileSync(file).indexOf('ZETA    ') + 8;
+  expect(at).toBeGreaterThan(7);
+  const fd = openSync(file, 'r+'); // the one byte, written where it lies: the size and inode stay
+  writeSync(fd, 'Q', at);
+  closeSync(fd);
   await page.getByRole('button', { name: 'Verify', exact: true }).click();
   await expect(page.locator('.prov b')).toHaveText(['input changed']);
   await expect(page.locator('.prov b')).toHaveClass('muted');
