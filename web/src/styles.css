@@ -100,6 +100,7 @@ main.lab { grid-template-columns: 0.95fr 2.6fr 1.05fr; }
 .card b { display: block; font-size: 15px; }
 .equity { flex: 1.2; display: flex; flex-direction: column; min-height: 0; }
 .lab-tabs { flex: 1; overflow: auto; }
+tr.diff { background: #f0b90b1f; color: var(--bright); }
 .runs tr:not(.muted) { cursor: pointer; }
 tr.on { background: #1f6feb22; }
 table { width: 100%; border-collapse: collapse; }

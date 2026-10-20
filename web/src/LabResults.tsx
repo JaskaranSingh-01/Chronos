@@ -1,7 +1,19 @@
 import { ColorType, createChart, LineSeries, LineStyle, TickMarkType, type Time } from 'lightweight-charts';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { px, ruleLabel, shares, signed, stamp, tone } from './format';
-import { align, cards, drawdown, moneyDigits, timeOfRun, useLab, type Results, type Run } from './lab';
+import {
+  align,
+  cards,
+  compareStats,
+  drawdown,
+  likeForLike,
+  moneyDigits,
+  specDiff,
+  timeOfRun,
+  useLab,
+  type Results,
+  type Run,
+} from './lab';
 
 const tabNames = ['Fills', 'Fill attribution', 'PnL by hour', 'Per-day PnL'] as const;
 const phaseNames: Record<string, string> = {
@@ -205,6 +217,65 @@ export function RunResults() {
       </div>
       <Equity runs={shown} />
       <ResultTabs key={run.id} run={run} r={r} />
+    </>
+  );
+}
+
+// Two runs ticked, older first: equity overlaid with the second dashed, the stats side by side with the second's
+// difference, every setting that differs marked, and a flag when the symbol or the days differ.
+export function Compare() {
+  const runs = useLab((l) => l.runs);
+  const compare = useLab((l) => l.compare);
+  const details = useLab((l) => l.details);
+  const ids = runs.filter((r) => compare.includes(r.id)).map((r) => r.id);
+  const key = ids.join();
+  const shown = useMemo(() => key.split(',').flatMap((id) => details[id] ?? []), [key, details]);
+  const [a, b] = shown;
+  if (!a?.results || !b?.results) return <div className="panel muted">Fetching the runs to compare…</div>;
+  const n = (run: Run) => runs.findIndex((r) => r.id === run.id) + 1;
+  return (
+    <>
+      <div className="title">
+        Compare #{n(a)} and #{n(b)}, #{n(b)} dashed
+        {!likeForLike(a.spec, b.spec) && <b className="sell"> · not like-for-like: another symbol or other days</b>}
+      </div>
+      <Equity runs={shown} />
+      <div className="panel lab-tabs">
+        <table>
+          <tbody>
+            <tr className="muted">
+              <td>Stat</td>
+              <td>#{n(a)}</td>
+              <td>#{n(b)}</td>
+              <td>
+                #{n(b)} − #{n(a)}
+              </td>
+            </tr>
+            {compareStats(a.results, b.results, moneyDigits(a)).map(([name, x, y, delta]) => (
+              <tr key={name}>
+                <td>{name}</td>
+                <td>{x}</td>
+                <td>{y}</td>
+                <td>{delta}</td>
+              </tr>
+            ))}
+            <tr className="muted">
+              <td>Setting</td>
+              <td />
+              <td />
+              <td />
+            </tr>
+            {specDiff(a.spec, b.spec, a.provenance.engine.price_scale).map((row) => (
+              <tr key={row.field} className={row.differs ? 'diff' : ''}>
+                <td>{row.field}</td>
+                <td>{row.a}</td>
+                <td>{row.b}</td>
+                <td>{row.differs ? 'differs' : ''}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </>
   );
 }

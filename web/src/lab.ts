@@ -162,7 +162,9 @@ export interface LabState {
   runs: RunListing[]; // oldest first: run #1 is the first
   offline: boolean; // the last listing failed; polling goes on until one answers
   selected: string; // the run shown; '' for none
-  details: Record<string, Run>; // the shown run's JSON, kept until its state or its verifications change
+  compare: string[]; // the runs ticked to compare, at most two
+  comparing: boolean; // the comparison is shown rather than the selected run
+  details: Record<string, Run>; // the JSON of the runs shown or ticked, kept until their state or verifications change
   notice: string; // a refused cancel or delete, or a delete's warning
 }
 
@@ -293,6 +295,49 @@ export function timeOfRun(t: number, days: number): string {
   return days > 1 ? `day ${Math.floor(t / 86_400) + 1} ${hms}` : hms;
 }
 
+const deltas = new Intl.NumberFormat('en-US', { signDisplay: 'exceptZero' });
+
+// Two runs' stats side by side, with the second's difference from the first.
+export function compareStats(a: Results, b: Results, digits: number): [string, string, string, string][] {
+  const [left, right] = [cards(a, digits), cards(b, digits)];
+  return stats.map(([name, of, kind], i) => {
+    const d = of(b) - of(a);
+    const delta =
+      kind === 'pnl' || kind === 'money'
+        ? signed(d, digits)
+        : kind === 'count'
+          ? deltas.format(d)
+          : `${deltas.format(Number(d.toFixed(1)))} pp`;
+    return [name, left[i][1], right[i][1], delta];
+  });
+}
+
+// A run's settings as [field, value], each field named as in a RunSpec, fees in dollars.
+export const specRows = (spec: Spec, digits: number): [string, string][] => [
+  ['symbol', spec.symbol],
+  ['days', spec.days.join(', ')],
+  ['strategy', strategyNames[spec.strategy] ?? spec.strategy],
+  ...Object.entries(spec.params).map(([name, value]): [string, string] => [`params.${name}`, String(value)]),
+  ['window', windowLabels[spec.window]],
+  ['latency.order_ns', String(spec.latency.order_ns)],
+  ['latency.report_ns', String(spec.latency.report_ns)],
+  ['fees.maker', px(spec.fees.maker, digits)],
+  ['fees.taker', px(spec.fees.taker, digits)],
+  ...Object.entries(spec.limits).map(([name, value]): [string, string] => [`limits.${name}`, String(value)]),
+];
+
+// Two runs' settings side by side: every field of either, a dash where one has none, and whether they differ.
+export function specDiff(a: Spec, b: Spec, digits: number) {
+  const [left, right] = [new Map(specRows(a, digits)), new Map(specRows(b, digits))];
+  return [...new Set([...left.keys(), ...right.keys()])].map((field) => {
+    const [x, y] = [left.get(field) ?? '—', right.get(field) ?? '—'];
+    return { field, a: x, b: y, differs: x !== y };
+  });
+}
+
+// Whether two runs replayed the same symbol over the same days.
+export const likeForLike = (a: Spec, b: Spec) => a.symbol === b.symbol && a.days.join() === b.days.join();
+
 // What a listed run allows.
 export const actions = (r: RunListing) => ({ cancel: r.state === 'queued' || r.state === 'running' });
 
@@ -305,6 +350,8 @@ export function createLab(env: Pick<Env, 'fetch' | 'load'>) {
     runs: [],
     offline: false,
     selected: '',
+    compare: [],
+    comparing: false,
     details: {},
     notice: '',
   };
@@ -350,7 +397,7 @@ export function createLab(env: Pick<Env, 'fetch' | 'load'>) {
     }
   }
 
-  // The shown run's JSON, unless the copy kept is of the state and the verifications listed.
+  // A shown or ticked run's JSON, unless the copy kept is of the state and the verifications listed.
   async function fetchRun(id: string) {
     const listed = state.runs.find((r) => r.id === id);
     const kept = state.details[id];
@@ -358,7 +405,9 @@ export function createLab(env: Pick<Env, 'fetch' | 'load'>) {
     try {
       const res = await get(`/api/backtests/${id}`);
       const run = res.ok ? ((await res.json()) as Run) : null;
-      if (run && id === state.selected) set({ ...state, details: { [id]: run } });
+      if (run && (id === state.selected || state.compare.includes(id))) {
+        set({ ...state, details: { ...state.details, [id]: run } });
+      }
     } catch {
       // the next listing asks again
     }
@@ -388,8 +437,9 @@ export function createLab(env: Pick<Env, 'fetch' | 'load'>) {
           if (answer.ok) set({ ...state, strategies: (await answer.json()) as Strategies });
           await loadDays();
         }
-        set({ ...state, runs, offline: !state.strategies || !state.start });
-        await fetchRun(state.selected);
+        const compare = state.compare.filter((id) => runs.some((r) => r.id === id)); // a deleted run drops out
+        set({ ...state, runs, compare, offline: !state.strategies || !state.start });
+        for (const id of [state.selected, ...state.compare]) await fetchRun(id);
       } catch {
         set({ ...state, offline: true });
       }
@@ -397,6 +447,14 @@ export function createLab(env: Pick<Env, 'fetch' | 'load'>) {
     listing = false;
     const busy = state.runs.some((r) => r.state === 'queued' || r.state === 'running' || r.verifying !== null);
     if (busy || state.offline) timer = setTimeout(() => void poll(), 1_000);
+  }
+
+  // Shows `selected` and ticks `compare`, drops the JSON of any other run, and fetches theirs.
+  async function view(selected: string, compare: string[], comparing: boolean) {
+    const wanted = [selected, ...compare];
+    const details = Object.fromEntries(Object.entries(state.details).filter(([id]) => wanted.includes(id)));
+    set({ ...state, selected, compare, comparing, details });
+    for (const id of wanted) await fetchRun(id);
   }
 
   // Queues a run and shows it; null, or why chronos-serve refused it.
@@ -445,11 +503,13 @@ export function createLab(env: Pick<Env, 'fetch' | 'load'>) {
         set({ ...state, selected: '' });
       }
     },
-    // Shows run `id`; its JSON replaces the one kept.
-    select(id: string) {
-      set({ ...state, selected: id });
-      return fetchRun(id);
+    select: (id: string) => view(id, state.compare, false),
+    // Ticks a run to compare, or unticks it; a third tick drops the first.
+    tick(id: string, on: boolean) {
+      const others = state.compare.filter((c) => c !== id);
+      return view(state.selected, on ? [...others, id].slice(-2) : others, state.comparing);
     },
+    showCompare: (comparing: boolean) => set({ ...state, comparing }),
   };
 }
 

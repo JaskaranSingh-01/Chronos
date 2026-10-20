@@ -3,12 +3,15 @@ import {
   actions,
   align,
   cards,
+  compareStats,
   createLab,
   defaults,
   drawdown,
   fromSpec,
+  likeForLike,
   page,
   refusalText,
+  specDiff,
   timeOfRun,
   toBody,
   type Form,
@@ -237,6 +240,64 @@ describe('results', () => {
   });
 });
 
+describe('compare', () => {
+  const results = (over: Partial<Results>) =>
+    ({ pnl: 0, fills: 0, fill_rate: 0, max_drawdown: 0, fees: 0, max_abs_position: 0, ...over }) as Results;
+
+  it("shows two runs' stats side by side, with the second's difference from the first", () => {
+    const a = results({
+      pnl: 30_000,
+      fills: 6,
+      fill_rate: 0.3529,
+      max_drawdown: 10_000,
+      fees: 0,
+      max_abs_position: 100,
+    });
+    const b = results({ pnl: 50_000, fills: 10, fill_rate: 0.3448, max_drawdown: 10_000, fees: -2_000 });
+    expect(compareStats(a, b, 4)).toEqual([
+      ['Total PnL', '+$3.00', '+$5.00', '+$2.00'],
+      ['Fills', '6', '10', '+4'],
+      ['Fill rate', '35.3%', '34.5%', '-0.8 pp'],
+      ['Max drawdown', '$1.00', '$1.00', '$0.00'],
+      ['Fees / rebates', '$0.00', '+$0.20', '+$0.20'],
+      ['Max |position|', '100', '0', '-100'],
+    ]);
+  });
+
+  it('marks every setting that differs, and runs over another symbol or other days as not like-for-like', () => {
+    const other: Spec = {
+      ...spec,
+      days: ['2019-12-27', '2019-12-30'],
+      strategy: 'imbalance',
+      params: { threshold: 3, clip: 100, max_position: 500, cooldown_ns: 1_000_000_000 },
+      fees: { maker: -20, taker: 30 },
+      window: 'full_day',
+    };
+    const diff = specDiff(spec, other, 4);
+    expect(diff.filter((row) => row.differs).map((row) => [row.field, row.a, row.b])).toEqual([
+      ['days', '2019-12-30', '2019-12-27, 2019-12-30'],
+      ['strategy', 'Market maker', 'Imbalance'],
+      ['params.quote_size', '100', '—'],
+      ['params.requote_cooldown_ns', '100000000', '—'],
+      ['params.improve_ticks', '0', '—'],
+      ['window', 'Regular (feed session)', 'Full day'],
+      ['fees.maker', '0.00', '-0.0020'],
+      ['fees.taker', '0.00', '0.0030'],
+      ['params.threshold', '—', '3'],
+      ['params.clip', '—', '100'],
+      ['params.cooldown_ns', '—', '1000000000'],
+    ]);
+    expect(diff.find((row) => row.field === 'params.max_position')).toEqual({
+      field: 'params.max_position',
+      a: '500',
+      b: '500',
+      differs: false,
+    });
+    expect([likeForLike(spec, { ...spec, window: 'full_day' }), likeForLike(spec, other)]).toEqual([true, false]);
+    expect(likeForLike(spec, { ...spec, symbol: 'ZETA' })).toBe(false);
+  });
+});
+
 describe('createLab', () => {
   beforeEach(() => vi.useFakeTimers());
   afterEach(() => vi.useRealTimers());
@@ -435,5 +496,40 @@ describe('createLab', () => {
       1,
     ]);
     expect(s.sent.map((c) => c.type)).toEqual(['application/json', 'application/json', 'application/json']);
+  });
+
+  it('keeps the JSON of the shown run and the two ticked to compare; a third tick drops the first, a deleted run its own', async () => {
+    const { s, env } = server();
+    s.runs = ['a', 'b', 'c'].map((id) => listed(id));
+    s.json = { a: run('a'), b: run('b'), c: run('c') };
+    const lab = createLab(env);
+    await lab.start();
+    await lab.select('a');
+    await lab.tick('b', true);
+    await lab.tick('c', true);
+    expect([lab.get().compare, Object.keys(lab.get().details).sort()]).toEqual([
+      ['b', 'c'],
+      ['a', 'b', 'c'],
+    ]);
+    await lab.tick('a', true); // a third: b, the first, goes
+    expect([lab.get().compare, Object.keys(lab.get().details).sort()]).toEqual([
+      ['c', 'a'],
+      ['a', 'c'],
+    ]);
+    s.runs = s.runs.filter((r) => r.id !== 'c'); // deleted, as from another tab
+    await lab.start();
+    lab.showCompare(true);
+    await lab.select('b');
+    expect([lab.get().compare, lab.get().comparing, Object.keys(lab.get().details).sort()]).toEqual([
+      ['a'],
+      false,
+      ['a', 'b'],
+    ]);
+    expect(s.fetched.filter((f) => f.startsWith('GET /api/backtests/'))).toEqual([
+      'GET /api/backtests/a',
+      'GET /api/backtests/b',
+      'GET /api/backtests/c',
+      'GET /api/backtests/b',
+    ]);
   });
 });

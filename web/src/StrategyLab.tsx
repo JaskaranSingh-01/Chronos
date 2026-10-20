@@ -16,7 +16,7 @@ import {
   type StrategyKind,
   type Window,
 } from './lab';
-import { RunResults } from './LabResults';
+import { Compare, RunResults } from './LabResults';
 import { useStore } from './store';
 import { DayPicker, Switch, Symbols } from './TopBar';
 
@@ -179,17 +179,21 @@ function result(r: RunListing): string {
   return `${signed(r.pnl, moneyDigits(r))}${r.partial ? ` · ${r.state}` : ''}`;
 }
 
-// Every run, newest first, numbered in the order they were queued; a click shows one.
+// Every run, newest first, numbered in the order they were listed; a click shows one, and two ticked compare.
 function Runs({ edit }: { edit(r: RunListing): void }) {
   const runs = useLab((l) => l.runs);
   const selected = useLab((l) => l.selected);
+  const compare = useLab((l) => l.compare);
   const shown = runs.findIndex((r) => r.id === selected);
+  const ticked = runs.filter((r) => compare.includes(r.id));
+  const n = (r: RunListing) => runs.indexOf(r) + 1;
   return (
     <div className="panel runs">
-      <div className="title">Runs</div>
+      <div className="title">Runs · tick two to compare</div>
       <table>
         <tbody>
           <tr className="muted">
+            <td />
             <td>#</td>
             <td>Strategy</td>
             <td>Symbol</td>
@@ -199,6 +203,14 @@ function Runs({ edit }: { edit(r: RunListing): void }) {
           {runs
             .map((r, i) => (
               <tr key={r.id} className={r.id === selected ? 'on' : ''} onClick={() => void lab.select(r.id)}>
+                <td onClick={(e) => e.stopPropagation()}>
+                  <input
+                    type="checkbox"
+                    aria-label={`compare #${i + 1}`}
+                    checked={compare.includes(r.id)}
+                    onChange={(e) => void lab.tick(r.id, e.target.checked)}
+                  />
+                </td>
                 <td>{i + 1}</td>
                 <td>{strategyNames[r.spec.strategy] ?? r.spec.strategy}</td>
                 <td>{r.spec.symbol}</td>
@@ -209,6 +221,14 @@ function Runs({ edit }: { edit(r: RunListing): void }) {
             .reverse()}
         </tbody>
       </table>
+      <div className="actions">
+        <button
+          disabled={ticked.length !== 2 || ticked.some((r) => r.pnl === null)}
+          onClick={() => lab.showCompare(true)}
+        >
+          {ticked.length === 2 ? `Compare #${n(ticked[0])} vs #${n(ticked[1])}` : 'Compare'}
+        </button>
+      </div>
       {shown >= 0 && <RunActions key={selected} run={runs[shown]} n={shown + 1} edit={() => edit(runs[shown])} />}
     </div>
   );
@@ -218,6 +238,7 @@ function Runs({ edit }: { edit(r: RunListing): void }) {
 export function StrategyLab() {
   const offline = useLab((l) => l.offline);
   const notice = useLab((l) => l.notice);
+  const comparing = useLab((l) => l.comparing && l.compare.length === 2);
   const strategies = useLab((l) => l.strategies);
   const start = useLab((l) => l.start);
   const digits = useStore((s) => s.hello?.price_scale ?? 4); // ITCH 5.0's, before hello
@@ -235,9 +256,7 @@ export function StrategyLab() {
         <section className="col">
           {form && <RunForm key={copies} form={form} setForm={setForm} digits={digits} />}
         </section>
-        <section className="col">
-          <RunResults />
-        </section>
+        <section className="col">{comparing ? <Compare /> : <RunResults />}</section>
         <section className="col">
           <Runs
             edit={(r) => {
