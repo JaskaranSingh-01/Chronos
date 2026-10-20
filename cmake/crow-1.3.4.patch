@@ -43,3 +43,14 @@
  
          void* middleware_context{};
          void* middleware_container{};
+--- a/include/crow/http_server.h
++++ b/include/crow/http_server.h
+@@ -382,7 +382,7 @@
+         std::vector<detail::task_timer*> task_timer_pool_;
+         std::vector<std::function<std::string()>> get_cached_date_str_pool_;
+         Acceptor acceptor_;
+-        bool shutting_down_ = false;
++        std::atomic<bool> shutting_down_{false};
+         bool server_started_{false};
+         bool startup_failed_ = false;
+         std::condition_variable cv_started_;

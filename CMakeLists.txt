@@ -144,8 +144,9 @@ FetchContent_Declare(
     URL https://github.com/CrowCpp/Crow/archive/refs/tags/v1.3.4.tar.gz
     URL_HASH SHA256=6be759b3a648b41f0adc3a8408a53fd0243775217b4e32e8101d69e4aadf48cc
     SOURCE_SUBDIR none
-    # Fixes Crow 1.3.4 lacks: overflow-safe max_payload, a request-body cap, pong only when idle, and a request's flags
-    # initialised, as its parser's clear() copies a fresh request (UBSan: an indeterminate bool).
+    # Fixes Crow 1.3.4 lacks: overflow-safe max_payload, a request-body cap, pong only when idle; a request's flags
+    # initialised, as its parser's clear() copies a fresh request (UBSan: an indeterminate bool); and an atomic shutdown
+    # flag, which stop() writes while the acceptor reads it (TSan).
     PATCH_COMMAND patch -p1 -i ${PROJECT_SOURCE_DIR}/cmake/crow-1.3.4.patch
 )
 
