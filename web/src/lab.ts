@@ -338,8 +338,26 @@ export function specDiff(a: Spec, b: Spec, digits: number) {
 // Whether two runs replayed the same symbol over the same days.
 export const likeForLike = (a: Spec, b: Spec) => a.symbol === b.symbol && a.days.join() === b.days.join();
 
-// What a listed run allows.
-export const actions = (r: RunListing) => ({ cancel: r.state === 'queued' || r.state === 'running' });
+// What a listed run allows: Cancel while it is queued or running; Watch and Verify once it completed whole, and Verify
+// one at a time.
+export function actions(r: RunListing) {
+  const whole = r.state === 'completed' && !r.partial;
+  return { cancel: r.state === 'queued' || r.state === 'running', watch: whole, verify: whole && r.verifying === null };
+}
+
+// A verdict as shown, with its colour: different code and a changed input prove nothing either way.
+export const outcomes: Record<Outcome, [label: string, tone: string]> = {
+  reproduced: ['✓ reproduced', 'buy'],
+  mismatch: ['✗ mismatch', 'sell'],
+  different_code: ['different code', 'muted'],
+  input_changed: ['input changed', 'muted'],
+};
+
+// A run as the list numbers it, or its id when the list does not have it.
+export function runLabel(runs: RunListing[], id: string): string {
+  const i = runs.findIndex((r) => r.id === id);
+  return i >= 0 ? `#${i + 1}` : id;
+}
 
 export function createLab(env: Pick<Env, 'fetch' | 'load'>) {
   let state: LabState = {
@@ -497,6 +515,18 @@ export function createLab(env: Pick<Env, 'fetch' | 'load'>) {
     loadSymbols,
     submit,
     cancel: (id: string) => act('cancel', 'POST', `/api/backtests/${id}/cancel`),
+    verify: (id: string) => act('verify', 'POST', `/api/backtests/${id}/verify`),
+    // The run's JSON as chronos-serve serves it, for Export; null, said on the notice line, if it cannot be fetched.
+    async download(id: string): Promise<Blob | null> {
+      try {
+        const res = await get(`/api/backtests/${id}`);
+        if (res.ok) return await res.blob();
+        set({ ...state, notice: `export refused: ${res.status}` });
+      } catch {
+        set({ ...state, notice: 'export: chronos-serve does not answer' });
+      }
+      return null;
+    },
     // Deletes a run: a busy one stops and is never saved.
     async remove(id: string) {
       if ((await act('delete', 'DELETE', `/api/backtests/${id}`)) && state.selected === id) {

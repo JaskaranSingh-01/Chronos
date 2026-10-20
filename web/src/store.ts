@@ -8,9 +8,11 @@ import type {
   History,
   MyOrder,
   Order,
+  Reproduced,
   ServerMessage,
   SessionState,
   Snapshot,
+  Spec,
   Trade,
 } from './protocol';
 
@@ -24,6 +26,9 @@ export interface State {
   generation: number; // the newest seen in any envelope
   symbol: string; // this generation's, from its generation_start or a snapshot; '' until known
   genDays: string[]; // this generation's days, from its generation_start or state
+  spec: Spec | null; // this generation's settings, from its state: a Watch brings its run's fees and limits
+  runId: string; // the run this generation watches, from its generation_start or state; '' for none
+  verdict: Reproduced | null; // the Watch's, once its generation has ended
   snap: Snapshot | null; // the latest of `generation`; null until its first state
   state: SessionState; // from snapshots and control acks
   seq: number; // the last ring seq applied: reports and control acks
@@ -58,6 +63,9 @@ export const initial: State = {
   generation: 0,
   symbol: '',
   genDays: [],
+  spec: null,
+  runId: '',
+  verdict: null,
   snap: null,
   state: 'ended',
   seq: 0,
@@ -120,6 +128,9 @@ function newGeneration(s: State, generation: number): State {
     generation,
     symbol: '',
     genDays: [],
+    spec: null,
+    runId: '',
+    verdict: null,
     snap: null,
     seekAt: 0,
     notice: '',
@@ -153,6 +164,8 @@ function onSnapshot(s: State, m: Snapshot): State {
     snap: m,
     symbol: m.symbol,
     genDays: m.spec?.days ?? s.genDays,
+    spec: m.spec ?? s.spec,
+    runId: m.run_id ?? s.runId,
     state: m.state,
     // A state with nothing to recover holds every report up to its watermark.
     seq: m.type === 'state' && (m.full_resync || s.seq === 0) ? Math.max(s.seq, m.last_report_seq) : s.seq,
@@ -166,7 +179,9 @@ function onSnapshot(s: State, m: Snapshot): State {
 export function apply(s: State, m: ServerMessage): State {
   if (m.type === 'hello') {
     const same = s.hello?.session_id === m.session_id; // a new id: the server restarted, and its seqs with it
-    const base = same ? s : { ...initial, status: s.status, symbols: s.symbols, barsVersion: s.barsVersion + 1 };
+    const base = same
+      ? s
+      : { ...initial, status: s.status, symbols: s.symbols, days: s.days, barsVersion: s.barsVersion + 1 };
     const next = { ...(m.generation > base.generation ? newGeneration(base, m.generation) : base), hello: m };
     // An older server is a stale binary, met only through the Vite dev proxy.
     return m.protocol < protocol
@@ -204,7 +219,9 @@ export function apply(s: State, m: ServerMessage): State {
       if (m.kind === 'generation_start' && m.generation === s.generation) {
         next.symbol = m.symbol;
         next.genDays = m.days ?? s.genDays;
+        next.runId = m.run_id ?? s.runId;
       }
+      if (m.kind === 'reproduced' && m.generation === s.generation) next.verdict = m;
       if (m.kind === 'execution' && m.report_type === 'fill' && m.generation === s.generation) {
         next.fills = [...s.fills, m];
       }

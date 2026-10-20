@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { money, px, shares, signed, tone } from './format';
-import { cost, validate } from './order';
+import { cost, terms, validate } from './order';
 import type { OrderType, Side } from './protocol';
 import { selectOrders, selectTradeBlock, store, useStore } from './store';
 
@@ -12,6 +12,7 @@ const types: [OrderType, string][] = [
 
 export function Ticket({ price, setPrice }: { price: string; setPrice: (price: string) => void }) {
   const hello = useStore((s) => s.hello);
+  const spec = useStore((s) => s.spec);
   const blocked = useStore(selectTradeBlock);
   const position = useStore((s) => s.snap?.account.position ?? 0);
   const orders = useStore(selectOrders);
@@ -29,10 +30,10 @@ export function Ticket({ price, setPrice }: { price: string; setPrice: (price: s
   if (!hello) return <div className="panel ticket" />;
   const digits = hello.price_scale;
   const moneyDigits = hello.price_scale + hello.quantity_scale;
-  const order = validate({ side, type, price, qty }, hello, position, orders);
+  const order = validate({ side, type, price, qty }, terms(hello, spec), position, orders);
   const valid = typeof order !== 'string';
   const at = valid ? (order.price ?? (side === 'buy' ? ask : bid)) : 0; // a market order's estimate: the best opposite
-  const { notional, fee } = valid ? cost(order, hello, at) : { notional: 0, fee: 0 };
+  const { notional, fee } = valid ? cost(order, terms(hello, spec), at) : { notional: 0, fee: 0 };
   const crosses = // a post-only order priced into the opposite side is rejected as would_cross
     valid &&
     order.order_type === 'post_only' &&

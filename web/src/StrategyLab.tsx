@@ -6,18 +6,22 @@ import {
   fromSpec,
   lab,
   moneyDigits,
+  outcomes,
   refusalText,
+  runLabel,
+  specRows,
   strategyNames,
   toBody,
   useLab,
   windowLabels,
   type Form,
+  type Run,
   type RunListing,
   type StrategyKind,
   type Window,
 } from './lab';
 import { Compare, RunResults } from './LabResults';
-import { useStore } from './store';
+import { store, useStore } from './store';
 import { DayPicker, Switch, Symbols } from './TopBar';
 
 const none = { field: '', text: '' };
@@ -154,17 +158,48 @@ function RunForm({ form, setForm, digits }: { form: Form; setForm(f: Form): void
   );
 }
 
-// What the run shown allows: its settings as a new run, Cancel while it is queued or running, and Delete, confirmed
-// here rather than by a dialog.
+// Saves a run's JSON, fetched with the token, from a Blob.
+async function save(id: string) {
+  const blob = await lab.download(id);
+  if (!blob) return;
+  const link = document.createElement('a');
+  link.href = URL.createObjectURL(blob);
+  link.download = `${id}.json`;
+  link.click();
+  setTimeout(() => URL.revokeObjectURL(link.href));
+}
+
+// What the run shown allows: Watch in the terminal, which only the controlling tab may; Verify; Export; its settings
+// as a new run; Cancel while it is queued or running; and Delete, confirmed here rather than by a dialog.
 function RunActions({ run, n, edit }: { run: RunListing; n: number; edit(): void }) {
   const [confirming, setConfirming] = useState(false);
+  const seat = useStore((s) =>
+    s.status !== 'open' || !s.hello
+      ? 'Not connected'
+      : s.hello.role === 'controller'
+        ? ''
+        : 'Another tab holds control',
+  );
+  const can = actions(run);
   // The second click of a double click, which lands on Confirm delete once Delete arms it, is not a click.
   const once = (f: () => void) => (e: { detail: number }) => e.detail < 2 && f();
   return (
     <div className="actions">
       <span className="muted">#{n}</span>
+      <button
+        disabled={!can.watch || seat !== ''}
+        onClick={() => {
+          if (store.control({ action: 'watch', run_id: run.id })) location.hash = '';
+        }}
+      >
+        Watch in Terminal
+      </button>
+      <button disabled={!can.verify} onClick={once(() => void lab.verify(run.id))}>
+        {run.verifying ? `Verifying: ${run.verifying}` : 'Verify'}
+      </button>
+      <button onClick={() => void save(run.id)}>Export JSON</button>
       <button onClick={edit}>Edit as new</button>
-      {actions(run).cancel && <button onClick={once(() => void lab.cancel(run.id))}>Cancel run</button>}
+      {can.cancel && <button onClick={once(() => void lab.cancel(run.id))}>Cancel run</button>}
       {confirming ? (
         <>
           <button className="sell" onClick={once(() => void lab.remove(run.id))}>
@@ -175,6 +210,68 @@ function RunActions({ run, n, edit }: { run: RunListing; n: number; edit(): void
       ) : (
         <button onClick={() => setConfirming(true)}>Delete</button>
       )}
+      {can.watch && seat && <span className="muted">{seat}</span>}
+    </div>
+  );
+}
+
+// A run's verifications, each with its verdict, and its identity and record: the build, each day with its hash and
+// session, the engine, the timings, the digests and the settings.
+function Provenance({ run, label }: { run: Run; label: string }) {
+  const p = run.provenance;
+  const b = p.build;
+  const e = p.engine;
+  const digests = run.results?.digests;
+  const rows: [string, string][] = [
+    ['build', `${b.commit}${b.dirty ? ' dirty' : ''} · ${b.compiler} · ${b.build_type} · sanitize ${b.sanitize}`],
+    ['platform', b.platform],
+    ['source digest', b.source_digest],
+    ...p.days.map((d): [string, string] => [
+      d.date,
+      `${d.hash} · ${d.session.source === 'fallback' ? '09:30-16:00 fallback' : 'feed session'} · ${d.size} bytes`,
+    ]),
+    [
+      'engine',
+      `book ${e.book_capacity} · scales ${e.price_scale}/${e.quantity_scale} · invariants ${e.check_invariants_every}`,
+    ],
+    ['truncated tail', p.allow_truncated_tail ? 'allowed' : 'refused'],
+    ['ran', `${p.started || 'not yet'} to ${p.finished || '…'} on ${p.host}: ${p.wall_ms} ms wall, ${p.cpu_ms} ms CPU`],
+    [
+      'digests',
+      digests ? `book ${digests.book} · execution ${digests.execution} · portfolio ${digests.portfolio}` : 'none',
+    ],
+    ...specRows(run.spec, e.price_scale),
+  ];
+  return (
+    <div className="prov">
+      <div className="title">Run {label} provenance</div>
+      {run.reason && <div className="sell">{run.reason}</div>}
+      {run.warning && <div className="sell">{run.warning}</div>}
+      <div className="title">
+        Verifications ·{' '}
+        {run.reproduced === null
+          ? 'none on this code and days yet'
+          : run.reproduced
+            ? '✓ reproduced'
+            : '✗ not reproduced'}
+      </div>
+      {run.verifications.map((v) => (
+        <div key={v.finished + v.source_digest}>
+          <b className={outcomes[v.outcome][1]}>{outcomes[v.outcome][0]}</b> {v.finished} · code{' '}
+          {v.source_digest.slice(0, 16)}
+          {v.changed.length > 0 && ` · changed ${v.changed.join(', ')}`}
+        </div>
+      ))}
+      <table>
+        <tbody>
+          {rows.map(([name, value]) => (
+            <tr key={name}>
+              <td className="muted">{name}</td>
+              <td>{value}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </div>
   );
 }
@@ -191,6 +288,7 @@ function Runs({ edit }: { edit(r: RunListing): void }) {
   const runs = useLab((l) => l.runs);
   const selected = useLab((l) => l.selected);
   const compare = useLab((l) => l.compare);
+  const full = useLab((l) => l.details[l.selected]); // its JSON, for the provenance
   const shown = runs.findIndex((r) => r.id === selected);
   const ticked = runs.filter((r) => compare.includes(r.id));
   const n = (r: RunListing) => runs.indexOf(r) + 1;
@@ -237,6 +335,7 @@ function Runs({ edit }: { edit(r: RunListing): void }) {
         </button>
       </div>
       {shown >= 0 && <RunActions key={selected} run={runs[shown]} n={shown + 1} edit={() => edit(runs[shown])} />}
+      {shown >= 0 && full && <Provenance run={full} label={runLabel(runs, selected)} />}
     </div>
   );
 }

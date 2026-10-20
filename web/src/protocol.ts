@@ -159,6 +159,16 @@ export interface GenerationEnd extends Ring {
 
 export type GenerationMark = GenerationStart | GenerationEnd;
 
+// The verdict at the end of a Watch's generation: its digests against the run's.
+export interface Reproduced extends Ring {
+  type: 'report';
+  kind: 'reproduced';
+  run_id: string;
+  outcome: Outcome;
+  digests: Digests;
+  expected: Digests;
+}
+
 export interface ControlAck extends Ring {
   type: 'ack';
   control: string;
@@ -179,6 +189,7 @@ export type ServerMessage =
   | Execution
   | Lifecycle
   | GenerationMark
+  | Reproduced
   | ControlAck
   | CommandAck
   | (Envelope & { type: 'gap'; from: number; to: number })
@@ -190,7 +201,8 @@ export type Control =
   | { action: 'step'; n: number }
   | { action: 'speed'; speed: number }
   | { action: 'seek'; ts: number }
-  | { action: 'symbol'; symbol: string; days?: string[] };
+  | { action: 'symbol'; symbol: string; days?: string[] }
+  | { action: 'watch'; run_id: string };
 
 export interface Order {
   side: Side;

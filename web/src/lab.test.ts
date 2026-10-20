@@ -9,8 +9,10 @@ import {
   drawdown,
   fromSpec,
   likeForLike,
+  outcomes,
   page,
   refusalText,
+  runLabel,
   specDiff,
   timeOfRun,
   toBody,
@@ -198,6 +200,35 @@ describe('the run form', () => {
   it('allows Cancel only while a run is queued or running', () => {
     const states = ['queued', 'running', 'completed', 'failed', 'cancelled'] as const;
     expect(states.map((state) => actions(listed('a', { state })).cancel)).toEqual([true, true, false, false, false]);
+  });
+});
+
+describe('watch and verify', () => {
+  it('lets only a completed, whole run be watched or verified, and verified once at a time', () => {
+    const allowed = (over: Partial<RunListing>) => {
+      const a = actions(listed('a', over));
+      return [a.watch, a.verify];
+    };
+    expect(allowed({})).toEqual([true, true]);
+    expect(allowed({ verifying: 'running' })).toEqual([true, false]);
+    for (const state of ['queued', 'running'] as const) expect(allowed({ state, pnl: null })).toEqual([false, false]);
+    for (const state of ['failed', 'cancelled'] as const)
+      expect(allowed({ state, partial: true })).toEqual([false, false]);
+  });
+
+  it('shows a different code or a changed input as such, never as a failed reproduction', () => {
+    expect(Object.values(outcomes)).toEqual([
+      ['✓ reproduced', 'buy'],
+      ['✗ mismatch', 'sell'],
+      ['different code', 'muted'],
+      ['input changed', 'muted'],
+    ]);
+    expect(Object.keys(outcomes)).toEqual(['reproduced', 'mismatch', 'different_code', 'input_changed']);
+  });
+
+  it('numbers a run as the list does, or names it by its id when the list does not have it', () => {
+    const runs = [listed('a'), listed('b')];
+    expect([runLabel(runs, 'b'), runLabel(runs, 'gone')]).toEqual(['#2', 'gone']);
   });
 });
 
@@ -530,6 +561,32 @@ describe('createLab', () => {
       'GET /api/backtests/b',
       'GET /api/backtests/c',
       'GET /api/backtests/b',
+    ]);
+  });
+
+  it('verifies a run, says when chronos-serve refuses, and downloads its JSON with the token for Export', async () => {
+    const { s, env } = server();
+    s.token = 't0k3n';
+    s.runs = [listed('a'), listed('b')];
+    s.json = { a: run('a') };
+    s.answer = (_method, path) => {
+      if (path === '/api/backtests/a/verify') {
+        s.runs[0] = listed('a', { verifying: 'queued' });
+        return Response.json({ id: 'a' }, { status: 202 });
+      }
+      if (path === '/api/backtests/b/verify') return Response.json({ error: 'input_changed' }, { status: 409 });
+      return undefined;
+    };
+    const lab = createLab(env);
+    await lab.verify('a');
+    expect([lab.get().runs[0].verifying, lab.get().notice]).toEqual(['queued', '']);
+    await lab.verify('b');
+    expect(lab.get().notice).toBe('verify refused: input_changed');
+    expect(JSON.parse(await (await lab.download('a'))!.text())).toEqual(run('a'));
+    expect([await lab.download('gone'), lab.get().notice]).toEqual([null, 'export refused: 404']);
+    expect(s.fetched.filter((f) => f.split(' ')[1].startsWith('/api/backtests/a'))).toEqual([
+      'POST /api/backtests/a/verify Bearer t0k3n',
+      'GET /api/backtests/a Bearer t0k3n',
     ]);
   });
 });

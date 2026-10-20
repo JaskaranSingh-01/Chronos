@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { cost, parseTicks, signedTicks, validate, type Ticket } from './order';
-import type { Hello, MyOrder } from './protocol';
+import { cost, parseTicks, signedTicks, terms, validate, type Ticket } from './order';
+import type { Hello, MyOrder, Spec } from './protocol';
 
 const hello: Hello = {
   type: 'hello',
@@ -145,6 +145,24 @@ describe('validate', () => {
         expect(validate(ticket({ type, price }), hello, 0, [])).toBe('Enter a price');
       }
     }
+  });
+});
+
+describe('terms', () => {
+  it("prices and limits a manual order by the generation's spec, a Watch's included, else by hello", () => {
+    const spec: Spec = {
+      symbol: 'ACME',
+      days: ['2019-12-30'],
+      strategy: 'market_maker',
+      params: {},
+      latency: { order_ns: 50_000, report_ns: 50_000 },
+      fees: { maker: -25, taker: 35 },
+      limits: { max_position: 500, max_order_quantity: 100, max_open_orders: 2 },
+      window: 'regular',
+    };
+    expect(terms(hello, null)).toBe(hello);
+    expect(terms(hello, spec)).toEqual({ ...hello, fees: spec.fees, limits: spec.limits });
+    expect(validate(ticket({ qty: '200' }), terms(hello, spec), 0, [])).toBe('At most 100 shares an order');
   });
 });
 

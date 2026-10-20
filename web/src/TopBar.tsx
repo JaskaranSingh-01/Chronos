@@ -210,7 +210,7 @@ export function TopBar() {
       <span>
         PnL <b>{snap && hello ? signed(snap.account.pnl, hello.price_scale + hello.quantity_scale) : '—'}</b>
       </span>
-      <span className="muted" data-testid="session">
+      <span className="muted session" data-testid="session">
         {symbol || (generation > 1 ? '…' : 'no symbol')} · gen {generation} · {state}
         {status !== 'open' && ` · ${status}`}
         {viewer && hello && ' · viewer'}

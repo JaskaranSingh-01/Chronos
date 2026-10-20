@@ -1,7 +1,7 @@
 import { useState, useSyncExternalStore } from 'react';
 import { Book, Tape } from './Book';
 import { Chart } from './Chart';
-import { page } from './lab';
+import { outcomes, page, runLabel, useLab } from './lab';
 import { store, useStore } from './store';
 import { StrategyLab } from './StrategyLab';
 import { Tabs } from './Tabs';
@@ -41,6 +41,24 @@ function ViewerBanner() {
   ) : null;
 }
 
+// Says which Lab run this generation replays, and, once it has ended, the verdict.
+function WatchBanner() {
+  const runId = useStore((s) => s.runId);
+  const verdict = useStore((s) => s.verdict);
+  const label = useLab((l) => runLabel(l.runs, runId));
+  if (!runId) return null;
+  return (
+    <p className="banner" data-testid="watch">
+      Watching run {label}
+      {verdict ? (
+        <b className={outcomes[verdict.outcome][1]}> · {outcomes[verdict.outcome][0]}</b>
+      ) : (
+        ': the verdict comes when its replay ends.'
+      )}
+    </p>
+  );
+}
+
 const onHash = (f: () => void) => {
   addEventListener('hashchange', f);
   return () => removeEventListener('hashchange', f);
@@ -59,6 +77,7 @@ export function App() {
         <>
           <TopBar />
           <ViewerBanner />
+          <WatchBanner />
           <main>
             <section className="col">
               <Chart />

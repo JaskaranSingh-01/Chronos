@@ -1,4 +1,4 @@
-import type { Hello, MyOrder, Order, OrderType, Side } from './protocol';
+import type { Hello, MyOrder, Order, OrderType, Side, Spec } from './protocol';
 
 export interface Ticket {
   side: Side;
@@ -21,6 +21,10 @@ export function parseTicks(text: string, digits: number): number {
   const ticks = signedTicks(text, digits);
   return ticks > 0 ? ticks : NaN;
 }
+
+// The fees and limits a manual order faces: the generation's own once its state has come, a Watch's run's included.
+export const terms = (hello: Hello, spec: Spec | null): Hello =>
+  spec ? { ...hello, fees: spec.fees, limits: spec.limits } : hello;
 
 // The order the ticket describes, or why it would be refused; the server checks again, in Portfolio::reserve's order.
 export function validate(t: Ticket, hello: Hello, position: number, orders: readonly MyOrder[]): Order | string {

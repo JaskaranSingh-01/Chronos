@@ -1,5 +1,16 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { Candle, Execution, Hello, MyOrder, ServerMessage, SessionState, Snapshot, Spec, Trade } from './protocol';
+import type {
+  Candle,
+  Day,
+  Execution,
+  Hello,
+  MyOrder,
+  ServerMessage,
+  SessionState,
+  Snapshot,
+  Spec,
+  Trade,
+} from './protocol';
 import {
   apply,
   createStore,
@@ -266,6 +277,44 @@ describe('apply', () => {
     };
     expect(apply(s, start).genDays).toEqual(['2019-12-31']);
     expect(apply(s, hello({ generation: 3 })).genDays).toEqual([]);
+  });
+
+  it("follows a Watch: its run from generation_start or state, its verdict, and the generation's spec", () => {
+    const spec: Spec = {
+      symbol: 'ACME',
+      days: ['2019-12-30'],
+      strategy: 'market_maker',
+      params: {},
+      latency: { order_ns: 50_000, report_ns: 50_000 },
+      fees: { maker: -20, taker: 30 },
+      limits: { max_position: 500, max_order_quantity: 100, max_open_orders: 2 },
+      window: 'regular',
+    };
+    const start: ServerMessage = { ...generationStart(3, 1), run_id: 'r1' } as ServerMessage;
+    const digests = { book: '1', execution: '2', portfolio: '3' };
+    const verdict: ServerMessage = {
+      type: 'report',
+      kind: 'reproduced',
+      session_id: 's1',
+      generation: 3,
+      seq: 9,
+      run_id: 'r1',
+      outcome: 'reproduced',
+      digests,
+      expected: digests,
+    };
+    const s = run(hello(), snapshot({ type: 'state' }), start);
+    expect([s.runId, s.spec, s.verdict]).toEqual(['r1', null, null]);
+    const watched = apply(apply(s, snapshot({ type: 'state', generation: 3, spec, run_id: 'r1' })), verdict);
+    expect([watched.runId, watched.spec, watched.verdict]).toEqual(['r1', spec, verdict]);
+    expect(apply(watched, snapshot({ generation: 3, snapshot_seq: 2 })).spec).toBe(spec); // a snapshot carries none
+    const next = apply(watched, generationStart(4, 10));
+    expect([next.runId, next.spec, next.verdict]).toEqual(['', null, null]);
+  });
+
+  it('keeps the days the day picker found when hello names a new session', () => {
+    const days = [{ date: '2019-12-30' } as Day];
+    expect(apply({ ...run(hello()), days }, hello({ session_id: 's2', generation: 1 })).days).toBe(days);
   });
 
   it('asks for a rebuilt chronos-serve when hello speaks an older protocol', () => {
