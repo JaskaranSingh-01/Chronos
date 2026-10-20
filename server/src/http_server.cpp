@@ -101,7 +101,8 @@ struct HttpServer::Impl
 
 void HttpServer::Impl::routes()
 {
-    app.loglevel(crow::LogLevel::Warning);
+    static std::once_flag quiet;  // Crow's log level is one per process: set before any server's threads read it
+    std::call_once(quiet, [] { crow::logger::setLogLevel(crow::LogLevel::Warning); });
     // ponytail: a rescan that finds a new file hashes it here, seconds on one of 4 Crow threads; scan in the
     // background if that stalls the UI.
     CROW_ROUTE(app, "/api/days")([this](const crow::request& request) {
