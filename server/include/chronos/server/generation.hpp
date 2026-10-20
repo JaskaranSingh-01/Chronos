@@ -154,5 +154,7 @@ constexpr Outcome verdict(bool input_changed, bool same_code, bool same_digests)
         : same_digests   ? Outcome::Reproduced
                          : Outcome::Mismatch;
 }
+static_assert(verdict(true, false, false) == Outcome::InputChanged &&
+              verdict(false, false, true) == Outcome::DifferentCode);
 
 }  // namespace simulator::server

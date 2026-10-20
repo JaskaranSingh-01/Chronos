@@ -101,8 +101,9 @@ enum class Refusal : std::uint8_t {
     None,
     NotFound,  // no such run, or one being deleted
     Conflict,      // the run is not in a state that allows it
-    InputChanged,  // a day of the run is gone, or its cached hash is not the run's
-    QueueFull      // max_queued jobs wait already
+    InputChanged,   // a day of the run is gone, or its cached hash is not the run's
+    OtherSettings,  // the run replayed under another --allow-truncated-tail (spec §8.9)
+    QueueFull       // max_queued jobs wait already
 };
 
 // The Lab's runs (spec §5.3-§5.5) and the one worker thread that runs their jobs, runs and verifications, oldest

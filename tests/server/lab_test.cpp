@@ -327,6 +327,10 @@ TEST(LabTest, AVerificationOnTheSameCodeAndDaysReproducesTheRun)
     const json reloaded = run(restarted, id);
     EXPECT_EQ(reloaded["verifications"].size(), 2u);
     EXPECT_EQ(reloaded["reproduced"], true);
+    SessionConfig lenient = lab_config();
+    lenient.allow_truncated_tail = true;
+    Backtester other{lenient, days.runs};  // a server started with the other --allow-truncated-tail
+    EXPECT_EQ(other.verify(id, days.library), Refusal::OtherSettings);
 }
 
 // Review gate 1, Verify's half: Friday is edited in place mid-file, keeping its size, mtime and inode, so the cached

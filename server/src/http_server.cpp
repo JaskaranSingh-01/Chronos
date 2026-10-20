@@ -178,6 +178,8 @@ void HttpServer::Impl::routes()
                     return json_response(409, encode_lab_error("not_completed"));
                 case Refusal::InputChanged:
                     return json_response(409, encode_lab_error("input_changed"));
+                case Refusal::OtherSettings:
+                    return json_response(409, encode_lab_error("other_settings"));
                 case Refusal::QueueFull:
                     return json_response(429, encode_lab_error("queue_full"));
                 }

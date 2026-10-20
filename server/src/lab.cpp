@@ -59,6 +59,12 @@ std::string write_file(const std::filesystem::path& path, const std::string& tex
     return {};
 }
 
+// The run's code is this build's: the same source digest, which a build without git ("unknown") never has.
+bool same_code(const Run& run) noexcept
+{
+    return run.provenance.build.source_digest != "unknown" && run.provenance.build.source_digest == build_source_digest;
+}
+
 // A verification's record (spec §5.5): the days whose re-hash differs from the run's, then this build's source digest
 // against the run's, then the digests.
 Verification verification(const Run& run, const RunResult& result)
@@ -72,7 +78,7 @@ Verification verification(const Run& run, const RunResult& result)
     if (!result.partial) {
         v.digests = result.digests;
     }
-    v.outcome = verdict(!v.changed.empty(), run.provenance.build.source_digest == build_source_digest,
+    v.outcome = verdict(!v.changed.empty(), same_code(run),
                         v.digests && run.results != nullptr && *v.digests == run.results->digests);
     return v;
 }
@@ -204,6 +210,9 @@ Refusal Backtester::verify(std::string_view id, const DayLibrary& library)
         if (run.state != RunState::Completed || run.results == nullptr || run.results->partial) {
             return Refusal::Conflict;
         }
+        if (run.provenance.allow_truncated_tail != config_.allow_truncated_tail) {
+            return Refusal::OtherSettings;
+        }
         recorded = run.provenance.days;
     }
     std::vector<DayHandle> days;
@@ -267,7 +276,7 @@ bool Backtester::watch(Control& control, const DayLibrary& library, std::string&
     control.watch.expected = run.results->digests;
     const std::string inputs = inputs_hash(hashes);
     std::copy(inputs.begin(), inputs.end(), control.watch.inputs.begin());
-    control.watch.same_code = run.provenance.build.source_digest == build_source_digest;
+    control.watch.same_code = same_code(run);
     return true;
 }
 
