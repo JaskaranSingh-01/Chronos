@@ -8,6 +8,7 @@
 #include <initializer_list>
 #include <limits>
 #include <memory>
+#include <optional>
 #include <stdexcept>
 #include <utility>
 
@@ -32,21 +33,21 @@ constexpr std::int64_t max_fee = 1'000'000;                  // ticks a share
 // The longest part of a client's `type` an error echoes.
 constexpr std::size_t max_echoed_type = 32;
 
-// The first key of `object` that is not one of `keys`; "" if there is none.
-std::string unknown_key(const json& object, std::initializer_list<std::string_view> keys)
+// The first key of `object` that is not one of `keys`, which may itself be ""; none if every key is one of them.
+std::optional<std::string> unknown_key(const json& object, std::initializer_list<std::string_view> keys)
 {
     for (const auto& item : object.items()) {
         if (std::find(keys.begin(), keys.end(), item.key()) == keys.end()) {
             return item.key();
         }
     }
-    return {};
+    return std::nullopt;
 }
 
 // True if every key of `object` is one of `keys`.
 bool only(const json& object, std::initializer_list<std::string_view> keys)
 {
-    return unknown_key(object, keys).empty();
+    return !unknown_key(object, keys);
 }
 
 // Reads `key` as an unsigned integer of at most `max`.
@@ -224,10 +225,9 @@ bool decode_strategy(const json& j, StrategySpec& spec, std::string& field)
     };
     if (spec.kind == SessionStrategyKind::MarketMaker) {
         MarketMakerParams& mm = spec.market_maker;
-        if (const std::string key =
-                unknown_key(params, {"quote_size", "max_position", "requote_cooldown_ns", "improve_ticks"});
-            !key.empty()) {
-            return bad(key);
+        if (const auto key =
+                unknown_key(params, {"quote_size", "max_position", "requote_cooldown_ns", "improve_ticks"})) {
+            return bad(*key);
         }
         if (!read_optional(params, "quote_size", max_param, mm.quote_size) || mm.quote_size == 0) {
             return bad("quote_size");
@@ -241,9 +241,8 @@ bool decode_strategy(const json& j, StrategySpec& spec, std::string& field)
         return read_optional(params, "improve_ticks", max_param, mm.improve_ticks) || bad("improve_ticks");
     }
     ImbalanceTakerParams& it = spec.imbalance;
-    if (const std::string key = unknown_key(params, {"threshold", "clip", "max_position", "cooldown_ns"});
-        !key.empty()) {
-        return bad(key);
+    if (const auto key = unknown_key(params, {"threshold", "clip", "max_position", "cooldown_ns"})) {
+        return bad(*key);
     }
     if (params.contains("threshold")) {
         const json& threshold = params.at("threshold");
@@ -281,8 +280,8 @@ const json* section(const json& j, const char* key, std::initializer_list<std::s
     if (!it->is_object()) {
         return nullptr;
     }
-    if (const std::string unknown = unknown_key(*it, keys); !unknown.empty()) {
-        field += "." + unknown;
+    if (const auto unknown = unknown_key(*it, keys)) {
+        field += "." + *unknown;
         return nullptr;
     }
     return &*it;
@@ -291,10 +290,9 @@ const json* section(const json& j, const char* key, std::initializer_list<std::s
 // A Lab run's RunSpec (spec §7.2); see decode_run_spec().
 bool spec_from(const json& j, RunSpec& spec, std::string& field)
 {
-    if (const std::string key =
-            unknown_key(j, {"symbol", "days", "strategy", "params", "latency", "fees", "limits", "window"});
-        !key.empty()) {
-        field = key;
+    if (const auto key =
+            unknown_key(j, {"symbol", "days", "strategy", "params", "latency", "fees", "limits", "window"})) {
+        field = *key;
         return false;
     }
     StrategySpec strategy;
@@ -518,6 +516,7 @@ Digests digests_from(const json& j)
             .portfolio = hex16_from(j.at("portfolio"))};
 }
 
+// Not written: RunResult's cancelled, reason, wall_ms and cpu_ms (the run's state, reason, provenance) and hashes.
 json results_json(const RunResult& r)
 {
     json t = json::array();
@@ -972,7 +971,12 @@ std::string encode_strategies()
         {{"strategies", strategies},
          {"latency",
           {{"order_ns", mm.latency.order_latency}, {"report_ns", mm.latency.report_latency}, {"max", max_latency_ns}}},
-         {"fees", {{"maker", 0}, {"taker", 0}, {"min", -max_fee}, {"max", max_fee}, {"taker_min", 0}}},
+         {"fees",
+          {{"maker", mm.fees.maker_fee_per_share},
+           {"taker", mm.fees.taker_fee_per_share},
+           {"min", -max_fee},
+           {"max", max_fee},
+           {"taker_min", 0}}},
          {"limit_max", max_param},
          {"windows",
           json::array({{{"id", TradingWindow::Regular}, {"label", "Regular (feed session)"}},

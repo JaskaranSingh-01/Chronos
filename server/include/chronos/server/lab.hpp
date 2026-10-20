@@ -82,7 +82,7 @@ struct Run
     RunSpec spec{};
     Provenance provenance{};
     std::shared_ptr<const RunResult> results{};  // null while queued or running
-    std::optional<RunState> verifying{};         // a verification Queued or Running; not saved
+    std::optional<RunState> verifying{};  // a verification Queued or Running; written, but decode_run drops it
     std::vector<Verification> verifications{};
     double progress{0};  // the bytes read over the days' sizes while running; not saved
 };

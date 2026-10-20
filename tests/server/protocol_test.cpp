@@ -174,6 +174,7 @@ TEST(ProtocolTest, RefusesAnythingOutsideItsSchema)
     EXPECT_TRUE(refused(R"({"type":"auth","token":5})"));                  // a value of the wrong type
     EXPECT_TRUE(refused(client_message("control", R"(,"action":"rewind")")));    // an unknown name
     EXPECT_TRUE(refused(client_message("control", R"(,"action":"play","n":1)")));  // a key its action does not take
+    EXPECT_TRUE(refused(client_message("control", R"(,"action":"play","":1)")));   // a key that is itself empty
     EXPECT_TRUE(refused(client_message("control", R"(,"action":"step","n":0)")));
     EXPECT_TRUE(refused(client_message("control", R"(,"action":"speed","speed":1001)")));
     EXPECT_TRUE(refused(client_message("control", R"(,"action":"seek","ts":-1)")));
@@ -591,6 +592,14 @@ TEST(ProtocolTest, DecodesARunSpecWithTheClisDefaults)
     EXPECT_EQ(minimal.latency.order_latency, 50'000);
     EXPECT_EQ(minimal.limits.max_open_orders, 2u);
 
+    RunSpec expected_imbalance = default_spec(SessionStrategyKind::ImbalanceTaker);
+    expected_imbalance.ticker = ticker("SPY");
+    expected_imbalance.days = {.day = {2019y / 12 / 30}, .count = 1};
+    const RunSpec imbalance = run_spec(R"({"symbol":"SPY","days":["2019-12-30"],"strategy":"imbalance"})");
+    EXPECT_EQ(json::parse(encode_snapshot("s", Snapshot{.spec = imbalance}, true, false))["spec"],
+              json::parse(encode_snapshot("s", Snapshot{.spec = expected_imbalance}, true, false))["spec"]);
+    EXPECT_EQ(imbalance.limits.max_open_orders, 1u);
+
     const RunSpec sized = run_spec(R"({"symbol":"SPY","days":["2019-12-30"],"strategy":"market_maker",)"
                                    R"("params":{"quote_size":200,"max_position":800}})");
     EXPECT_EQ(sized.limits.max_order_quantity, Quantity{200});  // as --quote-size 200 --max-position 800 set them
@@ -624,6 +633,7 @@ TEST(ProtocolTest, RefusesABadRunSpecNamingItsField)
     EXPECT_EQ(bad_field("["), "");
     EXPECT_EQ(bad_field("[1]"), "");
     EXPECT_EQ(bad_field(head + R"(,"frob":1})"), "frob");
+    EXPECT_EQ(bad_field(head + R"(,"":1})"), "");  // a key that is itself empty is an unknown key, not no key
     EXPECT_EQ(bad_field(R"({"days":["2019-12-30"],"strategy":"market_maker"})"), "symbol");
     EXPECT_EQ(bad_field(R"({"symbol":"TOOLONGXX","days":["2019-12-30"],"strategy":"market_maker"})"), "symbol");
     EXPECT_EQ(bad_field(R"({"symbol":"A B","days":["2019-12-30"],"strategy":"market_maker"})"), "symbol");
@@ -640,6 +650,8 @@ TEST(ProtocolTest, RefusesABadRunSpecNamingItsField)
     EXPECT_EQ(bad_field(R"({"symbol":"SPY","days":["2019-12-30"]})"), "strategy");
     EXPECT_EQ(bad_field(R"({"symbol":"SPY","days":["2019-12-30"],"strategy":"none"})"), "strategy");
     EXPECT_EQ(bad_field(head + R"(,"params":[1]})"), "params");
+    EXPECT_EQ(bad_field(head + R"(,"params":{"":1}})"), "params.");
+    EXPECT_EQ(bad_field(R"({"symbol":"SPY","days":["2019-12-30"],"strategy":"imbalance","params":{"":1}})"), "params.");
     EXPECT_EQ(bad_field(head + R"(,"params":{"quote_size":0}})"), "params.quote_size");
     EXPECT_EQ(bad_field(head + R"(,"params":{"quote_size":1000000001}})"), "params.quote_size");
     EXPECT_EQ(bad_field(head + R"(,"params":{"clip":5}})"), "params.clip");
@@ -650,6 +662,7 @@ TEST(ProtocolTest, RefusesABadRunSpecNamingItsField)
     EXPECT_EQ(bad_field(head + R"(,"latency":{"order_ns":1000000000001}})"), "latency.order_ns");
     EXPECT_EQ(bad_field(head + R"(,"latency":{"report_ns":2.5}})"), "latency.report_ns");
     EXPECT_EQ(bad_field(head + R"(,"latency":{"order_us":5}})"), "latency.order_us");
+    EXPECT_EQ(bad_field(head + R"(,"latency":{"":5}})"), "latency.");
     EXPECT_EQ(bad_field(head + R"(,"fees":{"maker":-1000001}})"), "fees.maker");
     EXPECT_EQ(bad_field(head + R"(,"fees":{"maker":18446744073709551615}})"), "fees.maker");
     EXPECT_EQ(bad_field(head + R"(,"fees":{"taker":-1}})"), "fees.taker");
@@ -683,17 +696,24 @@ TEST(ProtocolTest, EncodesTheStrategiesWithTheirDefaultsAndCaps)
     EXPECT_EQ(j["max_queued"], 8);
 }
 
-// A finished run reads back from its file as it was written; reproduced is true once a same-code, same-input
-// verification matched, and false once one did not. The listing leaves the results out.
+// A finished run reads back from its file as it was written, whatever state it ended in; reproduced is true once a
+// same-code, same-input verification matched, and false once one did not. The listing leaves the results out.
 TEST(ProtocolTest, ARunDocumentReadsBackAsItWasWritten)
 {
     using namespace std::chrono_literals;
+    // Every field the document holds is off its default, so one it drops or misreads shows in the comparisons.
     RunResult results{.events = 9,
                       .sim_events = 4,
                       .pnl = -200,
+                      .realised = -150,
+                      .unrealised = -30,
+                      .fees = 20,
                       .position = 100,
+                      .max_abs_position = 120,
+                      .max_drawdown = 260,
                       .maker_fills = 1,
-                      .filled_shares = 100,
+                      .taker_fills = 1,
+                      .filled_shares = 150,
                       .fill_rate = 0.5,
                       .digests = {.book = 0xcbf29ce484222325, .execution = 1, .portfolio = 2},
                       .equity = {{.second = 1'577'716'201, .pnl = 0, .position = 0},
@@ -707,17 +727,43 @@ TEST(ProtocolTest, ARunDocumentReadsBackAsItWasWritten)
                                  .liquidity = Liquidity::Maker,
                                  .rule = FillCause::RuleAExecute,
                                  .ahead_at_entry = 300,
-                                 .position = 100}}};
+                                 .position = 100},
+                                {.exchange_ts = 1'577'716'202'000'000'000,
+                                 .order_id = 2,
+                                 .side = Side::Sell,
+                                 .price = Price{100'500},
+                                 .quantity = Quantity{50},
+                                 .liquidity = Liquidity::Taker,
+                                 .rule = FillCause::RuleCReplace,
+                                 .ahead_at_entry = 7,
+                                 .position = 50}},
+                      .truncated = true};
     results.fills_by[0][2] = 1;
+    results.anomalies_by[3][1] = 2;
     RunSpec spec = default_spec(SessionStrategyKind::MarketMaker);
     spec.ticker = ticker("ACME");
     spec.days = {.day = {2019y / 12 / 30}, .count = 1};
+    spec.latency = {.order_latency = 123'456, .report_latency = 7};
+    spec.fees = {.maker_fee_per_share = -2, .taker_fee_per_share = 3};
+    spec.limits.max_open_orders = 4;
+    spec.window = TradingWindow::FullDay;
+    spec.strategy.market_maker.improve_ticks = 2;
     server::Run run{.id = "20261018T101500Z-9c2e41d07ab35f18",
                     .state = RunState::Completed,
+                    .warning = "not saved: No space left on device",
                     .spec = spec,
-                    .provenance = {.build = {.commit = "abc", .source_digest = std::string(64, 'f')},
+                    .provenance = {.build = {.commit = "abc1234",
+                                             .dirty = true,
+                                             .source_digest = std::string(64, 'f'),
+                                             .compiler = "AppleClang 17.0.0",
+                                             .build_type = "RelWithDebInfo",
+                                             .sanitize = "address",
+                                             .platform = "Darwin arm64"},
                                    .book_capacity = 1'048'576,
                                    .price_scale = 4,
+                                   .quantity_scale = 2,
+                                   .check_invariants_every = 1'000,
+                                   .allow_truncated_tail = true,
                                    .days = {{.date = 2019y / 12 / 30,
                                              .file = "12302019.NASDAQ_ITCH50.bin",
                                              .size = 7,
@@ -725,19 +771,24 @@ TEST(ProtocolTest, ARunDocumentReadsBackAsItWasWritten)
                                              .session = {.open = 1, .close = 2, .source = SessionSource::Feed}}},
                                    .host = "host",
                                    .submitted = "2026-10-18T10:15:00Z",
-                                   .wall_ms = 3},
+                                   .started = "2026-10-18T10:15:01Z",
+                                   .finished = "2026-10-18T10:15:04Z",
+                                   .wall_ms = 3,
+                                   .cpu_ms = 2},
                     .results = std::make_shared<const RunResult>(results)};
     const json written = json::parse(encode_run(run));
     EXPECT_EQ(written["format"], 1);
     EXPECT_EQ(written["state"], "completed");
     EXPECT_EQ(written["results"]["digests"]["book"], "cbf29ce484222325");
-    EXPECT_EQ(written["results"]["fills"], 1);
+    EXPECT_EQ(written["results"]["fills"], 2);
     EXPECT_EQ(written["results"]["equity"]["t"], json::parse("[1577716201,1577716202]"));
     EXPECT_EQ(written["results"]["by_hour"], json::parse(R"({"hour":[9],"pnl":[-200]})"));
     EXPECT_EQ(written["results"]["attribution"]["fills"][0], json::parse("[0,0,1,0,0]"));
     EXPECT_EQ(written["results"]["fill_list"]["rows"][0],
               json::parse(R"([1577716201500000000,1,"buy",100000,100,"maker","a_e",300,100])"));
-    EXPECT_EQ(written["spec"]["window"], "regular");
+    EXPECT_EQ(written["results"]["fill_list"]["rows"][1],
+              json::parse(R"([1577716202000000000,2,"sell",100500,50,"taker","c_replace",7,50])"));
+    EXPECT_EQ(written["spec"]["window"], "full_day");
     EXPECT_EQ(written["reproduced"], nullptr);
     EXPECT_EQ(written["verifying"], nullptr);
 
@@ -746,12 +797,24 @@ TEST(ProtocolTest, ARunDocumentReadsBackAsItWasWritten)
     EXPECT_EQ(encode_run(read), encode_run(run));
     EXPECT_EQ(*read.results, results);
 
-    const Verification matched{.outcome = Outcome::Reproduced, .digests = results.digests};
-    run.verifications = {{.outcome = Outcome::DifferentCode}, matched};
+    const std::string code = run.provenance.build.source_digest;
+    const Verification matched{.finished = "2026-10-18T11:00:00Z",
+                               .outcome = Outcome::Reproduced,
+                               .digests = results.digests,
+                               .source_digest = code};
+    run.verifications = {{.finished = "2026-10-18T10:30:00Z",
+                          .outcome = Outcome::DifferentCode,
+                          .digests = Digests{.book = 7, .execution = 8, .portfolio = 9},
+                          .source_digest = std::string(64, 'e')},
+                         matched};
     EXPECT_EQ(json::parse(encode_run(run))["reproduced"], true);
-    run.verifications.push_back({.outcome = Outcome::InputChanged, .changed = {2019y / 12 / 30}});
+    run.verifications.push_back({.finished = "2026-10-18T12:00:00Z",
+                                 .outcome = Outcome::InputChanged,
+                                 .source_digest = code,
+                                 .changed = {2019y / 12 / 30}});
     EXPECT_EQ(json::parse(encode_run(run))["reproduced"], true);  // neither proves nor disproves it
-    run.verifications.push_back({.outcome = Outcome::Mismatch});
+    run.verifications.push_back(
+        {.finished = "2026-10-18T13:00:00Z", .outcome = Outcome::Mismatch, .source_digest = code});
     const json verified = json::parse(encode_run(run));
     EXPECT_EQ(verified["reproduced"], false);
     EXPECT_EQ(verified["verifications"][2]["changed"], json::parse(R"(["2019-12-30"])"));
@@ -759,17 +822,53 @@ TEST(ProtocolTest, ARunDocumentReadsBackAsItWasWritten)
     ASSERT_TRUE(decode_run(encode_run(run), read));
     EXPECT_EQ(encode_run(read), encode_run(run));
 
-    results.partial = true;
-    run.results = std::make_shared<const RunResult>(results);
-    run.state = RunState::Cancelled;
+    run.verifying = RunState::Running;  // written for the page; a restart drops it
+    EXPECT_EQ(json::parse(encode_run(run))["verifying"], "running");
+    ASSERT_TRUE(decode_run(encode_run(run), read));
+    EXPECT_FALSE(read.verifying.has_value());
+    run.verifying.reset();
+
+    // A document with a digest that is not 16 hex digits, or a name that is none of its enum's, is refused: even the
+    // one name that nlohmann would read as its enum's first.
+    const auto corrupted = [&](const std::string& from, const std::string& to) {
+        std::string doc = encode_run(run);
+        const std::size_t at = doc.find(from);
+        EXPECT_NE(at, std::string::npos) << from;
+        return at == std::string::npos ? doc : doc.replace(at, from.size(), to);
+    };
+    EXPECT_FALSE(decode_run(corrupted("cbf29ce484222325", "cbf29ce48422232g"), read));
+    EXPECT_FALSE(decode_run(corrupted("cbf29ce484222325", "cbf29ce48422232"), read));
+    EXPECT_FALSE(decode_run(corrupted(R"("state":"completed")", R"("state":"finished")"), read));
+    EXPECT_FALSE(decode_run(corrupted(R"("outcome":"different_code")", R"("outcome":"unknown")"), read));
+
+    // Failed and cancelled runs keep what they had counted, without digests.
+    RunResult partial = results;
+    partial.partial = true;
+    partial.digests = {};
+    run.results = std::make_shared<const RunResult>(partial);
+    run.state = RunState::Failed;
+    run.reason = "source_error on 2019-12-30: TruncatedMessage";
     run.progress = 0.25;
     EXPECT_EQ(json::parse(encode_run(run))["results"]["digests"], nullptr);
+    ASSERT_TRUE(decode_run(encode_run(run), read));
+    EXPECT_EQ(read.state, RunState::Failed);
+    EXPECT_EQ(read.reason, run.reason);
+    EXPECT_EQ(read.warning, run.warning);
+    EXPECT_EQ(*read.results, partial);
+    EXPECT_EQ(encode_run(read), encode_run(run));
+    run.state = RunState::Cancelled;
+    run.reason.clear();
+    ASSERT_TRUE(decode_run(encode_run(run), read));
+    EXPECT_EQ(read.state, RunState::Cancelled);
+    EXPECT_EQ(*read.results, partial);
+    EXPECT_EQ(encode_run(read), encode_run(run));
+
     const json listed = json::parse(encode_runs(std::span{&run, 1}, 3));
     EXPECT_FALSE(listed["runs"][0].contains("results"));
     EXPECT_EQ(listed["runs"][0]["progress"], 0.25);
     EXPECT_EQ(listed["runs"][0]["partial"], true);
     EXPECT_EQ(listed["runs"][0]["pnl"], -200);
-    EXPECT_EQ(listed["runs"][0]["fills"], 1);
+    EXPECT_EQ(listed["runs"][0]["fills"], 2);
     EXPECT_EQ(listed["queued"], 3);
     EXPECT_EQ(listed["max_queued"], 8);
 
