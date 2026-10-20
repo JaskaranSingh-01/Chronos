@@ -9,6 +9,13 @@ export type Trade = [ts: number, price: number, quantity: number, resting: Side]
 export type Candle = [start: number, open: number, high: number, low: number, close: number, volume: number];
 // A maker fill's rule, (a), (c) or (d), and the ITCH message behind it: E, C, an Add or a Replace.
 export type FillRule = 'a_e' | 'a_c' | 'd_e' | 'd_c' | 'c_add' | 'c_replace';
+// A re-run's verdict: the same digests, others, or neither proven nor disproven as the code or a day's bytes changed.
+export type Outcome = 'reproduced' | 'mismatch' | 'different_code' | 'input_changed';
+export interface Digests {
+  book: string; // 16 hex digits
+  execution: string;
+  portfolio: string;
+}
 
 interface Envelope {
   session_id: string;

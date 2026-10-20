@@ -1,7 +1,9 @@
-import { useState } from 'react';
+import { useState, useSyncExternalStore } from 'react';
 import { Book, Tape } from './Book';
 import { Chart } from './Chart';
+import { page } from './lab';
 import { store, useStore } from './store';
+import { StrategyLab } from './StrategyLab';
 import { Tabs } from './Tabs';
 import { Account, Ticket } from './Ticket';
 import { TopBar } from './TopBar';
@@ -39,27 +41,40 @@ function ViewerBanner() {
   ) : null;
 }
 
-// The Trading Terminal. Each panel subscribes to its own slice, so a snapshot never re-renders this tree.
+const onHash = (f: () => void) => {
+  addEventListener('hashchange', f);
+  return () => removeEventListener('hashchange', f);
+};
+
+// The Trading Terminal, or the Strategy Lab at #lab. Each panel subscribes to its own slice, so a snapshot never
+// re-renders this tree.
 export function App() {
   const [price, setPrice] = useState('');
+  const shown = useSyncExternalStore(onHash, () => page(location.hash));
   return (
     <div className="terminal">
-      <TopBar />
-      <ViewerBanner />
-      <main>
-        <section className="col">
-          <Chart />
-          <Tabs />
-        </section>
-        <section className="col">
-          <Book onPick={setPrice} />
-          <Tape />
-        </section>
-        <section className="col">
-          <Ticket price={price} setPrice={setPrice} />
-          <Account />
-        </section>
-      </main>
+      {shown === 'lab' ? (
+        <StrategyLab />
+      ) : (
+        <>
+          <TopBar />
+          <ViewerBanner />
+          <main>
+            <section className="col">
+              <Chart />
+              <Tabs />
+            </section>
+            <section className="col">
+              <Book onPick={setPrice} />
+              <Tape />
+            </section>
+            <section className="col">
+              <Ticket price={price} setPrice={setPrice} />
+              <Account />
+            </section>
+          </main>
+        </>
+      )}
       <Gate />
     </div>
   );

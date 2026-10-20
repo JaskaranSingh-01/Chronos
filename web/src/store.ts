@@ -47,7 +47,7 @@ export interface Env {
 }
 
 const tapeSize = 512;
-const tokenKey = 'chronos-token';
+export const tokenKey = 'chronos-token'; // sessionStorage: the server's token, for the socket and the Lab
 const protocol = 2; // the server protocol this terminal speaks
 
 export const initial: State = {

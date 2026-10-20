@@ -21,6 +21,20 @@ const Symbols = memo(function Symbols() {
   );
 });
 
+// The header switch between the Trading Terminal and the Strategy Lab, at #lab.
+export function Switch({ lab }: { lab: boolean }) {
+  return (
+    <nav className="seg">
+      <a href="#" className={lab ? '' : 'on'} aria-current={lab ? undefined : 'page'}>
+        Terminal
+      </a>
+      <a href="#lab" className={lab ? 'on' : ''} aria-current={lab ? 'page' : undefined}>
+        Strategy Lab
+      </a>
+    </nav>
+  );
+}
+
 // The days a load replays, found again each time the list opens; a day that is not ITCH 5.0 cannot be ticked.
 function DayPicker({ picked, pick, disabled }: { picked: string[]; pick(days: string[]): void; disabled: boolean }) {
   const days = useStore((s) => s.days);
@@ -84,6 +98,7 @@ export function TopBar() {
   const at = seeking && seekAt > 0 ? seekAt : (snap?.exchange_ts ?? 0);
   return (
     <header className="bar">
+      <Switch lab={false} />
       <form
         onSubmit={(e) => {
           e.preventDefault();
