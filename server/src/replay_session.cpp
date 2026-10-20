@@ -98,7 +98,9 @@ Admission ReplaySession::control(Control control) noexcept
     const bool bad = (control.type == ControlType::Step && control.steps == 0) ||
         (control.type == ControlType::Speed && control.speed > max_speed) ||
         (control.type == ControlType::Symbol && name(control.spec.ticker).empty()) ||
-        (control.type == ControlType::Watch && control.watch.run_id[0] == '\0') || control.spec.days.count > max_days;
+        // A Watch needs its factory of fresh mappings; never kept ones (review gate 1).
+        (control.type == ControlType::Watch && (control.watch.run_id[0] == '\0' || !watch_factory_)) ||
+        control.spec.days.count > max_days;
     ErrorCode error = bad ? ErrorCode::BadRequest : ErrorCode::None;
     if (error == ErrorCode::None && !controls_.push(control)) {
         error = ErrorCode::QueueFull;
@@ -376,7 +378,7 @@ void ReplaySession::restart(const RunSpec& spec) noexcept
     load();
 }
 
-// A Watch's generation then gets its verdict: its days re-hashed as replayed, against the run's.
+// Ends the generation; a Watch's also gets its verdict: its days re-hashed as replayed, against the run's.
 void ReplaySession::end() noexcept
 {
     finish(*engine_);
@@ -444,6 +446,8 @@ void ReplaySession::apply_control(const Control& control, Timestamp wall_now) no
         anchor_wall_ = wall_now;
         anchor_exchange_ = clock();
         break;
+    // ponytail: a Watch's Restart or backward Seek carries the current strategy, so an attach or detach mid-Watch
+    // gives mismatch; restart a Watch from its run's spec if a client ever does that.
     case ControlType::Restart:
         restart(carried());
         break;

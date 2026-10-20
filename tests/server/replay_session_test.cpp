@@ -201,6 +201,9 @@ TEST(ReplaySessionTest, AdmissionRefusesBadRequestsStaleGenerationsAFullQueueAnd
     too_many.spec.ticker = ticker("ACME");
     too_many.spec.days.count = static_cast<std::uint8_t>(max_days + 1);
     EXPECT_EQ(session.control(too_many).error, ErrorCode::BadRequest);
+    Control watch{.type = ControlType::Watch};
+    watch.watch.run_id[0] = 'r';
+    EXPECT_EQ(session.control(watch).error, ErrorCode::BadRequest);  // no factory of fresh mappings
 
     for (std::size_t i = 1; i < ReplaySession::control_capacity; ++i) {
         ASSERT_EQ(session.control(kPause).error, ErrorCode::None);

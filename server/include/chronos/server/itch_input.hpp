@@ -91,7 +91,8 @@ public:
 // empty stream; for a Watch (`watch`), over fresh mappings and with hash as read. The engine thread resolves the days
 // only here, as it builds a generation. The library outlives it.
 // ponytail: a day removed between admission and the load replays as an empty stream, and one replaced by a non-ITCH
-// file fails the chain up front, named as its first day; re-check the days here if that matters.
+// file fails the chain up front, named as its first day (a Watch's verdict is then mismatch, not input_changed);
+// re-check the days here if that matters.
 SourceFactory chain_factory(const DayLibrary& library, const Instrument& instrument, bool allow_truncated_tail,
                             bool watch = false);
 
