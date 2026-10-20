@@ -717,6 +717,10 @@ TEST(ServerTest, TheLabApiQueuesListsServesCancelsAndDeletesRuns)
     EXPECT_GT(run["results"]["maker_fills"], 0);
     EXPECT_EQ(served.get("/api/backtests/20261018T101500Z-0000000000000000").first, 404);
     EXPECT_EQ(served.get("/api/backtests/no.such").first, 404);
+    EXPECT_EQ(served.send("POST", "/api/backtests/" + id + "/verify"), (Reply{202, created}));
+    ASSERT_TRUE(
+        eventually([&] { return json::parse(served.get("/api/backtests/" + id).second)["reproduced"] == true; }));
+    EXPECT_EQ(served.send("POST", "/api/backtests/20261018T101500Z-0000000000000000/verify").first, 404);
     EXPECT_EQ(served.send("POST", "/api/backtests/" + id + "/cancel").first, 409);
     EXPECT_EQ(served.send("POST", "/api/backtests/no.such/cancel").first, 404);
     EXPECT_EQ(served.send("DELETE", "/api/backtests/" + id).first, 204);
@@ -735,6 +739,8 @@ TEST(ServerTest, TheLabApiQueuesListsServesCancelsAndDeletesRuns)
     }
     EXPECT_GE(refused, 1);
     ASSERT_FALSE(ids.empty());
+    EXPECT_EQ(served.send("POST", "/api/backtests/" + ids.back() + "/verify"),
+              (Reply{409, R"({"error":"not_completed"})"}));
     EXPECT_EQ(served.send("POST", "/api/backtests/" + ids.back() + "/cancel").first, 204);  // still waiting
     for (const std::string& queued_id : ids) {
         EXPECT_EQ(served.send("DELETE", "/api/backtests/" + queued_id).first, 204);

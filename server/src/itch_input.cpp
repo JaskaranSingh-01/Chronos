@@ -314,6 +314,28 @@ std::string file_hash(const std::filesystem::path& path)
     return in.bad() || !in.eof() ? std::string{} : hex(XXH3_128bits_digest(&state));
 }
 
+DayHandle reopen(const Day& day)
+{
+    auto fresh = std::make_shared<Day>();
+    if (!fresh->mapped.open(day.path.c_str())) {
+        return nullptr;
+    }
+    fresh->date = day.date;
+    fresh->file = day.file;
+    fresh->path = day.path;
+    fresh->size = fresh->mapped.bytes().size();
+    fresh->mtime = day.mtime;
+    fresh->inode = day.inode;
+    fresh->hash = day.hash;
+    fresh->quick_check = day.quick_check;
+    fresh->itch50 = day.itch50;
+    fresh->cut_tail = day.cut_tail;
+    fresh->session = day.session;
+    fresh->symbols = day.symbols;
+    fresh->midnight = day.midnight;
+    return fresh;
+}
+
 std::string iso_date(std::chrono::year_month_day date)
 {
     char text[16];

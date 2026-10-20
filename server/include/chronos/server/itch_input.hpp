@@ -57,6 +57,10 @@ struct Day
 // A generation or a run keeps its days mapped through these, whatever a rescan finds later.
 using DayHandle = std::shared_ptr<const Day>;
 
+// `day` over a fresh mapping of its file, as one kept since a scan may still show bytes edited in place since: what
+// Watch and Verify replay and re-hash. Its size is the file's now; nullptr if the file cannot be mapped.
+DayHandle reopen(const Day& day);
+
 // The days of a directory: each file named exactly MMDDYYYY.NASDAQ_ITCH50.bin with a real date. A new file version
 // (name, size, mtime, inode, or a changed quick check) gets one pass over its bytes, unless the JSON cache at `cache`
 // holds it. Any thread; mapping and hashing run outside the lock on the days.

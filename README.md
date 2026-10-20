@@ -406,6 +406,7 @@ a built-in strategy over one symbol and one or more days, at full speed. Its HTT
 | `GET /api/backtests/<id>` | the whole run: spec, provenance, results |
 | `POST /api/backtests/<id>/cancel` | cancels a queued or running run; 409 once it has ended |
 | `DELETE /api/backtests/<id>` | removes a run and its file (200 with a `warning` if the file stays); a running one stops and is never saved |
+| `POST /api/backtests/<id>/verify` | re-runs a completed run and records the verdict; 202, 409 if partial or if a day changed |
 
 A run is posted as `{"symbol":"SPY","days":["2019-12-30"],"strategy":"market_maker"}`. Every other key takes
 `simulator backtest`'s default: `params`, `latency` (`order_ns`, `report_ns`), `fees` (`maker`, `taker`, in ticks a
@@ -417,6 +418,11 @@ by default, so a strategy trades only inside each day's feed session, from the d
 - Each finished run is saved to `runs/<id>.json` in the working directory, with the build it ran on (commit, source
   digest, compiler), each day's hash and regular hours, and its results: the PnL curve at the end of every second with
   a market event, PnL by day and by hour, the first 50,000 fills and the fill attribution. A restart reloads them.
+- **Verify** re-runs the run over fresh reads of its days, hashing every byte as it replays them. Each verification is
+  recorded with its verdict: `reproduced` (the same digests), `mismatch`, `different_code` (this build's source digest
+  is not the run's, so nothing is proven either way) or `input_changed` (a day's bytes are not the ones the run
+  hashed, even when an edit in place kept the file's size and time). A run's `reproduced` turns true once a
+  verification on the same code and days has matched, and false if one did not.
 - A POST or DELETE must be `Content-Type: application/json` (else 415) and carry the `Origin` of the page this server
   served (else 403), so no other site can queue or delete a run; with `--token` it also needs the `Authorization` header.
   A body over 64 KiB closes the connection.

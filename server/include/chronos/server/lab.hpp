@@ -99,28 +99,30 @@ struct Run
 enum class Refusal : std::uint8_t {
     None,
     NotFound,  // no such run, or one being deleted
-    Conflict,  // the run is not in a state that allows it
-    QueueFull  // max_queued jobs wait already
+    Conflict,      // the run is not in a state that allows it
+    InputChanged,  // a day of the run is gone, or its cached hash is not the run's
+    QueueFull      // max_queued jobs wait already
 };
 
-// The Lab's runs (spec §5.3, §5.4) and the one worker thread that runs their jobs, oldest first. The worker writes a
-// run's file, <dir>/<id>.json, through a temp file and a rename as the run finishes, and again after each
-// verification; never earlier. A run deleted while a job of it is busy is hidden at once, and erased, its file with
-// it, when the worker stops the job. The mutex covers the runs and the queue for a lookup or a state change only: no
-// file, hash or replay work runs under it.
+// The Lab's runs (spec §5.3-§5.5) and the one worker thread that runs their jobs, runs and verifications, oldest
+// first. The worker writes a run's file, <dir>/<id>.json, through a temp file and a rename as the run finishes, and
+// again after each verification; never earlier. A run deleted while a job of it is busy is hidden at once, and
+// erased, its file with it, when the worker stops the job. The mutex covers the runs and the queue for a lookup or a
+// state change only: no file, hash or replay work runs under it.
 class Backtester
 {
 private:
     struct Job
     {
         std::string id;
-        std::vector<DayHandle> days;  // the run's, as the library listed them when it was submitted
+        std::vector<DayHandle> days;  // as the library listed them when the job was queued
+        bool verify{false};  // a verification of the completed run `id`
     };
 
     struct Entry
     {
         Run run;
-        bool busy{false};     // its job is running, or its file is being written
+        bool busy{false};  // its job is running, or its file is being written
         bool deleted{false};  // a tombstone: hidden, and erased once the busy job stops
     };
 
@@ -157,6 +159,10 @@ public:
     Refusal submit(const RunSpec& spec, std::vector<DayHandle> days, std::string& id);
     // Cancels a queued run at once, and a running one at its next market event; Conflict once it has ended.
     Refusal cancel(std::string_view id);
+    // Queues a verification of a completed run over its days as `library` lists them now, or keeps the one already
+    // queued or running: a backtest() of its spec with hash as read, over fresh mappings. Conflict for a run that is
+    // not completed or partial; InputChanged if a day's cached hash is not the run's.
+    Refusal verify(std::string_view id, const DayLibrary& library);
     // Erases a queued or idle run, and an idle run's file; a busy one is a tombstone until its job stops. `warning`
     // says why a file could not be removed.
     Refusal remove(std::string_view id, std::string& warning);

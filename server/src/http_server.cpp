@@ -165,6 +165,25 @@ void HttpServer::Impl::routes()
                 return crow::response{refusal == Refusal::NotFound ? 404 : refusal == Refusal::Conflict ? 409 : 204};
             });
         });
+    CROW_ROUTE(app, "/api/backtests/<string>/verify")
+        .methods(crow::HTTPMethod::Post)([this](const crow::request& request, const std::string& id) {
+            return change(request, [&] {
+                switch (plain_id(id) && hub.library != nullptr ? hub.lab->verify(id, *hub.library)
+                                                               : Refusal::NotFound) {
+                case Refusal::None:
+                    return json_response(202, encode_run_id(id));
+                case Refusal::NotFound:
+                    break;
+                case Refusal::Conflict:
+                    return json_response(409, encode_lab_error("not_completed"));
+                case Refusal::InputChanged:
+                    return json_response(409, encode_lab_error("input_changed"));
+                case Refusal::QueueFull:
+                    return json_response(429, encode_lab_error("queue_full"));
+                }
+                return crow::response{404};
+            });
+        });
     // Crow drops a connection whose message passes max_message_bytes before onmessage; onopen follows onaccept's allow.
     CROW_WEBSOCKET_ROUTE(app, "/ws")
         .max_payload(max_message_bytes)

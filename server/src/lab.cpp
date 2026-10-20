@@ -3,6 +3,7 @@
 #include <time.h>
 #include <unistd.h>
 
+#include <algorithm>
 #include <cstdio>
 #include <ctime>
 #include <fstream>
@@ -56,6 +57,24 @@ std::string write_file(const std::filesystem::path& path, const std::string& tex
         return error.message();
     }
     return {};
+}
+
+// A verification's record (spec §5.5): the days whose re-hash differs from the run's, then this build's source digest
+// against the run's, then the digests.
+Verification verification(const Run& run, const RunResult& result)
+{
+    Verification v{.finished = utc_now(), .source_digest = build_source_digest};
+    for (std::size_t i = 0; i < run.provenance.days.size(); ++i) {
+        if (i < result.hashes.size() && result.hashes[i] != run.provenance.days[i].hash) {
+            v.changed.push_back(run.provenance.days[i].date);
+        }
+    }
+    if (!result.partial) {
+        v.digests = result.digests;
+    }
+    v.outcome = verdict(!v.changed.empty(), run.provenance.build.source_digest == build_source_digest,
+                        v.digests && run.results != nullptr && *v.digests == run.results->digests);
+    return v;
 }
 
 }  // namespace
@@ -169,6 +188,51 @@ Refusal Backtester::cancel(std::string_view id)
     return Refusal::None;
 }
 
+Refusal Backtester::verify(std::string_view id, const DayLibrary& library)
+{
+    std::vector<RunDay> recorded;
+    {
+        const std::lock_guard lock{mutex_};
+        const auto found = runs_.find(id);
+        if (found == runs_.end() || found->second.deleted) {
+            return Refusal::NotFound;
+        }
+        const Run& run = found->second.run;
+        if (run.verifying) {
+            return Refusal::None;  // the one queued or running
+        }
+        if (run.state != RunState::Completed || run.results == nullptr || run.results->partial) {
+            return Refusal::Conflict;
+        }
+        recorded = run.provenance.days;
+    }
+    std::vector<DayHandle> days;
+    for (const RunDay& day : recorded) {
+        DayHandle listed = library.find(day.date);
+        if (listed == nullptr || listed->hash != day.hash) {
+            return Refusal::InputChanged;
+        }
+        days.push_back(std::move(listed));
+    }
+    {
+        const std::lock_guard lock{mutex_};
+        const auto found = runs_.find(id);
+        if (found == runs_.end() || found->second.deleted) {
+            return Refusal::NotFound;
+        }
+        if (found->second.run.verifying) {
+            return Refusal::None;
+        }
+        if (queue_.size() >= max_queued) {
+            return Refusal::QueueFull;
+        }
+        found->second.run.verifying = RunState::Queued;
+        queue_.push_back({.id = std::string{id}, .days = std::move(days), .verify = true});
+    }
+    wake_.notify_one();
+    return Refusal::None;
+}
+
 Refusal Backtester::remove(std::string_view id, std::string& warning)
 {
     {
@@ -211,7 +275,7 @@ std::string Backtester::list() const
                 continue;
             }
             Run& run = runs.emplace_back(entry.run);
-            if (id == running_ && running_size_ != 0) {
+            if (id == running_ && run.state == RunState::Running && running_size_ != 0) {
                 run.progress = static_cast<double>(bytes_read_.load()) / static_cast<double>(running_size_);
             }
         }
@@ -250,8 +314,12 @@ void Backtester::work()
             queue_.pop_front();
             Entry& entry = runs_.at(job.id);
             entry.busy = true;
-            entry.run.state = RunState::Running;
-            entry.run.provenance.started = utc_now();
+            if (job.verify) {
+                entry.run.verifying = RunState::Running;
+            } else {
+                entry.run.state = RunState::Running;
+                entry.run.provenance.started = utc_now();
+            }
             spec = entry.run.spec;
             running_ = job.id;
             running_size_ = 0;
@@ -261,9 +329,20 @@ void Backtester::work()
             cancel_.store(false);
             bytes_read_.store(0);
         }
+        std::vector<DayHandle> days = job.days;
+        if (job.verify) {
+            std::transform(days.begin(), days.end(), days.begin(), [](const DayHandle& day) { return reopen(*day); });
+        }
         RunResult result;
         try {
-            result = backtest(config_, spec, job.days, false, cancel_, bytes_read_);
+            if (std::find(days.begin(), days.end(), nullptr) == days.end()) {
+                result = backtest(config_, spec, days, job.verify, cancel_, bytes_read_);
+            } else {  // a file gone since the verification was queued: no replay, and each day's re-hash
+                result.partial = true;
+                for (const DayHandle& day : days) {
+                    result.hashes.push_back(day != nullptr ? file_hash(day->path) : "");
+                }
+            }
         } catch (const std::bad_alloc&) {
             result = RunResult{.partial = true, .reason = "out_of_memory"};
         } catch (const std::exception& e) {
@@ -297,6 +376,12 @@ void Backtester::finish(const Job& job, RunResult result)
     if (run.id.empty()) {
         std::error_code ignored;
         std::filesystem::remove(file(job.id), ignored);
+        return;
+    }
+    if (job.verify) {
+        run.verifying.reset();
+        run.verifications.push_back(verification(run, result));
+        save(std::move(run));
         return;
     }
     run.state = result.cancelled ? RunState::Cancelled : result.partial ? RunState::Failed : RunState::Completed;

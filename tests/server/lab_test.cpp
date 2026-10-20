@@ -278,5 +278,125 @@ TEST(LabTest, ARunIsSavedAsItFinishesAndReloadedAfterARestart)
     EXPECT_EQ(j["warning"].get<std::string>().rfind("not saved: ", 0), 0u) << j["warning"];
 }
 
+// The run `id` once its verification has stopped.
+json verified(const Backtester& lab, const std::string& id, std::size_t verifications)
+{
+    EXPECT_TRUE(eventually([&] {
+        const json j = run(lab, id);
+        return j["verifying"].is_null() && j["verifications"].size() == verifications;
+    }));
+    return run(lab, id);
+}
+
+// A verification re-runs a completed run with hash as read: on the same code and days it reproduces the digests, and
+// reproduced turns true. While one is queued, a repeat keeps it; each completed one is recorded and saved. A run that
+// is queued, running, cancelled or unknown cannot be verified.
+TEST(LabTest, AVerificationOnTheSameCodeAndDaysReproducesTheRun)
+{
+    Days days{"lab-verify"};
+    std::string id;
+    {
+        Backtester lab{lab_config(), days.runs};
+        id = days.submit(lab);
+        ASSERT_TRUE(finished(lab, id));
+        EXPECT_EQ(run(lab, id)["reproduced"], nullptr);
+        const std::string busy = days.submit(lab, true);
+        ASSERT_TRUE(eventually([&] { return state(lab, busy) == "running"; }));
+        EXPECT_EQ(lab.verify(busy, days.library), Refusal::Conflict);
+        const std::string queued = days.submit(lab);
+        EXPECT_EQ(lab.verify(queued, days.library), Refusal::Conflict);
+        EXPECT_EQ(lab.cancel(queued), Refusal::None);
+        EXPECT_EQ(lab.verify(queued, days.library), Refusal::Conflict);  // partial
+        EXPECT_EQ(lab.verify("20261018T101500Z-0000000000000000", days.library), Refusal::NotFound);
+
+        EXPECT_EQ(lab.verify(id, days.library), Refusal::None);
+        EXPECT_EQ(run(lab, id)["verifying"], "queued");
+        EXPECT_EQ(lab.verify(id, days.library), Refusal::None);  // the same job
+        EXPECT_EQ(json::parse(lab.list())["queued"], 1);
+        const json first = verified(lab, id, 1);
+        const json& v = first["verifications"][0];
+        EXPECT_EQ(v["outcome"], "reproduced");
+        EXPECT_EQ(v["digests"], first["results"]["digests"]);
+        EXPECT_EQ(v["source_digest"], first["provenance"]["build"]["source_digest"]);
+        EXPECT_EQ(v["changed"], json::array());
+        EXPECT_EQ(first["reproduced"], true);
+        EXPECT_EQ(lab.verify(id, days.library), Refusal::None);
+        EXPECT_EQ(verified(lab, id, 2)["verifications"][1]["outcome"], "reproduced");
+    }
+    const Backtester restarted{lab_config(), days.runs};
+    const json reloaded = run(restarted, id);
+    EXPECT_EQ(reloaded["verifications"].size(), 2u);
+    EXPECT_EQ(reloaded["reproduced"], true);
+}
+
+// Review gate 1, Verify's half: Friday is edited in place mid-file, keeping its size, mtime and inode, so the cached
+// listing still shows the run's hash and the verification is queued; its re-hash of a fresh mapping sees the edit:
+// input_changed, naming the day. An edit the listing does see is refused up front.
+TEST(LabTest, AVerificationSeesADayEditedInPlaceAsInputChanged)
+{
+    const ScratchDir dir{"lab-edited"};
+    const std::filesystem::path friday_file = dir.path / "12272019.NASDAQ_ITCH50.bin";
+    itch_test::ItchBuilder friday = acme_day(4);
+    const std::size_t prints = friday.bytes().size();
+    for (std::uint64_t match = 1; match <= 50'000; ++match) {  // 2.3 MB of prints: a middle the quick check never reads
+        friday.trade(1, kNineThirty + 9 * kSecond, 0, 'B', 100, "ACME", 100'000, match);
+    }
+    write_file(friday_file, friday.bytes());
+    DayLibrary library{dir.path, dir.path / "fingerprints.json"};
+    const std::vector<DayHandle> before = library.scan();
+    Backtester lab{lab_config(), dir.path / "runs"};
+    RunSpec spec = default_spec(SessionStrategyKind::MarketMaker);
+    spec.ticker = ticker("ACME");
+    spec.days = {.day = {2019y / 12 / 27}, .count = 1};
+    std::string id;
+    ASSERT_EQ(lab.submit(spec, before, id), Refusal::None);
+    ASSERT_TRUE(finished(lab, id));
+
+    const std::filesystem::file_time_type mtime = std::filesystem::last_write_time(friday_file);
+    {
+        std::fstream edit{friday_file, std::ios::in | std::ios::out | std::ios::binary};
+        edit.seekp(static_cast<std::streamoff>(prints + 25'000 * 46 + 25));  // the low byte of a print's shares
+        edit.put('\x65');  // 101 shares, not 100
+    }
+    std::filesystem::last_write_time(friday_file, mtime);
+    const std::vector<DayHandle> after = library.scan();
+    ASSERT_EQ(after[0], before[0]);  // the same handle: the listing still shows the run's hash
+    ASSERT_EQ(lab.verify(id, library), Refusal::None);
+    const json j = verified(lab, id, 1);
+    EXPECT_EQ(j["verifications"][0]["outcome"], "input_changed");
+    EXPECT_EQ(j["verifications"][0]["changed"], json::parse(R"(["2019-12-27"])"));
+    EXPECT_EQ(j["verifications"][0]["digests"], j["results"]["digests"]);  // the edit changed no state
+    EXPECT_EQ(j["reproduced"], nullptr);
+
+    std::ofstream{friday_file, std::ios::app | std::ios::binary} << 'x';
+    library.scan();
+    EXPECT_EQ(lab.verify(id, library), Refusal::InputChanged);
+}
+
+// Review gate 2, Verify's half: a run recorded by a build of other source, as a dirty tree at the same commit would
+// be, verifies as different_code, never as a failed reproduction.
+TEST(LabTest, AVerificationOnOtherCodeReportsDifferentCode)
+{
+    Days days{"lab-other-code"};
+    std::string id;
+    {
+        Backtester lab{lab_config(), days.runs};
+        id = days.submit(lab);
+        ASSERT_TRUE(finished(lab, id));
+    }
+    const std::filesystem::path file = days.runs / (id + ".json");
+    json saved = json::parse(read(file));
+    saved["provenance"]["build"]["source_digest"] = std::string(64, '0');
+    std::ofstream{file} << saved.dump();
+
+    Backtester lab{lab_config(), days.runs};
+    ASSERT_EQ(lab.verify(id, days.library), Refusal::None);
+    const json j = verified(lab, id, 1);
+    EXPECT_EQ(j["verifications"][0]["outcome"], "different_code");
+    EXPECT_NE(j["verifications"][0]["source_digest"], std::string(64, '0'));
+    EXPECT_EQ(j["verifications"][0]["digests"], j["results"]["digests"]);
+    EXPECT_EQ(j["reproduced"], nullptr);
+}
+
 }  // namespace
 }  // namespace simulator::server::test

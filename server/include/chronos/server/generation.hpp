@@ -137,4 +137,12 @@ enum class Outcome : std::uint8_t {
     Mismatch
 };
 
+constexpr Outcome verdict(bool input_changed, bool same_code, bool same_digests) noexcept
+{
+    return input_changed ? Outcome::InputChanged
+        : !same_code     ? Outcome::DifferentCode
+        : same_digests   ? Outcome::Reproduced
+                         : Outcome::Mismatch;
+}
+
 }  // namespace simulator::server
