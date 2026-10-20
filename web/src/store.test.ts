@@ -483,6 +483,7 @@ describe('selectors', () => {
     const s = { ...run(hello(), snapshot({ type: 'state' })), status: 'open' as const };
     expect(selectTradeBlock(s)).toBe('');
     expect(selectTradeBlock({ ...s, hello: hello({ role: 'viewer' }) })).not.toBe('');
+    expect(selectTradeBlock({ ...s, runId: 'r1' })).toBe("The watched run's strategy trades");
     expect(selectTradeBlock({ ...s, status: 'closed' })).not.toBe('');
     expect(selectTradeBlock({ ...s, state: 'seeking' })).not.toBe('');
     expect(selectTradeBlock({ ...s, state: 'ended' })).not.toBe('');

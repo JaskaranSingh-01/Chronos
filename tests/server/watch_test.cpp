@@ -207,6 +207,22 @@ TEST(WatchTest, ADetachGivesMismatchAndTheWatchsLogReproducesTheRun)
     EXPECT_EQ(digests(again), resolved.watch.expected);
 }
 
+// A symbol loaded after a Watch trades by hand on the terminal's own settings, not the watched run's strategy, window
+// and limits.
+TEST(WatchTest, ASymbolLoadedAfterAWatchHasTheTerminalsOwnSettings)
+{
+    Terminal t{"watch-then-symbol"};
+    ASSERT_EQ(t.watch(t.run(SessionStrategyKind::MarketMaker, false, TradingWindow::Regular)), "");
+    t.session.control(Control{.type = ControlType::Symbol,
+                              .spec = {.ticker = ticker("ACME"), .days = {.day = {2019y / 12 / 30}, .count = 1}}});
+    t.tick();
+    const Snapshot now = latest(t.session);
+    EXPECT_EQ(name(now.run_id), "");
+    EXPECT_EQ(now.spec.strategy.kind, SessionStrategyKind::None);
+    EXPECT_EQ(now.spec.window, lab_config().defaults.window);
+    EXPECT_EQ(now.spec.limits.max_order_quantity, lab_config().defaults.limits.max_order_quantity);
+}
+
 // A Watch is admitted for a completed run whose days the library lists with the run's hashes, run with this server's
 // allow_truncated_tail; else the controller gets bad_request, with the reason, and nothing is loaded.
 TEST(WatchTest, AWatchIsAdmittedOnlyForACompletedRunOverTheSameDays)

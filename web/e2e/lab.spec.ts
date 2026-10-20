@@ -95,6 +95,7 @@ test("Watch in Terminal prices the ticket by the run's fees, plays at Max and sh
   await expect(page.getByTestId('session')).toContainText('ACME · gen 2 · paused');
   await page.getByLabel('Price').fill('10.00');
   await expect(page.locator('.ticket')).toContainText('Est. rebate+$0.20'); // the run's maker fee, not hello's 0
+  await expect(page.locator('.ticket button.place')).toBeDisabled(); // the run's strategy trades, not the hand
   await page.getByRole('button', { name: 'Max', exact: true }).click();
   await page.getByRole('button', { name: '▶ Play' }).click();
   await expect(page.getByTestId('watch')).toHaveText('Watching run #1 · ✓ reproduced', { timeout: 15_000 });

@@ -452,7 +452,7 @@ void ReplaySession::apply_control(const Control& control, Timestamp wall_now) no
         restart(carried());
         break;
     case ControlType::Symbol: {
-        RunSpec spec = carried();
+        RunSpec spec = watch_.run_id[0] != '\0' ? config_.defaults : carried();  // a watched run's settings are its own
         spec.ticker = control.spec.ticker;
         spec.days = control.spec.days;
         watch_ = {};

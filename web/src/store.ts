@@ -252,11 +252,12 @@ export function selectOrders(s: State): MyOrder[] {
   return lastOrders;
 }
 // Why manual trading is unavailable, or '' when it is not: the controller, connected, on a trading symbol, not seeking.
-// ponytail: an attached strategy is not visible to the client; the server's not_ready is the only signal for it.
+// ponytail: a strategy attached outside a Watch is not visible to the client; the server's not_ready is its signal.
 export function selectTradeBlock(s: State): string {
   if (!s.hello || s.status !== 'open') return 'Not connected';
   if (s.hello.role !== 'controller') return 'Viewers cannot trade';
   if (s.state === 'seeking') return 'Seeking';
+  if (s.runId) return "The watched run's strategy trades";
   if (!s.snap || s.snap.symbol === '') return 'No symbol loaded';
   if (s.snap.trading_state !== 'trading') return `Not trading: ${s.snap.trading_state}`;
   if (s.state === 'ended') return 'Session ended';
