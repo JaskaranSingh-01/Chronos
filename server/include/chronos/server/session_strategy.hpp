@@ -49,6 +49,14 @@ struct FeedSession
     bool operator==(const FeedSession&) const = default;
 };
 
+// Queues a cancel of every resting order; the gateway only queues, so the span stays valid.
+inline void cancel_resting(const ExecutionSimulator& execution, OrderGateway& gateway) noexcept
+{
+    for (const ShadowOrder& order : execution.resting_orders()) {
+        gateway.cancel(order.id);
+    }
+}
+
 // The strategy a session's EventLoop drives, swapped at command boundaries; keeps every report delivered to it. Under a
 // Regular window an attached strategy trades only inside each day's feed session (spec §5.2).
 class SessionStrategy
@@ -61,6 +69,7 @@ private:
     std::vector<FeedSession> sessions_;  // each day's, oldest first
     std::size_t day_{0};  // each Clear starts the next
     bool open_{false};  // from the first market event inside the day's session to its close timer
+    Timestamp close_{0};  // the close of the window opened last
 
     bool windowed() const noexcept
     {
@@ -131,8 +140,9 @@ public:
             }
             if (!open_) {
                 open_ = true;
+                close_ = sessions_[day_].close;
                 ctx.gateway.set_open(true);
-                ctx.set_timer(sessions_[day_].close, close_timer);
+                ctx.set_timer(close_, close_timer);
             }
         }
         std::visit([&](auto& strategy) { strategy.on_market(ctx, event); }, active_);
@@ -141,13 +151,16 @@ public:
     void on_report(StrategyContext& ctx, const ExecutionReport& report) noexcept
     {
         delivered.push_back(report);
-        if (windowed() && !open_ && report.type == ReportType::Accepted) {
+        // An order that arrived before the close rested at the timer, which cancelled it.
+        if (windowed() && !open_ && report.type == ReportType::Accepted && report.exchange_time >= close_) {
             ctx.gateway.cancel(report.order_id);  // it was in flight at the close
         }
         std::visit([&](auto& strategy) { strategy.on_report(ctx, report); }, active_);
     }
 
     // The close timer shuts the gateway and cancels every resting order.
+    // ponytail: an order whose own cancel is in flight is cancelled again, so a CancelRejected is possible; track
+    // pending cancels to avoid it.
     void on_timer(StrategyContext& ctx, std::uint64_t timer_id) noexcept
     {
         if (timer_id != close_timer) {
@@ -157,9 +170,7 @@ public:
         open_ = false;
         ctx.gateway.set_open(gateway_open());
         if (windowed()) {
-            for (const ShadowOrder& order : execution_.resting_orders()) {
-                ctx.gateway.cancel(order.id);  // only queues an event, so the span stays valid
-            }
+            cancel_resting(execution_, ctx.gateway);
         }
     }
 };

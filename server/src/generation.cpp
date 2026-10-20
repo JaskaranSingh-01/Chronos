@@ -48,15 +48,6 @@ std::vector<FeedSession> sessions(const DayList& days, const MarketEventSource& 
     return found;
 }
 
-// Cancels every resting order, so a strategy swap leaves none holding a reservation.
-// ponytail: orders still in flight rest; cancel them manually after detach.
-void cancel_resting(const Generation& generation, OrderGateway& gateway) noexcept
-{
-    for (const ShadowOrder& order : generation.execution.resting_orders()) {
-        gateway.cancel(order.id);  // only queues an event, so the span stays valid
-    }
-}
-
 }  // namespace
 
 Generation::Generation(const SessionConfig& config, const RunSpec& run, std::unique_ptr<MarketEventSource> market)
@@ -72,9 +63,10 @@ Generation::Generation(const SessionConfig& config, const RunSpec& run, std::uni
 
 void finish(Generation& generation) noexcept
 {
-    const std::vector<FeedSession>& sessions = generation.strategy.sessions();
-    if (generation.spec.window == TradingWindow::Regular && !sessions.empty()) {
-        generation.loop.advance_to(sessions.back().close);
+    const std::vector<FeedSession>& days = generation.strategy.sessions();
+    if (generation.spec.window == TradingWindow::Regular && !days.empty()) {
+        // The end-of-stream drain runs the close timer too; this pins the final clock at the close.
+        generation.loop.advance_to(days.back().close);
     }
     generation.loop.finish();
 }
@@ -128,13 +120,15 @@ Applied apply_command(Generation& generation, const Command& command) noexcept
     case CommandType::Cancel:
         gateway.cancel(command.order_id);
         return {.order_id = command.order_id};
+    // A strategy swap cancels every resting order, so none holds a reservation.
+    // ponytail: orders still in flight rest; cancel them manually after detach.
     case CommandType::Attach:
-        cancel_resting(generation, gateway);
+        cancel_resting(generation.execution, gateway);
         generation.strategy.attach(command.strategy);
         gateway.set_open(generation.strategy.gateway_open());
         return {};
     case CommandType::Detach:
-        cancel_resting(generation, gateway);
+        cancel_resting(generation.execution, gateway);
         generation.strategy.attach(StrategySpec{});
         gateway.set_open(generation.strategy.gateway_open());
         return {};
