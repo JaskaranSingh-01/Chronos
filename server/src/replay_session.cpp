@@ -375,7 +375,7 @@ void ReplaySession::restart(const RunSpec& spec) noexcept
 
 void ReplaySession::end() noexcept
 {
-    engine_->loop.finish();
+    finish(*engine_);
     publish_delivered();
     state_.store(SessionState::Ended);
 }

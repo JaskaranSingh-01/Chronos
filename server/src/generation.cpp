@@ -1,7 +1,9 @@
 #include "chronos/server/generation.hpp"
 
 #include <utility>
+#include <vector>
 
+#include "chronos/server/itch_input.hpp"
 #include "simulator/market/market_book.hpp"
 
 namespace simulator::server {
@@ -32,6 +34,20 @@ Timestamp first_midnight(const DayList& days) noexcept
     return days.count == 0 ? 0 : session_midnight_ns(days.day[0], us_eastern_utc_offset(days.day[0]));
 }
 
+// Each day's feed session from a day chain; any other source's days take the 09:30-16:00 fallback.
+std::vector<FeedSession> sessions(const DayList& days, const MarketEventSource& source)
+{
+    const auto* chain = dynamic_cast<const DaySequenceSource*>(&source);
+    std::vector<FeedSession> found;
+    for (std::size_t i = 0; i < days.count; ++i) {
+        const Timestamp midnight = session_midnight_ns(days.day[i], us_eastern_utc_offset(days.day[i]));
+        found.push_back(chain != nullptr && i < chain->days().size()
+                            ? chain->days()[i]->session
+                            : FeedSession{.open = midnight + RTH_OPEN_NS, .close = midnight + RTH_CLOSE_NS});
+    }
+    return found;
+}
+
 // Cancels every resting order, so a strategy swap leaves none holding a reservation.
 // ponytail: orders still in flight rest; cancel them manually after detach.
 void cancel_resting(const Generation& generation, OrderGateway& gateway) noexcept
@@ -49,10 +65,19 @@ Generation::Generation(const SessionConfig& config, const RunSpec& run, std::uni
       book(config.symbol, config.book_capacity),
       execution(first_midnight(run.days)),
       portfolio(config.instrument, run.limits, run.fees),
-      strategy(run.strategy),
+      strategy(run.strategy, execution, run.window, sessions(run.days, *source)),
       loop(*source, book, execution, portfolio, strategy, run.latency,
            {.check_invariants_every = config.check_invariants_every, .session_midnight = first_midnight(run.days)})
 {}
+
+void finish(Generation& generation) noexcept
+{
+    const std::vector<FeedSession>& sessions = generation.strategy.sessions();
+    if (generation.spec.window == TradingWindow::Regular && !sessions.empty()) {
+        generation.loop.advance_to(sessions.back().close);
+    }
+    generation.loop.finish();
+}
 
 Digests digests(const Generation& generation) noexcept
 {
@@ -106,10 +131,12 @@ Applied apply_command(Generation& generation, const Command& command) noexcept
     case CommandType::Attach:
         cancel_resting(generation, gateway);
         generation.strategy.attach(command.strategy);
+        gateway.set_open(generation.strategy.gateway_open());
         return {};
     case CommandType::Detach:
         cancel_resting(generation, gateway);
         generation.strategy.attach(StrategySpec{});
+        gateway.set_open(generation.strategy.gateway_open());
         return {};
     }
     return {.error = ErrorCode::BadRequest};

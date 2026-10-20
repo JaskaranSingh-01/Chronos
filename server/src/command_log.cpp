@@ -574,7 +574,7 @@ bool reproduce(Generation& generation, const LoggedGeneration& logged, std::span
         generation.strategy.delivered.clear();
     }
     if (loop.peek(next_ts) != PeekStatus::Event) {
-        loop.finish();
+        finish(generation);
     } else if (logged.end) {
         loop.advance_to(logged.end->exchange_ts);
     }

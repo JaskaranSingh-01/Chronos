@@ -486,6 +486,11 @@ std::uint64_t DaySequenceSource::size() const noexcept
     return total;
 }
 
+const std::vector<DayHandle>& DaySequenceSource::days() const noexcept
+{
+    return days_;
+}
+
 const std::vector<std::string>& DaySequenceSource::hashes() const noexcept
 {
     return hashes_;

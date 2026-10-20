@@ -49,11 +49,6 @@ struct DayList
     bool operator==(const DayList&) const = default;
 };
 
-enum class TradingWindow : std::uint8_t {
-    Regular,  // each day's feed session: a run's default
-    FullDay
-};
-
 // What one generation, or one Lab run, replays and how. Never changed once it starts.
 struct RunSpec
 {
@@ -82,7 +77,7 @@ struct SessionConfig
 };
 
 // One generation of a session: a fresh source, book, simulator, portfolio and strategy under one EventLoop. Its first
-// day's midnight seeds the loop and the simulator.
+// day's midnight seeds the loop and the simulator, and its days' feed sessions the strategy's window.
 struct Generation
 {
     RunSpec spec;
@@ -104,6 +99,10 @@ struct Applied
 
 // Applies one command at the loop's clock through the gateway strategies use.
 Applied apply_command(Generation& generation, const Command& command) noexcept;
+
+// Ends the stream: under a Regular window the clock first runs to the last day's close, so its closing cancels run
+// even when the input ends before it; then EventLoop::finish().
+void finish(Generation& generation) noexcept;
 
 // The one stepping function. A pending Clear starts a new day at its timestamp: the simulator events due before it run
 // under the old day, then the session midnight moves to it, then it applies; those due at it run after it.

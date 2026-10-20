@@ -434,5 +434,38 @@ TEST(ReplaySessionTest, AChainPlayedByTheSessionEqualsSteppingItAndEndsOnTheLast
     EXPECT_NE(straight.book.digest(), MarketBook(kSymbol, 16).digest());
 }
 
+// Review gate 4, in the terminal: the market maker's quotes rest when Monday's input ends at 09:30:04, before its
+// 16:00 close; once the session has played to the end, the close timer has cancelled them with no market event after.
+TEST(ReplaySessionTest, TheLastDaysCloseCancelsTheQuotesWhenItsInputEndsFirst)
+{
+    const ScratchDir dir{"session-close"};
+    write_file(dir.path / "12302019.NASDAQ_ITCH50.bin", acme_day(4).bytes());
+    DayLibrary library{dir.path, dir.path / "fingerprints.json"};
+    library.scan();
+    SessionConfig cfg = config({.order_latency = kMs, .report_latency = kMs});
+    cfg.defaults.ticker = ticker("ACME");
+    cfg.defaults.days = {.day = {2019y / 12 / 30}, .count = 1};
+    cfg.defaults.window = TradingWindow::Regular;
+    cfg.defaults.strategy = {.kind = SessionStrategyKind::MarketMaker, .market_maker = {.quote_size = 10}};
+
+    ReplaySession session{cfg, chain_factory(library, kEquity, false)};
+    session.control(kFullSpeed);
+    session.control(kPlay);
+    for (Timestamp wall = kWall; session.state() != SessionState::Ended; wall += snapshot_interval) {
+        session.tick(wall);
+    }
+    const std::string close = std::to_string(session_midnight_ns(2019y / 12 / 30, -5h) + 57'600 * kSecond + kMs);
+    std::vector<std::string> cancels;
+    for (const std::string& line : trace(session)) {
+        if (line.find("cancelled") != std::string::npos) {
+            cancels.push_back(line);
+        }
+    }
+    EXPECT_EQ(cancels,
+              (std::vector<std::string>{"report ord1 cancelled 10 @" + close, "report ord2 cancelled 10 @" + close}));
+    EXPECT_TRUE(session.execution().resting_orders().empty());
+    EXPECT_EQ(session.portfolio().open_orders(), 0u);
+}
+
 }  // namespace
 }  // namespace simulator::server::test

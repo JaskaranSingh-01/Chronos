@@ -5,6 +5,7 @@
 #include <cstddef>
 #include <functional>
 #include <memory>
+#include <string>
 #include <utility>
 #include <vector>
 
@@ -278,6 +279,122 @@ TEST(GenerationTest, ThePortfolioAndTheStrategyCarryOvernight)
     while (g.loop.peek(ts) == PeekStatus::Event && server::step(g.loop).ok) {
     }
     EXPECT_FALSE(g.execution.resting_orders().empty());  // quoting on Monday's book
+}
+
+// The reports a generation's strategy was delivered, as "accepted 1 @<exchange ns>".
+std::vector<std::string> delivered(const Generation& g)
+{
+    std::vector<std::string> lines;
+    for (const ExecutionReport& r : g.strategy.delivered) {
+        lines.push_back(report_name(r.type) + " " + std::to_string(r.order_id) + " @" +
+                        std::to_string(r.exchange_time));
+    }
+    return lines;
+}
+
+// Steps a generation to the end of its stream, then ends it.
+void run_to_end(Generation& g)
+{
+    Timestamp ts{0};
+    while (g.loop.peek(ts) == PeekStatus::Event && server::step(g.loop).ok) {
+    }
+    finish(g);
+}
+
+// Review gate 6: under a Regular window the market maker trades only inside each day's feed session. Friday has no
+// 'Q' or 'M', so it takes the flagged 09:30-16:00 fallback; Monday's 'M' closes it at 13:00. Outside the window the
+// strategy sees no market event and its gateway refuses it; each close cancels its quotes; the window moves to Monday
+// at the Clear. A Full-day run of the same spec quotes on Friday's 09:00 book.
+TEST(GenerationTest, ARegularWindowTradesOnlyInsideEachDaysFeedSession)
+{
+    constexpr std::uint64_t hour = 3'600 * kSecond;
+    itch_test::ItchBuilder friday;
+    friday.system_event(0, 3 * hour, 'O')
+        .stock_directory(1, 3 * hour, "ACME")
+        .trading_action(1, 3 * hour, "ACME", 'T')
+        .system_event(0, 4 * hour, 'S')
+        .add_order(1, 9 * hour, 1, 'B', 1'000, "ACME", 100'000)
+        .add_order(1, 9 * hour, 2, 'S', 1'000, "ACME", 100'100)
+        .add_order(1, 10 * hour, 3, 'B', 100, "ACME", 99'900)     // the first event inside the fallback session
+        .add_order(1, 17 * hour, 4, 'B', 100, "ACME", 100'050);   // a better bid, after the close
+    itch_test::ItchBuilder monday;
+    monday.system_event(0, 3 * hour, 'O')
+        .stock_directory(1, 3 * hour, "ACME")
+        .trading_action(1, 3 * hour, "ACME", 'T')
+        .system_event(0, 4 * hour, 'S')
+        .system_event(0, kNineThirty, 'Q')
+        .add_order(1, kNineThirty + kSecond, 1, 'B', 1'000, "ACME", 100'000)
+        .add_order(1, kNineThirty + kSecond, 2, 'S', 1'000, "ACME", 100'100)
+        .system_event(0, 13 * hour, 'M')
+        .add_order(1, 14 * hour, 3, 'B', 100, "ACME", 100'050);
+    const ScratchDir dir{"window"};
+    write_file(dir.path / "12272019.NASDAQ_ITCH50.bin", friday.bytes());
+    write_file(dir.path / "12302019.NASDAQ_ITCH50.bin", monday.bytes());
+    DayLibrary library{dir.path, dir.path / "fingerprints.json"};
+    library.scan();
+    ASSERT_EQ(library.find(2019y / 12 / 27)->session.source, SessionSource::Fallback);
+    RunSpec spec = config({.order_latency = kMs, .report_latency = kMs}).defaults;
+    spec.ticker = ticker("ACME");
+    spec.days = {.day = {2019y / 12 / 27, 2019y / 12 / 30}, .count = 2};
+    spec.window = TradingWindow::Regular;
+    spec.strategy = {.kind = SessionStrategyKind::MarketMaker, .market_maker = {.quote_size = 10}};
+    const SourceFactory chain = chain_factory(library, kEquity, false);
+
+    Generation g{config(), spec, chain(spec.ticker, spec.days)};
+    run_to_end(g);
+    const auto at = [](Timestamp ts) { return " @" + std::to_string(ts); };
+    const Timestamp fri = session_midnight_ns(2019y / 12 / 27, -5h);
+    const Timestamp mon = session_midnight_ns(2019y / 12 / 30, -5h);
+    EXPECT_EQ(
+        delivered(g),
+        (std::vector<std::string>{
+            "accepted 1" + at(fri + 10 * hour + kMs), "accepted 2" + at(fri + 10 * hour + kMs),
+            "cancelled 1" + at(fri + 16 * hour + kMs), "cancelled 2" + at(fri + 16 * hour + kMs),
+            "accepted 3" + at(mon + kNineThirty + kSecond + kMs), "accepted 4" + at(mon + kNineThirty + kSecond + kMs),
+            "cancelled 3" + at(mon + 13 * hour + kMs), "cancelled 4" + at(mon + 13 * hour + kMs)}));
+    EXPECT_TRUE(g.execution.resting_orders().empty());
+    EXPECT_EQ(g.portfolio.open_orders(), 0u);
+
+    spec.window = TradingWindow::FullDay;
+    Generation full{config(), spec, chain(spec.ticker, spec.days)};
+    run_to_end(full);
+    ASSERT_FALSE(full.strategy.delivered.empty());
+    EXPECT_EQ(delivered(full)[0], "accepted 1" + at(fri + 9 * hour + kMs));
+}
+
+// A quote still in flight at the close is cancelled when its Accepted arrives. Manual orders have no window, before the
+// session or after a detach that follows the close.
+TEST(GenerationTest, AQuoteInFlightAtTheCloseIsCancelledOnItsAcceptedAndManualOrdersHaveNoWindow)
+{
+    const Timestamp midnight = session_midnight_ns(2019y / 12 / 30, -5h);
+    const Timestamp close = midnight + RTH_CLOSE_NS;  // a VectorSource's days take the 09:30-16:00 fallback
+    const std::vector<MarketEvent> events{add(midnight + 8 * 3'600 * kSecond, 1, Side::Buy, 999'000, 100),
+                                          add(close - kMs / 2, 2, Side::Buy, 1'000'000, 100),
+                                          add(close - kMs / 2, 3, Side::Sell, 1'000'100, 100),
+                                          add(close + kSecond, 4, Side::Buy, 1'000'050, 100)};
+    RunSpec spec = config({.order_latency = kMs, .report_latency = kMs}).defaults;
+    spec.days = {.day = {2019y / 12 / 30}, .count = 1};
+    spec.window = TradingWindow::Regular;
+    spec.strategy = {.kind = SessionStrategyKind::MarketMaker, .market_maker = {.quote_size = 10}};
+    Generation g{config(), spec, std::make_unique<VectorSource>(events)};
+    Timestamp ts{0};
+    while (g.loop.peek(ts) == PeekStatus::Event && server::step(g.loop).ok) {
+    }
+    g.loop.advance_to(ts);
+    const auto at = [](Timestamp t) { return " @" + std::to_string(t); };
+    EXPECT_EQ(delivered(g),
+              (std::vector<std::string>{"accepted 1" + at(close + kMs / 2), "accepted 2" + at(close + kMs / 2),
+                                        "cancelled 1" + at(close + kMs / 2 + 2 * kMs),
+                                        "cancelled 2" + at(close + kMs / 2 + 2 * kMs)}));
+    EXPECT_TRUE(g.execution.resting_orders().empty());
+    ASSERT_EQ(apply_command(g, Command{.type = CommandType::Detach}).error, ErrorCode::None);
+    EXPECT_EQ(apply_command(g, order(OrderType::PostOnly, Side::Buy, 999'000, 10)).error, ErrorCode::None);
+
+    spec.strategy = {};
+    Generation manual{config(), spec, std::make_unique<VectorSource>(events)};
+    ASSERT_EQ(manual.loop.peek(ts), PeekStatus::Event);
+    server::step(manual.loop);  // 08:00, before the session
+    EXPECT_EQ(apply_command(manual, order(OrderType::PostOnly, Side::Buy, 999'000, 10)).error, ErrorCode::None);
 }
 
 }  // namespace

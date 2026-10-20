@@ -35,21 +35,6 @@ std::string file_hash(const std::filesystem::path& path);
 // YYYY-MM-DD.
 std::string iso_date(std::chrono::year_month_day date);
 
-enum class SessionSource : std::uint8_t {
-    Feed,     // the day's System Events 'Q' (start of market hours) and 'M' (end of market hours)
-    Fallback  // either is missing: 09:30-16:00 ET
-};
-
-// A day's regular hours, [open, close) in epoch ns.
-struct FeedSession
-{
-    Timestamp open{0};
-    Timestamp close{0};
-    SessionSource source{SessionSource::Fallback};
-
-    bool operator==(const FeedSession&) const = default;
-};
-
 // One day file of a DayLibrary, identified by one pass over its bytes.
 struct Day
 {
@@ -132,6 +117,7 @@ public:
 
     // position() at the end: the days' sizes.
     std::uint64_t size() const noexcept;
+    const std::vector<DayHandle>& days() const noexcept;
     // With hash as read, day_hash() of each day replayed to its end, in order.
     const std::vector<std::string>& hashes() const noexcept;
 };
