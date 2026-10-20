@@ -166,7 +166,7 @@ async function save(id: string) {
   link.href = URL.createObjectURL(blob);
   link.download = `${id}.json`;
   link.click();
-  setTimeout(() => URL.revokeObjectURL(link.href));
+  setTimeout(() => URL.revokeObjectURL(link.href), 60_000); // a browser may still be reading it
 }
 
 // What the run shown allows: Watch in the terminal, which only the controlling tab may; Verify; Export; its settings
@@ -181,16 +181,16 @@ function RunActions({ run, n, edit }: { run: RunListing; n: number; edit(): void
         : 'Another tab holds control',
   );
   const can = actions(run);
-  // The second click of a double click, which lands on Confirm delete once Delete arms it, is not a click.
+  // A double click's second click is dropped: it would confirm a Delete just armed, or click the terminal Watch opened.
   const once = (f: () => void) => (e: { detail: number }) => e.detail < 2 && f();
   return (
     <div className="actions">
       <span className="muted">#{n}</span>
       <button
         disabled={!can.watch || seat !== ''}
-        onClick={() => {
+        onClick={once(() => {
           if (store.control({ action: 'watch', run_id: run.id })) location.hash = '';
-        }}
+        })}
       >
         Watch in Terminal
       </button>
@@ -255,8 +255,8 @@ function Provenance({ run, label }: { run: Run; label: string }) {
             ? '✓ reproduced'
             : '✗ not reproduced'}
       </div>
-      {run.verifications.map((v) => (
-        <div key={v.finished + v.source_digest}>
+      {run.verifications.map((v, i) => (
+        <div key={i}>
           <b className={outcomes[v.outcome][1]}>{outcomes[v.outcome][0]}</b> {v.finished} · code{' '}
           {v.source_digest.slice(0, 16)}
           {v.changed.length > 0 && ` · changed ${v.changed.join(', ')}`}

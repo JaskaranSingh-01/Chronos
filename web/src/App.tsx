@@ -45,6 +45,7 @@ function ViewerBanner() {
 function WatchBanner() {
   const runId = useStore((s) => s.runId);
   const verdict = useStore((s) => s.verdict);
+  const ended = useStore((s) => s.state === 'ended');
   const label = useLab((l) => runLabel(l.runs, runId));
   if (!runId) return null;
   return (
@@ -53,7 +54,7 @@ function WatchBanner() {
       {verdict ? (
         <b className={outcomes[verdict.outcome][1]}> · {outcomes[verdict.outcome][0]}</b>
       ) : (
-        ': the verdict comes when its replay ends.'
+        `: ${ended ? 'its verdict was sent before this tab connected' : 'the verdict comes when its replay ends'}.`
       )}
     </p>
   );

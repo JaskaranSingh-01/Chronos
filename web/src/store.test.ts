@@ -310,6 +310,7 @@ describe('apply', () => {
     expect(apply(watched, snapshot({ generation: 3, snapshot_seq: 2 })).spec).toBe(spec); // a snapshot carries none
     const next = apply(watched, generationStart(4, 10));
     expect([next.runId, next.spec, next.verdict]).toEqual(['', null, null]);
+    expect(apply(next, { ...verdict, seq: 11 } as ServerMessage).verdict).toBeNull(); // generation 3's, arriving late
   });
 
   it('keeps the days the day picker found when hello names a new session', () => {

@@ -589,6 +589,7 @@ describe('createLab', () => {
         return Response.json({ id: 'a' }, { status: 202 });
       }
       if (path === '/api/backtests/b/verify') return Response.json({ error: 'input_changed' }, { status: 409 });
+      if (path === '/api/backtests/c/verify') return Response.json({ error: 'other_settings' }, { status: 409 });
       return undefined;
     };
     const lab = createLab(env);
@@ -596,6 +597,8 @@ describe('createLab', () => {
     expect([lab.get().runs[0].verifying, lab.get().notice]).toEqual(['queued', '']);
     await lab.verify('b');
     expect(lab.get().notice).toBe('verify refused: input_changed');
+    await lab.verify('c');
+    expect(lab.get().notice).toBe('verify refused: the run used another --allow-truncated-tail');
     expect(JSON.parse(await (await lab.download('a'))!.text())).toEqual(run('a'));
     expect([await lab.download('gone'), lab.get().notice]).toEqual([null, 'export refused: 404']);
     expect(s.fetched.filter((f) => f.split(' ')[1].startsWith('/api/backtests/a'))).toEqual([

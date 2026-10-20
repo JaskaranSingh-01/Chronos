@@ -252,6 +252,9 @@ export function refusalText(r: LabError, symbol: string): string {
 
 const counts = new Intl.NumberFormat('en-US');
 
+// A refusal's code in words, where the code alone would not say what to change.
+const plain: Record<string, string> = { other_settings: 'the run used another --allow-truncated-tail' };
+
 // The stats of a run's results, each with how it reads: signed money for a PnL, money, a count, or a percentage.
 const stats: [name: string, of: (r: Results) => number, kind: 'pnl' | 'money' | 'count' | 'percent'][] = [
   ['Total PnL', (r) => r.pnl, 'pnl'],
@@ -498,7 +501,8 @@ export function createLab(env: Pick<Env, 'fetch' | 'load'>) {
     try {
       const res = await send(method, path);
       const answer = (await res.json().catch(() => ({}))) as { error?: string; warning?: string };
-      set({ ...state, notice: res.ok ? (answer.warning ?? '') : `${what} refused: ${answer.error ?? res.status}` });
+      const why = answer.error ?? String(res.status);
+      set({ ...state, notice: res.ok ? (answer.warning ?? '') : `${what} refused: ${plain[why] ?? why}` });
       return res.ok;
     } catch {
       set({ ...state, notice: `${what}: chronos-serve does not answer` });
