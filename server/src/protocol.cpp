@@ -1056,6 +1056,28 @@ bool decode_run(std::string_view text, Run& run)
     return true;
 }
 
+std::string encode_lab_error(std::string_view code, std::string_view field, std::span<const std::string> days)
+{
+    json j = {{"error", code}};
+    if (!field.empty()) {
+        j["field"] = field;
+    }
+    if (!days.empty()) {
+        j["days"] = days;
+    }
+    return text(j);
+}
+
+std::string encode_run_id(std::string_view id)
+{
+    return text({{"id", id}});
+}
+
+std::string encode_warning(std::string_view warning)
+{
+    return text({{"warning", warning}});
+}
+
 std::string encode_runs(std::span<const Run> runs, std::size_t queued)
 {
     json list = json::array();

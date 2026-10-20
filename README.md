@@ -393,6 +393,34 @@ second and the server dropped none (`dropped_snapshots`), the command queue was 
 frames a second, its slowest frame 17 ms. The snapshot metrics carry no per-event latency, so there is no p50 or p99
 per event yet.
 
+### Strategy Lab (server)
+
+`chronos-serve` also runs backtests in the background, one at a time on a worker thread, while the terminal plays:
+a built-in strategy over one symbol and one or more days, at full speed. Its HTTP API (the Lab page comes later):
+
+| Endpoint | Does |
+|---|---|
+| `GET /api/strategies` | the strategies, their params, defaults and caps, the windows, `max_days` and `max_queued` |
+| `POST /api/backtests` | queues a run; 202 `{"id"}`, 400 `{"error","field"}` or `symbol_missing` with its `days`, 429 when 8 wait |
+| `GET /api/backtests` | every run, without its results: state, progress, PnL and fills |
+| `GET /api/backtests/<id>` | the whole run: spec, provenance, results |
+| `POST /api/backtests/<id>/cancel` | cancels a queued or running run; 409 once it has ended |
+| `DELETE /api/backtests/<id>` | removes a run and its file; a running one stops and is never saved |
+
+A run is posted as `{"symbol":"SPY","days":["2019-12-30"],"strategy":"market_maker"}`. Every other key takes
+`simulator backtest`'s default: `params`, `latency` (`order_ns`, `report_ns`), `fees` (`maker`, `taker`, in ticks a
+share), `limits` and `window`. An omitted limit follows the params, as on the command line. The window is `"regular"`
+by default, so a strategy trades only inside each day's feed session, from the day's own 'Q' to its 'M' System Event
+(09:30-16:00 when a file lacks them); `"full_day"` trades the whole file. A one-day, Full-day run with the defaults gives
+`simulator backtest`'s PnL, fills and fill attribution.
+
+- Each finished run is saved to `runs/<id>.json` in the working directory, with the build it ran on (commit, source
+  digest, compiler), each day's hash and regular hours, and its results: the PnL curve at the end of every second with
+  a market event, PnL by day and by hour, the first 50,000 fills and the fill attribution. A restart reloads them.
+- A POST or DELETE must be `Content-Type: application/json` (else 415) and carry the `Origin` of the page this server
+  served (else 403), so no other site can queue or delete a run; with `--token` it also needs the `Authorization` header.
+  A body over 64 KiB closes the connection.
+
 ## How it works
 
 ```text

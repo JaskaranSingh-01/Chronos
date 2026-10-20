@@ -233,7 +233,7 @@ struct Served
     SessionRunner runner;
 
     Served(ReplaySession& session, ServerOptions options, std::string token = {}, const LogQueue* log = nullptr,
-           const LogWriter* writer = nullptr, DayLibrary* library = nullptr)
+           const LogWriter* writer = nullptr, DayLibrary* library = nullptr, Backtester* lab = nullptr)
         : hub{.session = session,
               .log = log,
               .writer = writer,
@@ -241,6 +241,7 @@ struct Served
               .token = std::move(token),
               .config = config(),
               .library = library,
+              .lab = lab,
               .start = 2019y / 12 / 30},
           server{hub, std::move(options)},
           runner{session}
@@ -261,6 +262,18 @@ struct Served
         return client.request("GET " + target + " HTTP/1.1\r\nHost: " + (host.empty() ? this->host() : host) + "\r\n" +
                               (authorization.empty() ? "" : "Authorization: " + authorization + "\r\n") +
                               "Connection: close\r\n\r\n");
+    }
+
+    // `method` `target` with `body` and `headers` (each line ending in CRLF); by default as this server's own page
+    // sends a Lab request: JSON, with its Origin.
+    std::pair<int, std::string> send(const std::string& method, const std::string& target, const std::string& body = "",
+                                     const std::string& headers = "")
+    {
+        Client client{server.port()};
+        return client.request(
+            method + " " + target + " HTTP/1.1\r\nHost: " + host() + "\r\n" +
+            (headers.empty() ? "Content-Type: application/json\r\nOrigin: http://" + host() + "\r\n" : headers) +
+            "Content-Length: " + std::to_string(body.size()) + "\r\nConnection: close\r\n\r\n" + body);
     }
 
     // A WebSocket from this server's own page; a test failure if the upgrade is refused.
@@ -638,6 +651,124 @@ TEST(ServerTest, AnOrderIsAckedOnceLoggedAndItsFillIsReported)
     ASSERT_FALSE(fill.is_null());
     EXPECT_EQ(fill["quantity"], 10);
     EXPECT_EQ(fill["price"], 1'000'000);
+}
+
+// The Lab's days in a scratch directory: Friday's ACME, a long Monday's, and a Tuesday that lists AAA alone.
+struct LabDays
+{
+    ScratchDir dir;
+    DayLibrary library{dir.path / "data", dir.path / "data" / "fingerprints.json"};
+
+    explicit LabDays(const std::string& name)
+        : dir(name)
+    {
+        std::filesystem::create_directories(dir.path / "data");
+        itch_test::ItchBuilder tuesday;
+        tuesday.system_event(0, kSecond, 'O').stock_directory(1, kSecond, "AAA").system_event(0, 2 * kSecond, 'S');
+        write_file(dir.path / "data" / "12272019.NASDAQ_ITCH50.bin", lab_day(1).bytes());
+        write_file(dir.path / "data" / "12302019.NASDAQ_ITCH50.bin", lab_day(2, 200'000).bytes());
+        write_file(dir.path / "data" / "12312019.NASDAQ_ITCH50.bin", tuesday.bytes());
+        library.scan();
+    }
+};
+
+const std::string kFridayRun = R"({"symbol":"ACME","days":["2019-12-27"],"strategy":"market_maker"})";
+const std::string kMondayRun = R"({"symbol":"ACME","days":["2019-12-30"],"strategy":"imbalance"})";
+
+// Every Lab endpoint: the strategies; a run refused for its spec, a day or the symbol, or a full queue; a run queued,
+// listed, served, cancelled once it has ended, and deleted.
+TEST(ServerTest, TheLabApiQueuesListsServesCancelsAndDeletesRuns)
+{
+    LabDays days{"server-lab"};
+    Backtester lab{config(), days.dir.path / "runs"};
+    const std::vector<MarketEvent> events = spaced_bids(10);
+    ReplaySession session{config(), over(events)};
+    Served served{session, options(), {}, nullptr, nullptr, &days.library, &lab};
+    using Reply = std::pair<int, std::string>;
+
+    const auto [status, strategies] = served.get("/api/strategies");
+    EXPECT_EQ(status, 200);
+    EXPECT_EQ(json::parse(strategies)["max_queued"], 8);
+    EXPECT_EQ(served.send("POST", "/api/backtests", R"({"symbol":"ACME","strategy":"market_maker"})"),
+              (Reply{400, R"({"error":"bad_request","field":"days"})"}));
+    EXPECT_EQ(served.send("POST", "/api/backtests",
+                          R"({"symbol":"ACME","days":["2019-12-26","2019-12-27"],"strategy":"market_maker"})"),
+              (Reply{400, R"({"error":"bad_request","field":"days[0]"})"}));
+    EXPECT_EQ(
+        served.send("POST", "/api/backtests",
+                    R"({"symbol":"ACME","days":["2019-12-27","2019-12-30","2019-12-31"],"strategy":"market_maker"})"),
+        (Reply{400, R"({"days":["2019-12-31"],"error":"symbol_missing"})"}));
+
+    const auto [queued, created] = served.send("POST", "/api/backtests", kFridayRun);
+    ASSERT_EQ(queued, 202);
+    const std::string id = json::parse(created)["id"];
+    EXPECT_EQ(json::parse(served.get("/api/backtests").second)["runs"][0]["id"], id);
+    ASSERT_TRUE(eventually([&] {
+        const auto [code, body] = served.get("/api/backtests/" + id);
+        return code == 200 && json::parse(body)["state"] == "completed";
+    }));
+    const json run = json::parse(served.get("/api/backtests/" + id).second);
+    EXPECT_EQ(run["spec"],
+              json::parse(R"({"symbol":"ACME","days":["2019-12-27"],"strategy":"market_maker",)"
+                          R"("params":{"quote_size":100,"max_position":500,"requote_cooldown_ns":100000000,)"
+                          R"("improve_ticks":0},"latency":{"order_ns":50000,"report_ns":50000},)"
+                          R"("fees":{"maker":0,"taker":0},"limits":{"max_position":500,)"
+                          R"("max_order_quantity":100,"max_open_orders":2},"window":"regular"})"));
+    EXPECT_GT(run["results"]["maker_fills"], 0);
+    EXPECT_EQ(served.get("/api/backtests/20261018T101500Z-0000000000000000").first, 404);
+    EXPECT_EQ(served.get("/api/backtests/no.such").first, 404);
+    EXPECT_EQ(served.send("POST", "/api/backtests/" + id + "/cancel").first, 409);
+    EXPECT_EQ(served.send("POST", "/api/backtests/no.such/cancel").first, 404);
+    EXPECT_EQ(served.send("DELETE", "/api/backtests/" + id).first, 204);
+    EXPECT_EQ(served.get("/api/backtests/" + id).first, 404);
+    EXPECT_EQ(served.send("DELETE", "/api/backtests/" + id).first, 404);
+
+    // A long Monday runs while eight more wait; the next is refused.
+    std::vector<std::string> ids;
+    int refused = 0;
+    for (std::size_t i = 0; i < max_queued + 3; ++i) {
+        const auto [code, body] = served.send("POST", "/api/backtests", kMondayRun);
+        if (code == 202) {
+            ids.push_back(json::parse(body)["id"]);
+        }
+        refused += code == 429 && body == R"({"error":"queue_full"})" ? 1 : 0;
+    }
+    EXPECT_GE(refused, 1);
+    for (const std::string& queued_id : ids) {
+        EXPECT_EQ(served.send("DELETE", "/api/backtests/" + queued_id).first, 204);
+    }
+}
+
+// Spec §5.6: a Lab POST or DELETE must be JSON from this server's own page, besides what every /api request needs; a
+// body over 64 KiB is dropped before it reaches a route.
+TEST(ServerTest, EveryLabChangeNeedsJsonFromThisServersOwnPage)
+{
+    LabDays days{"server-lab-csrf"};
+    Backtester lab{config(), days.dir.path / "runs"};
+    const std::vector<MarketEvent> events = spaced_bids(10);
+    ReplaySession session{config(), over(events)};
+    Served served{session, options(), {}, nullptr, nullptr, &days.library, &lab};
+    const std::string origin = "Origin: http://" + served.host() + "\r\n";
+    const std::string json_type = "Content-Type: application/json\r\n";
+
+    EXPECT_EQ(served.send("POST", "/api/backtests", kFridayRun, origin).first, 415);
+    EXPECT_EQ(served.send("POST", "/api/backtests", kFridayRun, origin + "Content-Type: text/plain\r\n").first, 415);
+    EXPECT_EQ(served.send("POST", "/api/backtests", kFridayRun, json_type).first, 403);
+    EXPECT_EQ(served.send("POST", "/api/backtests", kFridayRun, json_type + "Origin: http://evil.example\r\n").first,
+              403);
+    EXPECT_EQ(served.send("DELETE", "/api/backtests/x", "", origin).first, 415);
+    EXPECT_EQ(served.send("POST", "/api/backtests/x/cancel", "", json_type).first, 403);
+    EXPECT_EQ(
+        served.send("POST", "/api/backtests", "{", origin + "Content-Type: application/json; charset=utf-8\r\n").first,
+        400);
+    EXPECT_EQ(served.send("POST", "/api/backtests", std::string(70 * 1024, ' ')).first, 0);  // no response
+
+    ReplaySession other{config(), over(events)};
+    Served guarded{other, options(), "t0k3n", nullptr, nullptr, &days.library, &lab};
+    const std::string own = json_type + "Origin: http://" + guarded.host() + "\r\n";
+    EXPECT_EQ(guarded.send("POST", "/api/backtests", kFridayRun, own).first, 401);
+    EXPECT_EQ(guarded.send("GET", "/api/backtests", "", own).first, 401);
+    EXPECT_EQ(guarded.send("POST", "/api/backtests", kFridayRun, own + "Authorization: Bearer t0k3n\r\n").first, 202);
 }
 
 }  // namespace

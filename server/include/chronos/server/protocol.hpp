@@ -90,5 +90,12 @@ std::string encode_run(const Run& run);
 bool decode_run(std::string_view text, Run& run);
 // GET /api/backtests: each run without its results, with its progress and headline; `queued` jobs wait.
 std::string encode_runs(std::span<const Run> runs, std::size_t queued);
+// A Lab request refused (spec §5.6): {"error": code}, with "field" when it names one and "days" when it lists them.
+std::string encode_lab_error(std::string_view code, std::string_view field = {},
+                             std::span<const std::string> days = {});
+// A run queued: {"id": id}.
+std::string encode_run_id(std::string_view id);
+// A Lab request done, with a warning: {"warning": warning}.
+std::string encode_warning(std::string_view warning);
 
 }  // namespace simulator::server
