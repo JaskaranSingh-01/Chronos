@@ -29,6 +29,7 @@ function RunForm({ form, setForm, digits }: { form: Form; setForm(f: Form): void
   const days = useLab((l) => l.days);
   const symbols = useLab((l) => l.symbols);
   const [refusal, setRefusal] = useState(none); // why the last Run was refused, until an edit
+  const [busy, setBusy] = useState(false); // a Run is being sent; a disabled button also stops Enter
   const picked = form.days.join(',');
   useEffect(() => {
     if (picked) void lab.loadSymbols(picked.split(','));
@@ -57,7 +58,9 @@ function RunForm({ form, setForm, digits }: { form: Form; setForm(f: Form): void
         e.preventDefault();
         const body = toBody(form, strategies, digits);
         if (typeof body === 'string') return setRefusal({ field: body, text: `Check ${body}` });
+        setBusy(true);
         const r = await lab.submit(body);
+        setBusy(false);
         const named = r?.field ?? (r?.error === 'symbol_missing' ? 'symbol' : '');
         setRefusal(r ? { field: named, text: refusalText(r, body.symbol) } : none);
       }}
@@ -143,7 +146,9 @@ function RunForm({ form, setForm, digits }: { form: Form; setForm(f: Form): void
           String(kind.limits[name]),
         ),
       )}
-      <button className="place run">▶ Run backtest</button>
+      <button className="place run" disabled={busy}>
+        ▶ Run backtest
+      </button>
       <div className="sell">{refusal.text}</div>
     </form>
   );
@@ -153,14 +158,16 @@ function RunForm({ form, setForm, digits }: { form: Form; setForm(f: Form): void
 // here rather than by a dialog.
 function RunActions({ run, n, edit }: { run: RunListing; n: number; edit(): void }) {
   const [confirming, setConfirming] = useState(false);
+  // The second click of a double click, which lands on Confirm delete once Delete arms it, is not a click.
+  const once = (f: () => void) => (e: { detail: number }) => e.detail < 2 && f();
   return (
     <div className="actions">
       <span className="muted">#{n}</span>
       <button onClick={edit}>Edit as new</button>
-      {actions(run).cancel && <button onClick={() => void lab.cancel(run.id)}>Cancel run</button>}
+      {actions(run).cancel && <button onClick={once(() => void lab.cancel(run.id))}>Cancel run</button>}
       {confirming ? (
         <>
-          <button className="sell" onClick={() => void lab.remove(run.id)}>
+          <button className="sell" onClick={once(() => void lab.remove(run.id))}>
             Confirm delete
           </button>
           <button onClick={() => setConfirming(false)}>Keep</button>
