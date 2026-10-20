@@ -104,7 +104,8 @@ tr.diff { background: #f0b90b1f; color: var(--bright); }
 .prov { margin-top: 8px; }
 .prov td { vertical-align: top; white-space: nowrap; }
 .prov td + td { white-space: normal; overflow-wrap: anywhere; }
-.runs tr:not(.muted) { cursor: pointer; }
+.runs > table tr:not(.muted) { cursor: pointer; }
+.runs td > button { background: none; border: 0; padding: 0; color: inherit; font: inherit; cursor: pointer; }
 tr.on { background: #1f6feb22; }
 table { width: 100%; border-collapse: collapse; }
 td { padding: 1px 4px; }

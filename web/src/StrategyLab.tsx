@@ -181,16 +181,16 @@ function RunActions({ run, n, edit }: { run: RunListing; n: number; edit(): void
         : 'Another tab holds control',
   );
   const can = actions(run);
-  // A double click's second click is dropped: it would confirm a Delete just armed, or click the terminal Watch opened.
+  // A double click's second click is dropped: it would confirm a Delete just armed, or send a request twice.
   const once = (f: () => void) => (e: { detail: number }) => e.detail < 2 && f();
   return (
     <div className="actions">
       <span className="muted">#{n}</span>
       <button
         disabled={!can.watch || seat !== ''}
-        onClick={once(() => {
+        onClick={() => {
           if (store.control({ action: 'watch', run_id: run.id })) location.hash = '';
-        })}
+        }}
       >
         Watch in Terminal
       </button>
@@ -292,6 +292,7 @@ function Runs({ edit }: { edit(r: RunListing): void }) {
   const shown = runs.findIndex((r) => r.id === selected);
   const ticked = runs.filter((r) => compare.includes(r.id));
   const n = (r: RunListing) => runs.indexOf(r) + 1;
+  const comparing = useLab((l) => l.comparing && l.compare.length === 2);
   return (
     <div className="panel runs">
       <div className="title">Runs · tick two to compare</div>
@@ -316,7 +317,9 @@ function Runs({ edit }: { edit(r: RunListing): void }) {
                     onChange={(e) => void lab.tick(r.id, e.target.checked)}
                   />
                 </td>
-                <td>{i + 1}</td>
+                <td>
+                  <button aria-label={`show #${i + 1}`}>{i + 1}</button>
+                </td>
                 <td>{strategyNames[r.spec.strategy] ?? r.spec.strategy}</td>
                 <td>{r.spec.symbol}</td>
                 <td>{r.spec.days.length}</td>
@@ -328,10 +331,14 @@ function Runs({ edit }: { edit(r: RunListing): void }) {
       </table>
       <div className="actions">
         <button
-          disabled={ticked.length !== 2 || ticked.some((r) => r.pnl === null)}
-          onClick={() => lab.showCompare(true)}
+          disabled={!comparing && (ticked.length !== 2 || ticked.some((r) => r.pnl === null))}
+          onClick={() => lab.showCompare(!comparing)}
         >
-          {ticked.length === 2 ? `Compare #${n(ticked[0])} vs #${n(ticked[1])}` : 'Compare'}
+          {comparing
+            ? 'Close compare'
+            : ticked.length === 2
+              ? `Compare #${n(ticked[0])} vs #${n(ticked[1])}`
+              : 'Compare'}
         </button>
       </div>
       {shown >= 0 && <RunActions key={selected} run={runs[shown]} n={shown + 1} edit={() => edit(runs[shown])} />}
@@ -342,6 +349,7 @@ function Runs({ edit }: { edit(r: RunListing): void }) {
 
 // The Strategy Lab: a run's settings on the left, its results in the middle, the runs on the right.
 export function StrategyLab() {
+  useEffect(() => void lab.start(), []); // runs queued or deleted elsewhere show on entering
   const offline = useLab((l) => l.offline);
   const notice = useLab((l) => l.notice);
   const comparing = useLab((l) => l.comparing && l.compare.length === 2);

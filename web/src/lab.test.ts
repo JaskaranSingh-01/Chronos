@@ -523,7 +523,7 @@ describe('createLab', () => {
     await lab.cancel('a');
     expect([lab.get().runs[0].state, lab.get().notice]).toEqual(['cancelled', '']);
     await lab.cancel('b');
-    expect(lab.get().notice).toBe('cancel refused: 409');
+    expect(lab.get().notice).toBe('cancel refused: it has already ended');
     await lab.remove('b');
     expect([lab.get().notice, lab.get().selected, lab.get().runs.length]).toEqual([
       'not removed: Permission denied',
@@ -590,15 +590,18 @@ describe('createLab', () => {
       }
       if (path === '/api/backtests/b/verify') return Response.json({ error: 'input_changed' }, { status: 409 });
       if (path === '/api/backtests/c/verify') return Response.json({ error: 'other_settings' }, { status: 409 });
+      if (path === '/api/backtests/d/verify') return Response.json({ error: 'queue_full' }, { status: 429 });
       return undefined;
     };
     const lab = createLab(env);
     await lab.verify('a');
     expect([lab.get().runs[0].verifying, lab.get().notice]).toEqual(['queued', '']);
     await lab.verify('b');
-    expect(lab.get().notice).toBe('verify refused: input_changed');
+    expect(lab.get().notice).toBe('verify refused: a day changed since the run');
     await lab.verify('c');
     expect(lab.get().notice).toBe('verify refused: the run used another --allow-truncated-tail');
+    await lab.verify('d');
+    expect(lab.get().notice).toBe('verify refused: the queue is full');
     expect(JSON.parse(await (await lab.download('a'))!.text())).toEqual(run('a'));
     expect([await lab.download('gone'), lab.get().notice]).toEqual([null, 'export refused: 404']);
     expect(s.fetched.filter((f) => f.split(' ')[1].startsWith('/api/backtests/a'))).toEqual([

@@ -45,17 +45,17 @@ function ViewerBanner() {
 function WatchBanner() {
   const runId = useStore((s) => s.runId);
   const verdict = useStore((s) => s.verdict);
-  const ended = useStore((s) => s.state === 'ended');
+  const state = useStore((s) => s.state);
   const label = useLab((l) => runLabel(l.runs, runId));
   if (!runId) return null;
+  const until =
+    state === 'ended'
+      ? 'its verdict was sent before this tab connected'
+      : `${state === 'paused' ? 'press ▶ Play; ' : ''}the verdict comes when its replay ends`;
   return (
     <p className="banner" data-testid="watch">
       Watching run {label}
-      {verdict ? (
-        <b className={outcomes[verdict.outcome][1]}> · {outcomes[verdict.outcome][0]}</b>
-      ) : (
-        `: ${ended ? 'its verdict was sent before this tab connected' : 'the verdict comes when its replay ends'}.`
-      )}
+      {verdict ? <b className={outcomes[verdict.outcome][1]}> · {outcomes[verdict.outcome][0]}</b> : `: ${until}.`}
     </p>
   );
 }

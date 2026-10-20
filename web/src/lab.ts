@@ -253,7 +253,12 @@ export function refusalText(r: LabError, symbol: string): string {
 const counts = new Intl.NumberFormat('en-US');
 
 // A refusal's code in words, where the code alone would not say what to change.
-const plain: Record<string, string> = { other_settings: 'the run used another --allow-truncated-tail' };
+const plain: Record<string, string> = {
+  other_settings: 'the run used another --allow-truncated-tail',
+  input_changed: 'a day changed since the run',
+  queue_full: 'the queue is full',
+  '409': 'it has already ended', // cancel's bare 409
+};
 
 // The stats of a run's results, each with how it reads: signed money for a PnL, money, a count, or a percentage.
 const stats: [name: string, of: (r: Results) => number, kind: 'pnl' | 'money' | 'count' | 'percent'][] = [
@@ -357,6 +362,8 @@ export const outcomes: Record<Outcome, [label: string, tone: string]> = {
 };
 
 // A run as the list numbers it, or its id when the list does not have it.
+// ponytail: #n is the listing position, so a delete renumbers later runs and same-second runs may swap; a server seq if
+// that matters.
 export function runLabel(runs: RunListing[], id: string): string {
   const i = runs.findIndex((r) => r.id === id);
   return i >= 0 ? `#${i + 1}` : id;

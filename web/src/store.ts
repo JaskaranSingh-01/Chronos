@@ -251,7 +251,8 @@ export function selectOrders(s: State): MyOrder[] {
   if (next.length !== lastOrders.length || !next.every((o, i) => sameOrder(o, lastOrders[i]))) lastOrders = next;
   return lastOrders;
 }
-// Why manual trading is unavailable, or '' when it is not: the controller, connected, on a trading symbol, not seeking.
+// Why manual trading is unavailable, or '' when it is not: the controller, connected, not seeking or watching a run,
+// on a trading symbol.
 // ponytail: a strategy attached outside a Watch is not visible to the client; the server's not_ready is its signal.
 export function selectTradeBlock(s: State): string {
   if (!s.hello || s.status !== 'open') return 'Not connected';

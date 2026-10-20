@@ -425,7 +425,7 @@ a built-in strategy over one symbol and one or more days, at full speed. The **S
   over another symbol or other days flagged. For the run picked: **Watch in Terminal** replays it in the terminal,
   paced, and says when the replay ends whether it reproduced; **Verify** re-runs it on the server; **Export JSON**
   saves it; **Edit as new** copies its settings into the form; **Cancel** and **Delete**. Its provenance lists the
-  build, each day's hash and hours, the engine, the timings, the digests and every verification.
+  build, each day's hash, session source and size, the engine, the timings, the digests and every verification.
 
 The page polls the runs about once a second while one is queued or running. Its HTTP API:
 
@@ -689,6 +689,8 @@ A bad argument prints a two-line error on stderr and exits 2. `--json PATH` writ
 - The CLI with `--help`, `--version`, documented exit codes and `--json`.
 - The Trading Terminal: `chronos-serve` (HTTP and WebSocket, a command log, reconnect and resync) and a React UI with
   a TradingView-style chart, L3 queue positions and Playwright end-to-end tests.
+- Days chained in the terminal, and the Strategy Lab: backtests over one or more days run from the UI, kept,
+  compared, verified, and watched in the terminal to a digest-checked verdict.
 - A GitHub Actions workflow and `.clang-format` / `.clang-tidy` configuration.
 
 **Not yet:**
