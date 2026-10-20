@@ -165,6 +165,7 @@ target_compile_definitions(crow_headers INTERFACE ASIO_STANDALONE ASIO_NO_DEPREC
 
 add_library(chronos_server
 
+    server/src/backtest.cpp
     server/src/candles.cpp
     server/src/command_log.cpp
     server/src/generation.cpp
@@ -285,6 +286,7 @@ gtest_discover_tests(simulator_tests)
 # Its own executable, so simulator_tests never links server code.
 add_executable(chronos_server_tests
 
+    tests/server/backtest_test.cpp
     tests/server/candles_test.cpp
     tests/server/channels_test.cpp
     tests/server/command_log_test.cpp

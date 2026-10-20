@@ -4,7 +4,9 @@
 
 #include <unistd.h>
 
+#include <algorithm>
 #include <chrono>
+#include <cstddef>
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
@@ -297,6 +299,65 @@ inline itch_test::ItchBuilder acme_day(std::uint64_t seconds = 4, std::uint32_t 
         itch.executed(1, kNineThirty + s * kSecond, s % 2 == 0 ? 1 : 2, 100, s);
     }
     itch.system_event(0, 57'600 * kSecond, 'M');
+    return itch;
+}
+
+// A busier day of ACME, fixed by `seed`, for Lab runs: a 10.00 bid and 10.01 offer of 1,000 from 09:00; from 09:30, a
+// message every 10 ms, `messages` of them: adds up to 3 cents behind either touch, executions (E, or C at the order's
+// own price), cancels and deletes. The market maker fills by rules (a) and (d), and the imbalance taker trades.
+inline itch_test::ItchBuilder lab_day(std::uint64_t seed, std::size_t messages = 4'000)
+{
+    struct Live
+    {
+        std::uint64_t id;
+        std::uint32_t price;
+        std::uint32_t shares;
+    };
+    constexpr std::uint64_t hour = 3'600 * kSecond;
+    itch_test::ItchBuilder itch;
+    itch.system_event(0, 3 * hour, 'O')
+        .stock_directory(1, 3 * hour, "ACME")
+        .trading_action(1, 3 * hour, "ACME", 'T')
+        .system_event(0, 4 * hour, 'S')
+        .add_order(1, 9 * hour, 1, 'B', 1'000, "ACME", 100'000)
+        .add_order(1, 9 * hour, 2, 'S', 1'000, "ACME", 100'100)
+        .system_event(0, kNineThirty, 'Q');
+    std::vector<Live> live{{1, 100'000, 1'000}, {2, 100'100, 1'000}};
+    std::mt19937_64 rng{seed};
+    std::uint64_t next_id = 3;
+    std::uint64_t match = 1;
+    for (std::uint64_t i = 1; i <= messages; ++i) {
+        const std::uint64_t ts = kNineThirty + i * 10 * kMs;
+        const std::uint64_t roll = rng() % 10;
+        if (live.size() < 4 || roll < 4) {
+            const bool buy = rng() % 2 == 0;
+            const auto behind = static_cast<std::uint32_t>(rng() % 4 * 100);
+            const std::uint32_t price = buy ? 100'000 - behind : 100'100 + behind;
+            const auto shares = static_cast<std::uint32_t>(100 * (1 + rng() % 10));
+            itch.add_order(1, ts, next_id, buy ? 'B' : 'S', shares, "ACME", price);
+            live.push_back({next_id++, price, shares});
+            continue;
+        }
+        const std::size_t k = rng() % live.size();
+        Live& order = live[k];
+        std::uint32_t part = std::min(order.shares, static_cast<std::uint32_t>(100 * (1 + rng() % 3)));
+        if (roll == 9) {
+            itch.erase(1, ts, order.id);
+            part = order.shares;
+        } else if (roll >= 7) {
+            itch.cancel(1, ts, order.id, part);
+        } else if (roll == 6) {
+            itch.executed_with_price(1, ts, order.id, part, match++, true, order.price);
+        } else {
+            itch.executed(1, ts, order.id, part, match++);
+        }
+        order.shares -= part;
+        if (order.shares == 0) {
+            live[k] = live.back();
+            live.pop_back();
+        }
+    }
+    itch.system_event(0, 16 * hour, 'M');
     return itch;
 }
 
