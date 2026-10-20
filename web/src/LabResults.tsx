@@ -228,7 +228,7 @@ export function RunResults() {
   );
 }
 
-// Two runs ticked, older first: equity overlaid with the second dashed, the stats side by side with the second's
+// Two runs ticked, in list order: equity overlaid with the second dashed, the stats side by side with the second's
 // difference, every setting that differs marked, and a flag when the symbol or the days differ.
 export function Compare() {
   const runs = useLab((l) => l.runs);

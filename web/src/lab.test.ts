@@ -553,6 +553,7 @@ describe('createLab', () => {
     ]);
     s.runs = s.runs.filter((r) => r.id !== 'c'); // deleted, as from another tab
     await lab.start();
+    expect(Object.keys(lab.get().details)).toEqual(['a']);
     lab.showCompare(true);
     await lab.select('b');
     expect([lab.get().compare, lab.get().comparing, Object.keys(lab.get().details).sort()]).toEqual([
@@ -566,6 +567,15 @@ describe('createLab', () => {
       'GET /api/backtests/c',
       'GET /api/backtests/b',
     ]);
+    await lab.tick('b', true);
+    lab.showCompare(true);
+    await lab.tick('b', false); // one left: the comparison ends, and a new tick does not bring it back
+    await lab.tick('b', true);
+    expect(lab.get().comparing).toBe(false);
+    lab.showCompare(true);
+    s.answer = (method) => (method === 'POST' ? Response.json({ id: 'n' }, { status: 202 }) : undefined);
+    await lab.submit({ symbol: 'ACME', days: ['2019-12-30'], strategy: 'market_maker' }); // shown, leaving the comparison
+    expect([lab.get().selected, lab.get().comparing]).toEqual(['n', false]);
   });
 
   it('verifies a run, says when chronos-serve refuses, and downloads its JSON with the token for Export', async () => {

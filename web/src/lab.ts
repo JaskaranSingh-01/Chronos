@@ -164,7 +164,7 @@ export interface LabState {
   selected: string; // the run shown; '' for none
   compare: string[]; // the runs ticked to compare, at most two
   comparing: boolean; // the comparison is shown rather than the selected run
-  details: Record<string, Run>; // the JSON of the runs shown or ticked, kept until their state or verifications change
+  details: Record<string, Run>; // the JSON of the run shown and the runs ticked, and of no other
   notice: string; // a refused cancel or delete, or a delete's warning
 }
 
@@ -455,9 +455,9 @@ export function createLab(env: Pick<Env, 'fetch' | 'load'>) {
           if (answer.ok) set({ ...state, strategies: (await answer.json()) as Strategies });
           await loadDays();
         }
+        set({ ...state, runs, offline: !state.strategies || !state.start });
         const compare = state.compare.filter((id) => runs.some((r) => r.id === id)); // a deleted run drops out
-        set({ ...state, runs, compare, offline: !state.strategies || !state.start });
-        for (const id of [state.selected, ...state.compare]) await fetchRun(id);
+        await view(state.selected, compare, state.comparing);
       } catch {
         set({ ...state, offline: true });
       }
@@ -467,11 +467,15 @@ export function createLab(env: Pick<Env, 'fetch' | 'load'>) {
     if (busy || state.offline) timer = setTimeout(() => void poll(), 1_000);
   }
 
-  // Shows `selected` and ticks `compare`, drops the JSON of any other run, and fetches theirs.
+  // Shows `selected` and ticks `compare`, compared only while two are, drops the JSON of any other run, and fetches
+  // theirs; `details` stays the same object when nothing drops, so a chart is not redrawn each poll.
   async function view(selected: string, compare: string[], comparing: boolean) {
     const wanted = [selected, ...compare];
-    const details = Object.fromEntries(Object.entries(state.details).filter(([id]) => wanted.includes(id)));
-    set({ ...state, selected, compare, comparing, details });
+    const ids = Object.keys(state.details);
+    const details = ids.every((id) => wanted.includes(id))
+      ? state.details
+      : Object.fromEntries(ids.filter((id) => wanted.includes(id)).map((id) => [id, state.details[id]]));
+    set({ ...state, selected, compare, comparing: comparing && compare.length === 2, details });
     for (const id of wanted) await fetchRun(id);
   }
 
@@ -481,7 +485,7 @@ export function createLab(env: Pick<Env, 'fetch' | 'load'>) {
       const res = await send('POST', '/api/backtests', body);
       const answer = (await res.json().catch(() => ({ error: String(res.status) }))) as LabError & { id: string };
       if (res.status !== 202) return answer;
-      set({ ...state, selected: answer.id });
+      await view(answer.id, state.compare, false);
       await poll();
       return null;
     } catch {
@@ -530,7 +534,7 @@ export function createLab(env: Pick<Env, 'fetch' | 'load'>) {
     // Deletes a run: a busy one stops and is never saved.
     async remove(id: string) {
       if ((await act('delete', 'DELETE', `/api/backtests/${id}`)) && state.selected === id) {
-        set({ ...state, selected: '' });
+        await view('', state.compare, state.comparing);
       }
     },
     select: (id: string) => view(id, state.compare, false),
