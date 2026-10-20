@@ -17,6 +17,7 @@
 #include <vector>
 
 #include "chronos/server/backtest.hpp"
+#include "chronos/server/replay_session.hpp"
 
 namespace simulator::server {
 
@@ -163,6 +164,10 @@ public:
     // queued or running: a backtest() of its spec with hash as read, over fresh mappings. Conflict for a run that is
     // not completed or partial; InputChanged if a day's cached hash is not the run's.
     Refusal verify(std::string_view id, const DayLibrary& library);
+    // A Watch in Terminal's admission (spec §5.5): fills `control`'s spec and watch from the completed run
+    // control.watch.run_id, if each of its days is listed with the run's hash and it ran with this server's
+    // allow_truncated_tail. False, with `why`, if not.
+    bool watch(Control& control, const DayLibrary& library, std::string& why) const;
     // Erases a queued or idle run, and an idle run's file; a busy one is a tombstone until its job stops. `warning`
     // says why a file could not be removed.
     Refusal remove(std::string_view id, std::string& warning);

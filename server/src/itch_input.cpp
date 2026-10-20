@@ -343,19 +343,31 @@ std::string iso_date(std::chrono::year_month_day date)
     return text;
 }
 
-SourceFactory chain_factory(const DayLibrary& library, const Instrument& instrument, bool allow_truncated_tail)
+std::string inputs_hash(std::span<const std::string> hashes)
 {
-    return [&library, instrument, allow_truncated_tail](const Ticker& ticker,
-                                                        const DayList& days) -> std::unique_ptr<MarketEventSource> {
+    XXH3_state_t state;
+    XXH3_128bits_reset(&state);
+    for (const std::string& hash : hashes) {
+        XXH3_128bits_update(&state, hash.data(), hash.size());
+    }
+    return hex(XXH3_128bits_digest(&state));
+}
+
+SourceFactory chain_factory(const DayLibrary& library, const Instrument& instrument, bool allow_truncated_tail,
+                            bool watch)
+{
+    return [&library, instrument, allow_truncated_tail,
+            watch](const Ticker& ticker, const DayList& days) -> std::unique_ptr<MarketEventSource> {
         std::vector<DayHandle> handles;
         for (std::size_t i = 0; i < days.count; ++i) {
-            handles.push_back(library.find(days.day[i]));
+            const DayHandle day = library.find(days.day[i]);
+            handles.push_back(watch && day != nullptr ? reopen(*day) : day);
         }
         if (name(ticker).empty() || std::find(handles.begin(), handles.end(), nullptr) != handles.end()) {
             return std::make_unique<VectorSource>(std::span<const MarketEvent>{});
         }
         return std::make_unique<DaySequenceSource>(std::move(handles), name(ticker), instrument, allow_truncated_tail,
-                                                   false);
+                                                   watch);
     };
 }
 
@@ -466,6 +478,9 @@ SourceResult DaySequenceSource::next(MarketEvent& event) noexcept
         }
         const SourceResult result = source_->next(event);
         if (result == SourceResult::Event) {
+            // ponytail: the hash trails the reader to the ticker's next event, re-touching the pages read since:
+            // about 1% more page-ins for an illiquid ticker over a day that misses the page cache; hash in the
+            // reader's scan if that matters.
             if (hashing_ != nullptr && source_->position() >= hashing_->hashed + step) {
                 hash_to(source_->position() / step * step);  // whole MiBs already replayed
             }

@@ -167,7 +167,8 @@ int main(int argc, char** argv)
         std::fprintf(stderr, "error: cannot write the log %s\n", log_path.c_str());
         return 2;
     }
-    ReplaySession session{config, chain_factory(library, config.instrument, parsed.allow_truncated_tail), &queue};
+    ReplaySession session{config, chain_factory(library, config.instrument, parsed.allow_truncated_tail), &queue,
+                          chain_factory(library, config.instrument, parsed.allow_truncated_tail, true)};
     Backtester lab{config, "runs"};
     std::optional<SessionRunner> runner{std::in_place, session};
     Hub hub{.session = session,

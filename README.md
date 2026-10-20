@@ -423,6 +423,11 @@ by default, so a strategy trades only inside each day's feed session, from the d
   is not the run's, so nothing is proven either way) or `input_changed` (a day's bytes are not the ones the run
   hashed, even when an edit in place kept the file's size and time). A run's `reproduced` turns true once a
   verification on the same code and days has matched, and false if one did not.
+- **Watch in Terminal** replays a completed run in the terminal, paced, at any speed: the WebSocket control
+  `{"type":"control","action":"watch","run_id":"<id>"}`, from the controlling tab. The server loads the run's spec
+  and days, refuses a run whose days have changed since, and pauses before the first event. When the replay ends it
+  sends `report{kind:"reproduced"}` with the verdict, by the same rules as Verify; a command applied during the Watch
+  makes it another run, so the verdict is then `mismatch`. The Watch's command log names the run and reproduces it.
 - A POST or DELETE must be `Content-Type: application/json` (else 415) and carry the `Origin` of the page this server
   served (else 403), so no other site can queue or delete a run; with `--token` it also needs the `Authorization` header.
   A body over 64 KiB closes the connection.

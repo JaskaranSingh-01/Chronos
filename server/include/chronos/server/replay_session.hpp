@@ -35,7 +35,17 @@ enum class ControlType : std::uint8_t {
     Seek,
     Restart,
     Symbol,
-    CancelSeek
+    CancelSeek,
+    Watch
+};
+
+// A Watch in Terminal of a Lab run (spec §5.5): the run, and what each of its generations' verdict compares.
+struct Watched
+{
+    RunId run_id{};                 // all NUL when the generation watches no run
+    Digests expected{};             // the run's
+    std::array<char, 32> inputs{};  // inputs_hash() of the run's days
+    bool same_code{false};          // the run's source digest is this build's
 };
 
 // A replay control from the client.
@@ -46,7 +56,8 @@ struct Control
     std::uint64_t steps{0};  // Step: market events to apply
     std::uint32_t speed{1};  // Speed: exchange ns per wall ns; 0 = as fast as possible
     Timestamp seek_ts{0};    // Seek: the exchange time to stop at
-    RunSpec spec{};          // Symbol: the ticker and days the next generation replays
+    RunSpec spec{};          // Symbol: the ticker and days the next generation replays; Watch: the run's spec
+    Watched watch{};         // Watch; GenerationStart: the run the generation watches
 };
 
 enum class RecordKind : std::uint8_t {
@@ -54,7 +65,8 @@ enum class RecordKind : std::uint8_t {
     Report,     // an execution report delivered to the session's strategy
     Ack,              // a control, applied
     GenerationStart,  // a new generation and the spec it replays
-    GenerationEnd     // a generation's last boundary and digests: the log's trailer, at a restart and at close()
+    GenerationEnd,    // a generation's last boundary and digests: the log's trailer, at a restart and at close()
+    Verdict           // a Watch's generation ended: its outcome and digests, for clients only
 };
 
 // A command's steps; Applied means it reached the gateway, and an order's or cancel's verdict follows.
@@ -85,7 +97,8 @@ struct Record
     ExecutionReport report{};             // Report
     Control control{};                    // Ack; GenerationStart: control.spec is the generation's
     SessionState state{SessionState::Paused};  // Ack: the state after the control
-    Digests digests{};                         // GenerationEnd
+    Digests digests{};                         // GenerationEnd, Verdict
+    Outcome outcome{Outcome::Mismatch};        // Verdict; control.watch holds the run and its digests
 };
 
 // submit()'s and control()'s answer.
@@ -138,6 +151,7 @@ struct Snapshot
 {
     std::uint64_t generation{0};
     RunSpec spec{};  // the generation's
+    RunId run_id{};  // the run it watches
     std::uint64_t snapshot_seq{0};
     Timestamp exchange_ts{0};
     std::uint64_t event_seq{0};  // market events applied
@@ -177,7 +191,7 @@ class ReplaySession
 public:
     static constexpr std::size_t command_capacity = 1'024;
     static constexpr std::size_t control_capacity = 64;
-    // ponytail: ~600 B records (~39 MB), as a Control carries its RunSpec; key loads by generation if it grows.
+    // ponytail: ~712 B records (~47 MB), as a Control carries a RunSpec and a Watch; key loads by generation then.
     static constexpr std::size_t ring_capacity = 65'536;
     // The most market events a tick applies, so controls are seen at full speed: Playing yields at the next new
     // timestamp, but Step and Seek stop at the budget, possibly mid-timestamp.
@@ -196,6 +210,7 @@ private:
 
     SessionConfig config_;
     SourceFactory factory_;
+    SourceFactory watch_factory_;
     std::optional<Generation> engine_;  // the current generation
 
     // The admission point: any thread, under inbox_mutex_.
@@ -218,6 +233,7 @@ private:
     std::vector<Command> batch_;
     std::vector<Control> controls_batch_;
     std::vector<Awaiting> awaiting_;  // applied orders and cancels waiting for the simulator's verdict
+    Watched watch_{};  // the run the current generation watches
     std::uint64_t batch_seq_{0};
     std::uint64_t last_command_seq_{0};
     std::uint64_t steps_left_{0};
@@ -228,8 +244,8 @@ private:
     Snapshot snapshot_;  // built here, then copied into snapshots_
     CandleBuilder candles_;
     std::array<Trade, snapshot_trades> trades_{};  // the generation's latest market trades, a ring
-    std::uint64_t trades_total_{0};                // the generation's market trades
-    std::uint64_t trades_published_{0};            // trades_total_ at the last published snapshot
+    std::uint64_t trades_total_{0};  // the generation's market trades
+    std::uint64_t trades_published_{0};  // trades_total_ at the last published snapshot
     std::size_t candles_published_{0};
     std::uint64_t snapshot_seq_{0};
     std::uint64_t dropped_snapshots_{0};
@@ -293,7 +309,8 @@ private:
     }
 
 public:
-    ReplaySession(SessionConfig config, SourceFactory factory, LogQueue* log = nullptr);
+    // `watch` builds a Watch's generations, over fresh mappings with hash as read; without it, `factory` does.
+    ReplaySession(SessionConfig config, SourceFactory factory, LogQueue* log = nullptr, SourceFactory watch = {});
 
     ReplaySession(const ReplaySession&) = delete;
     ReplaySession& operator=(const ReplaySession&) = delete;

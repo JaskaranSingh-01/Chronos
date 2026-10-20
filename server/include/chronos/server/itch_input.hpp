@@ -32,6 +32,9 @@ std::string day_hash(std::span<const std::byte> bytes);
 // day_hash() of a fresh read() of the file, as a kept mapping may still show bytes edited in place; "" if it fails.
 std::string file_hash(const std::filesystem::path& path);
 
+// XXH3-128 of the day hashes in order, as 32 hex digits: the inputs hash of a run, which a Watch compares.
+std::string inputs_hash(std::span<const std::string> hashes);
+
 // YYYY-MM-DD.
 std::string iso_date(std::chrono::year_month_day date);
 
@@ -85,10 +88,12 @@ public:
 };
 
 // Each generation's stream: a DaySequenceSource of `ticker` over `days` from `library`, or for the empty ticker an
-// empty stream. The engine thread resolves the days only here, as it builds a generation. The library outlives it.
+// empty stream; for a Watch (`watch`), over fresh mappings and with hash as read. The engine thread resolves the days
+// only here, as it builds a generation. The library outlives it.
 // ponytail: a day removed between admission and the load replays as an empty stream, and one replaced by a non-ITCH
 // file fails the chain up front, named as its first day; re-check the days here if that matters.
-SourceFactory chain_factory(const DayLibrary& library, const Instrument& instrument, bool allow_truncated_tail);
+SourceFactory chain_factory(const DayLibrary& library, const Instrument& instrument, bool allow_truncated_tail,
+                            bool watch = false);
 
 // One ticker over days in date order, the ticker SymbolId 0 in each day's own ItchSource, with a Clear at each next
 // day's midnight. A day not ITCH 5.0 (InvalidHeader) or with other instrument fields (InstrumentRejected) fails the

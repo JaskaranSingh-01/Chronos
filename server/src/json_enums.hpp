@@ -82,7 +82,8 @@ NLOHMANN_JSON_SERIALIZE_ENUM(ControlType,
                               {ControlType::Seek, "seek"},
                               {ControlType::Restart, "restart"},
                               {ControlType::Symbol, "symbol"},
-                              {ControlType::CancelSeek, "cancel_seek"}})
+                              {ControlType::CancelSeek, "cancel_seek"},
+                              {ControlType::Watch, "watch"}})
 NLOHMANN_JSON_SERIALIZE_ENUM(SessionSource, {{SessionSource::Feed, "feed"}, {SessionSource::Fallback, "fallback"}})
 NLOHMANN_JSON_SERIALIZE_ENUM(TradingWindow, {{TradingWindow::Regular, "regular"}, {TradingWindow::FullDay, "full_day"}})
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(FeedSession, open, close, source)

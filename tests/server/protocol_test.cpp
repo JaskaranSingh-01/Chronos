@@ -879,5 +879,40 @@ TEST(ProtocolTest, ARunDocumentReadsBackAsItWasWritten)
     EXPECT_FALSE(decode_run("{}", read));
 }
 
+// A Watch control names its run. generation_start and state carry the run id, and a Watch's verdict is
+// report{kind:"reproduced"}: its outcome, its digests and the run's.
+TEST(ProtocolTest, DecodesAWatchAndEncodesItsRunIdAndVerdict)
+{
+    const ClientMessage watch =
+        decoded(client_message("control", R"(,"action":"watch","run_id":"20261018T101500Z-9c2e41d07ab35f18")"));
+    EXPECT_EQ(watch.control.type, ControlType::Watch);
+    EXPECT_EQ(name(watch.control.watch.run_id), "20261018T101500Z-9c2e41d07ab35f18");
+    EXPECT_TRUE(refused(client_message("control", R"(,"action":"watch")")));
+    EXPECT_TRUE(refused(client_message("control", R"(,"action":"watch","run_id":"")")));
+    EXPECT_TRUE(refused(client_message("control", R"(,"action":"watch","run_id":")" + std::string(41, 'x') + "\"")));
+    EXPECT_TRUE(refused(client_message("control", R"(,"action":"watch","run_id":"r1","symbol":"SPY")")));
+
+    Watched w{.expected = {.book = 1, .execution = 2, .portfolio = 3}};
+    ASSERT_TRUE(to_padded("r1", w.run_id));
+    const json start = json::parse(encode_record(
+        "s1", Record{.seq = 3, .generation = 2, .kind = RecordKind::GenerationStart, .control = {.watch = w}}));
+    EXPECT_EQ(start["run_id"], "r1");
+    EXPECT_EQ(json::parse(encode_record("s1",
+                                        Record{.seq = 9,
+                                               .generation = 2,
+                                               .kind = RecordKind::Verdict,
+                                               .control = {.watch = w},
+                                               .digests = {.book = 1, .execution = 2, .portfolio = 4},
+                                               .outcome = Outcome::Mismatch})),
+              json::parse(R"({"type":"report","session_id":"s1","generation":2,"seq":9,"kind":"reproduced",)"
+                          R"("run_id":"r1","outcome":"mismatch","digests":{"book":"0000000000000001",)"
+                          R"("execution":"0000000000000002","portfolio":"0000000000000004"},)"
+                          R"("expected":{"book":"0000000000000001","execution":"0000000000000002",)"
+                          R"("portfolio":"0000000000000003"}})"));
+    Snapshot s;
+    s.run_id = w.run_id;
+    EXPECT_EQ(json::parse(encode_snapshot("s1", s, true, false))["run_id"], "r1");
+}
+
 }  // namespace
 }  // namespace simulator::server::test

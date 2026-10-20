@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cmath>
 #include <limits>
+#include <string_view>
 #include <utility>
 
 #include "chronos/server/command_log.hpp"
@@ -57,8 +58,8 @@ ErrorCode verdict(const ExecutionReport& report) noexcept
 
 }  // namespace
 
-ReplaySession::ReplaySession(SessionConfig config, SourceFactory factory, LogQueue* log)
-    : config_(std::move(config)), factory_(std::move(factory)), log_(log)
+ReplaySession::ReplaySession(SessionConfig config, SourceFactory factory, LogQueue* log, SourceFactory watch)
+    : config_(std::move(config)), factory_(std::move(factory)), watch_factory_(std::move(watch)), log_(log)
 {
     batch_.reserve(command_capacity);
     controls_batch_.reserve(control_capacity);
@@ -97,7 +98,7 @@ Admission ReplaySession::control(Control control) noexcept
     const bool bad = (control.type == ControlType::Step && control.steps == 0) ||
         (control.type == ControlType::Speed && control.speed > max_speed) ||
         (control.type == ControlType::Symbol && name(control.spec.ticker).empty()) ||
-        control.spec.days.count > max_days;
+        (control.type == ControlType::Watch && control.watch.run_id[0] == '\0') || control.spec.days.count > max_days;
     ErrorCode error = bad ? ErrorCode::BadRequest : ErrorCode::None;
     if (error == ErrorCode::None && !controls_.push(control)) {
         error = ErrorCode::QueueFull;
@@ -267,7 +268,7 @@ std::uint64_t ReplaySession::publish(Record record, bool reserved) noexcept
 {
     const std::lock_guard lock{publish_mutex_};
     record.seq = ring_.publish(record);
-    if (log_ == nullptr || record.kind == RecordKind::Ack) {
+    if (log_ == nullptr || record.kind == RecordKind::Ack || record.kind == RecordKind::Verdict) {
         return record.seq;
     }
     if (reserved) {
@@ -318,8 +319,9 @@ void ReplaySession::publish_delivered() noexcept
 
 void ReplaySession::publish_start() noexcept
 {
-    publish(Record{
-        .generation = generation_.load(), .kind = RecordKind::GenerationStart, .control = {.spec = engine_->spec}});
+    publish(Record{.generation = generation_.load(),
+                   .kind = RecordKind::GenerationStart,
+                   .control = {.spec = engine_->spec, .watch = watch_}});
 }
 
 // The simulator events due by the clock run first, as a reproduction's advance_to() runs them.
@@ -360,7 +362,8 @@ void ReplaySession::restart(const RunSpec& spec) noexcept
 {
     close();
     engine_.reset();
-    engine_.emplace(config_, spec, factory_(spec.ticker, spec.days));
+    const SourceFactory& factory = watch_.run_id[0] != '\0' && watch_factory_ ? watch_factory_ : factory_;
+    engine_.emplace(config_, spec, factory(spec.ticker, spec.days));
     generation_.fetch_add(1);
     awaiting_.clear();
     candles_ = CandleBuilder{std::max<std::size_t>(spec.days.count, 1)};
@@ -373,11 +376,26 @@ void ReplaySession::restart(const RunSpec& spec) noexcept
     load();
 }
 
+// A Watch's generation then gets its verdict: its days re-hashed as replayed, against the run's.
 void ReplaySession::end() noexcept
 {
     finish(*engine_);
     publish_delivered();
     state_.store(SessionState::Ended);
+    if (watch_.run_id[0] == '\0') {
+        return;
+    }
+    const auto* chain = dynamic_cast<const DaySequenceSource*>(engine_->source.get());
+    const bool rehashed = chain != nullptr && chain->hashes().size() == engine_->spec.days.count;
+    const Digests now = digests(*engine_);
+    const Outcome outcome = verdict(
+        rehashed && inputs_hash(chain->hashes()) != std::string_view{watch_.inputs.data(), watch_.inputs.size()},
+        watch_.same_code, engine_->loop.report().replay.succeeded() && now == watch_.expected);
+    publish(Record{.generation = generation_.load(),
+                   .kind = RecordKind::Verdict,
+                   .control = {.watch = watch_},
+                   .digests = now,
+                   .outcome = outcome});
 }
 
 void ReplaySession::drain_inbox() noexcept
@@ -433,9 +451,14 @@ void ReplaySession::apply_control(const Control& control, Timestamp wall_now) no
         RunSpec spec = carried();
         spec.ticker = control.spec.ticker;
         spec.days = control.spec.days;
+        watch_ = {};
         restart(spec);
         break;
     }
+    case ControlType::Watch:
+        watch_ = control.watch;
+        restart(control.spec);
+        break;
     case ControlType::Seek:
         if (ended || control.seek_ts < clock()) {
             restart(carried());
@@ -641,6 +664,7 @@ void ReplaySession::publish_snapshot(Timestamp wall_now) noexcept
     const ReplayReport& replay = g.loop.report().replay;
     s.generation = generation_.load();
     s.spec = g.spec;
+    s.run_id = watch_.run_id;
     s.snapshot_seq = snapshot_seq_ + 1;
     s.exchange_ts = clock();
     s.event_seq = replay.events;

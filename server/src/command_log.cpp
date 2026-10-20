@@ -121,7 +121,7 @@ json header_json(const SessionConfig& config, const Record& start, std::span<con
             {"window", spec.window},
             {"check_invariants_every", config.check_invariants_every},
             {"strategy", strategy_json(spec.strategy)},
-            {"run_id", ""}};
+            {"run_id", name(start.control.watch.run_id)}};
 }
 
 SessionConfig config_from(const json& header)
@@ -470,7 +470,8 @@ bool read_log(const std::filesystem::path& path, std::uint64_t generation, Logge
                 }
                 record = Record{.generation = line.at("generation").get<std::uint64_t>(),
                                 .kind = RecordKind::GenerationStart};
-                if (!spec_from(line, record.control.spec, days)) {
+                if (!spec_from(line, record.control.spec, days) ||
+                    !to_padded(line.at("run_id").get<std::string>(), record.control.watch.run_id)) {
                     error = where + "unexpected field or value";
                     return false;
                 }

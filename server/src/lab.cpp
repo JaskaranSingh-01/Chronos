@@ -233,6 +233,44 @@ Refusal Backtester::verify(std::string_view id, const DayLibrary& library)
     return Refusal::None;
 }
 
+bool Backtester::watch(Control& control, const DayLibrary& library, std::string& why) const
+{
+    const std::string_view id = name(control.watch.run_id);
+    Run run;
+    {
+        const std::lock_guard lock{mutex_};
+        const auto found = runs_.find(id);
+        if (found == runs_.end() || found->second.deleted) {
+            why = std::string{id} + ": no such run";
+            return false;
+        }
+        run = found->second.run;
+    }
+    if (run.state != RunState::Completed || run.results == nullptr || run.results->partial) {
+        why = std::string{id} + ": not a completed run";
+        return false;
+    }
+    if (run.provenance.allow_truncated_tail != config_.allow_truncated_tail) {
+        why = std::string{id} + ": run with another --allow-truncated-tail";
+        return false;
+    }
+    std::vector<std::string> hashes;
+    for (const RunDay& day : run.provenance.days) {
+        const DayHandle listed = library.find(day.date);
+        if (listed == nullptr || listed->hash != day.hash) {
+            why = iso_date(day.date) + ": not the day the run replayed";
+            return false;
+        }
+        hashes.push_back(day.hash);
+    }
+    control.spec = run.spec;
+    control.watch.expected = run.results->digests;
+    const std::string inputs = inputs_hash(hashes);
+    std::copy(inputs.begin(), inputs.end(), control.watch.inputs.begin());
+    control.watch.same_code = run.provenance.build.source_digest == build_source_digest;
+    return true;
+}
+
 Refusal Backtester::remove(std::string_view id, std::string& warning)
 {
     {

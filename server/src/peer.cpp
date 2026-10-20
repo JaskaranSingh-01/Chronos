@@ -74,6 +74,11 @@ bool Peer::receive(std::string_view text, Timestamp now, std::vector<std::string
         if (message.generation != generation) {
             return refuse("stale_generation", "a control for an earlier generation");
         }
+        std::string why;
+        if (control.type == ControlType::Watch &&
+            (hub_.lab == nullptr || hub_.library == nullptr || !hub_.lab->watch(control, *hub_.library, why))) {
+            return refuse("bad_request", why.empty() ? "no Lab" : why);
+        }
         if (control.type == ControlType::Symbol) {
             if (control.spec.days.count == 0) {
                 control.spec.days = hub_.days;  // written out, so the engine never resolves "the current days"
@@ -102,7 +107,7 @@ bool Peer::receive(std::string_view text, Timestamp now, std::vector<std::string
         if (admission.error != ErrorCode::None) {
             return refuse(to_string(admission.error), "control refused");
         }
-        if (control.type == ControlType::Symbol) {
+        if (control.type == ControlType::Symbol || control.type == ControlType::Watch) {
             hub_.days = control.spec.days;
         }
         return true;

@@ -20,21 +20,31 @@ namespace simulator::server {
 // An ITCH ticker, NUL-padded: a generation's input. All NUL before the session's first symbol switch.
 using Ticker = std::array<char, 8>;
 
-// The ticker without its padding.
-inline std::string_view name(const Ticker& ticker) noexcept
+// A Lab run's id, NUL-padded, as a generation that watches the run carries it.
+using RunId = std::array<char, 40>;
+
+// A ticker or a run id without its padding.
+template <std::size_t N>
+std::string_view name(const std::array<char, N>& padded) noexcept
 {
-    return {ticker.data(), static_cast<std::size_t>(std::find(ticker.begin(), ticker.end(), '\0') - ticker.begin())};
+    return {padded.data(), static_cast<std::size_t>(std::find(padded.begin(), padded.end(), '\0') - padded.begin())};
 }
 
-// `text` as a Ticker; false if it is longer than 8 characters or holds a NUL.
-inline bool to_ticker(std::string_view text, Ticker& ticker) noexcept
+// `text` padded with NULs; false if it is longer than N characters or holds a NUL.
+template <std::size_t N>
+bool to_padded(std::string_view text, std::array<char, N>& padded) noexcept
 {
-    if (text.size() > ticker.size() || text.find('\0') != std::string_view::npos) {
+    if (text.size() > N || text.find('\0') != std::string_view::npos) {
         return false;
     }
-    ticker.fill('\0');
-    std::copy(text.begin(), text.end(), ticker.begin());
+    padded.fill('\0');
+    std::copy(text.begin(), text.end(), padded.begin());
     return true;
+}
+
+inline bool to_ticker(std::string_view text, Ticker& ticker) noexcept
+{
+    return to_padded(text, ticker);
 }
 
 // ponytail: 32 days per generation or run (~8 min of backtest); raise it, minding the report ring's record size.

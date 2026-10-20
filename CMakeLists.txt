@@ -302,6 +302,7 @@ add_executable(chronos_server_tests
     tests/server/server_test.cpp
     tests/server/session_runner_test.cpp
     tests/server/snapshot_test.cpp
+    tests/server/watch_test.cpp
 )
 
 target_compile_options(chronos_server_tests PRIVATE ${CHRONOS_WARNINGS})

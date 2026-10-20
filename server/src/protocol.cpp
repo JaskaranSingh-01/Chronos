@@ -173,6 +173,9 @@ bool decode_control(const json& j, Control& control)
     case ControlType::Symbol:
         return only(j, {"type", "session_id", "generation", "action", "symbol", "days"}) &&
             read_symbol(j, control.spec.ticker) && read_days(j, control.spec.days, field);
+    case ControlType::Watch:
+        return only(j, {"type", "session_id", "generation", "action", "run_id"}) && read(j, "run_id", field) &&
+            !field.empty() && to_padded(field, control.watch.run_id);
     case ControlType::Play:
     case ControlType::Pause:
     case ControlType::Restart:
@@ -785,7 +788,7 @@ std::string encode_snapshot(std::string_view session_id, const Snapshot& s, bool
     if (state) {
         j["full_resync"] = full_resync;
         j["spec"] = spec_json(s.spec);
-        j["run_id"] = "";
+        j["run_id"] = name(s.run_id);
     }
     j["symbol"] = name(s.spec.ticker);
     j["snapshot_seq"] = s.snapshot_seq;
@@ -866,12 +869,19 @@ std::string encode_record(std::string_view session_id, const Record& r)
         j["strategy"] = r.control.spec.strategy.kind;
         j["days"] = days_json(r.control.spec.days);
         j["window"] = r.control.spec.window;
-        j["run_id"] = "";
+        j["run_id"] = name(r.control.watch.run_id);
         break;
     case RecordKind::GenerationEnd:
         j["kind"] = "generation_end";
         j["exchange_ts"] = r.exchange_ts;
         j["market_event_seq"] = r.market_event_seq;
+        break;
+    case RecordKind::Verdict:
+        j["kind"] = "reproduced";
+        j["run_id"] = name(r.control.watch.run_id);
+        j["outcome"] = r.outcome;
+        j["digests"] = digests_json(r.digests);
+        j["expected"] = digests_json(r.control.watch.expected);
         break;
     case RecordKind::Ack:
         break;
