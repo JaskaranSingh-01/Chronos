@@ -306,11 +306,14 @@ TEST(ServerTest, ServesTheSymbolsHistoryLogAndUi)
     const ScratchDir logs{"sessions"};
     std::ofstream{logs.path / "test.jsonl"} << "{\"a\":1}\n{\"b\":2}\n{\"c\":";  // its last line is half written
     const ScratchDir data{"data"};
-    itch_test::ItchBuilder day;  // the starting day's stock directory
+    itch_test::ItchBuilder day;  // the starting day: AAA and BBB, and IDLE without a market event
     day.system_event(0, kSecond, 'O')
         .stock_directory(1, kSecond, "AAA")
         .stock_directory(2, kSecond, "BBB")
-        .system_event(0, 2 * kSecond, 'S');
+        .stock_directory(3, kSecond, "IDLE")
+        .system_event(0, 2 * kSecond, 'S')
+        .add_order(1, kNineThirty, 1, 'B', 100, "AAA", 100'000)
+        .add_order(2, kNineThirty, 2, 'S', 100, "BBB", 100'100);
     write_file(data.path / "12302019.NASDAQ_ITCH50.bin", day.bytes());
     DayLibrary library{data.path, data.path / "fingerprints.json"};
     library.scan();
@@ -380,15 +383,19 @@ TEST(ServerTest, TheHistoryOfATwoDayGenerationHoldsBothDays)
     EXPECT_EQ(history["trades"].size(), 6u);
 }
 
-// GET /api/days rescans on every request; /api/symbols lists the starting day's tickers, or those on every day listed.
+// GET /api/days rescans on every request; /api/symbols lists the tickers with market events on the starting day, or on
+// every day listed.
 TEST(ServerTest, ServesTheDaysAndTheSymbolsOnEveryListedDay)
 {
     const ScratchDir data{"days"};
-    itch_test::ItchBuilder friday;  // AAA and ACME, and no regular hours of its own
+    itch_test::ItchBuilder friday;  // AAA and ACME, IDLE without a market event, and no regular hours of its own
     friday.system_event(0, kSecond, 'O')
         .stock_directory(1, kSecond, "AAA")
         .stock_directory(2, kSecond, "ACME")
-        .system_event(0, 2 * kSecond, 'S');
+        .stock_directory(3, kSecond, "IDLE")
+        .system_event(0, 2 * kSecond, 'S')
+        .add_order(1, kNineThirty, 1, 'B', 100, "AAA", 100'000)
+        .add_order(2, kNineThirty, 2, 'S', 100, "ACME", 100'100);
     const itch_test::ItchBuilder monday = acme_day();
     write_file(data.path / "12272019.NASDAQ_ITCH50.bin", friday.bytes());
     write_file(data.path / "12302019.NASDAQ_ITCH50.bin", monday.bytes());
@@ -745,6 +752,35 @@ TEST(ServerTest, TheLabApiQueuesListsServesCancelsAndDeletesRuns)
     for (const std::string& queued_id : ids) {
         EXPECT_EQ(served.send("DELETE", "/api/backtests/" + queued_id).first, 204);
     }
+}
+
+// Spec §4: a run saved before the per-symbol store stays listed and served, and Verify answers 409 before_store.
+TEST(ServerTest, VerifyRefusesARunRecordedBeforeTheStore)
+{
+    LabDays days{"server-before-store"};
+    const std::vector<MarketEvent> events = spaced_bids(10);
+    ReplaySession session{config(), over(events)};
+    std::string id;
+    {
+        Backtester lab{config(), days.dir.path / "runs"};
+        Served served{session, options(), {}, nullptr, nullptr, &days.library, &lab};
+        const auto [queued, created] = served.send("POST", "/api/backtests", kFridayRun);
+        ASSERT_EQ(queued, 202);
+        id = json::parse(created)["id"];
+        ASSERT_TRUE(
+            eventually([&] { return json::parse(served.get("/api/backtests/" + id).second)["state"] == "completed"; }));
+    }
+    const std::filesystem::path file = days.dir.path / "runs" / (id + ".json");
+    std::ifstream in{file};
+    json saved = json::parse(in);
+    saved["provenance"]["days"][0].erase("segment");
+    std::ofstream{file} << saved.dump();
+
+    Backtester lab{config(), days.dir.path / "runs"};
+    Served served{session, options(), {}, nullptr, nullptr, &days.library, &lab};
+    EXPECT_EQ(served.get("/api/backtests/" + id).first, 200);
+    EXPECT_EQ(served.send("POST", "/api/backtests/" + id + "/verify"),
+              (std::pair<int, std::string>{409, R"({"error":"before_store"})"}));
 }
 
 // Spec §5.6: a Lab POST or DELETE must be JSON from this server's own page, besides what every /api request needs; a

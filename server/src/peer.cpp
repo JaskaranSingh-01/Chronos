@@ -86,7 +86,7 @@ bool Peer::receive(std::string_view text, Timestamp now, std::vector<std::string
             if (control.spec.days.count == 0) {
                 return refuse("bad_request", "no day to load");
             }
-            std::string missing;  // the days whose stock directory lacks the symbol
+            std::string missing;  // the days without a market event of the symbol
             for (std::size_t i = 0; i < control.spec.days.count; ++i) {
                 const std::chrono::year_month_day date = control.spec.days.day[i];
                 const DayHandle day = hub_.library != nullptr ? hub_.library->find(date) : nullptr;

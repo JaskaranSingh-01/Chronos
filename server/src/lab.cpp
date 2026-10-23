@@ -59,19 +59,26 @@ std::string write_file(const std::filesystem::path& path, const std::string& tex
     return {};
 }
 
+// A run recorded before the per-symbol store: a day without its segment's hash.
+bool before_store(const Run& run) noexcept
+{
+    return std::any_of(run.provenance.days.begin(), run.provenance.days.end(),
+                       [](const RunDay& day) { return day.segment_hash.empty(); });
+}
+
 // The run's code is this build's: the same source digest, which a build without git ("unknown") never has.
 bool same_code(const Run& run) noexcept
 {
     return run.provenance.build.source_digest != "unknown" && run.provenance.build.source_digest == build_source_digest;
 }
 
-// A verification's record (spec §5.5): the days whose re-hash differs from the run's, then this build's source digest
-// against the run's, then the digests.
+// A verification's record (spec §5.5): the days whose segment as read differs from the run's, then this build's source
+// digest against the run's, then the digests.
 Verification verification(const Run& run, const RunResult& result)
 {
     Verification v{.finished = utc_now(), .source_digest = build_source_digest};
     for (std::size_t i = 0; i < run.provenance.days.size(); ++i) {
-        if (i < result.hashes.size() && result.hashes[i] != run.provenance.days[i].hash) {
+        if (i < result.hashes.size() && result.hashes[i] != run.provenance.days[i].segment_hash) {
             v.changed.push_back(run.provenance.days[i].date);
         }
     }
@@ -149,8 +156,14 @@ Refusal Backtester::submit(const RunSpec& spec, std::vector<DayHandle> days, std
                            .host = host_name(),
                            .submitted = utc_now()}};
     for (const DayHandle& day : days) {
-        run.provenance.days.push_back(
-            {.date = day->date, .file = day->file, .size = day->size, .hash = day->hash, .session = day->session});
+        const Segment* segment = day->segment(name(spec.ticker));
+        run.provenance.days.push_back({.date = day->date,
+                                       .file = day->file,
+                                       .size = day->size,
+                                       .hash = day->hash,
+                                       .session = day->session,
+                                       .segment_hash = segment != nullptr ? segment->hash : "",
+                                       .segment_size = segment != nullptr ? segment->uncompressed : 0});
     }
     {
         const std::lock_guard lock{mutex_};
@@ -197,6 +210,7 @@ Refusal Backtester::cancel(std::string_view id)
 Refusal Backtester::verify(std::string_view id, const DayLibrary& library)
 {
     std::vector<RunDay> recorded;
+    std::string symbol;
     {
         const std::lock_guard lock{mutex_};
         const auto found = runs_.find(id);
@@ -210,15 +224,20 @@ Refusal Backtester::verify(std::string_view id, const DayLibrary& library)
         if (run.state != RunState::Completed || run.results == nullptr || run.results->partial) {
             return Refusal::Conflict;
         }
+        if (before_store(run)) {
+            return Refusal::BeforeStore;
+        }
         if (run.provenance.allow_truncated_tail != config_.allow_truncated_tail) {
             return Refusal::OtherSettings;
         }
         recorded = run.provenance.days;
+        symbol = name(run.spec.ticker);
     }
     std::vector<DayHandle> days;
     for (const RunDay& day : recorded) {
         DayHandle listed = library.find(day.date);
-        if (listed == nullptr || listed->hash != day.hash) {
+        const Segment* segment = listed != nullptr ? listed->segment(symbol) : nullptr;
+        if (segment == nullptr || segment->hash != day.segment_hash) {
             return Refusal::InputChanged;
         }
         days.push_back(std::move(listed));
@@ -259,6 +278,10 @@ bool Backtester::watch(Control& control, const DayLibrary& library, std::string&
         why = std::string{id} + ": not a completed run";
         return false;
     }
+    if (before_store(run)) {
+        why = std::string{id} + ": recorded before the per-symbol store: queue it again";
+        return false;
+    }
     if (run.provenance.allow_truncated_tail != config_.allow_truncated_tail) {
         why = std::string{id} + ": run with another --allow-truncated-tail";
         return false;
@@ -266,11 +289,12 @@ bool Backtester::watch(Control& control, const DayLibrary& library, std::string&
     std::vector<std::string> hashes;
     for (const RunDay& day : run.provenance.days) {
         const DayHandle listed = library.find(day.date);
-        if (listed == nullptr || listed->hash != day.hash) {
+        const Segment* segment = listed != nullptr ? listed->segment(name(run.spec.ticker)) : nullptr;
+        if (segment == nullptr || segment->hash != day.segment_hash) {
             why = iso_date(day.date) + ": not the day the run replayed";
             return false;
         }
-        hashes.push_back(day.hash);
+        hashes.push_back(day.segment_hash);
     }
     control.spec = run.spec;
     control.watch.expected = run.results->digests;
@@ -371,26 +395,15 @@ void Backtester::work()
             running_ = job.id;
             running_size_ = 0;
             for (const DayHandle& day : job.days) {
-                running_size_ += day->size;
+                const Segment* segment = day->segment(name(spec.ticker));
+                running_size_ += segment != nullptr ? segment->uncompressed : 0;
             }
             cancel_.store(false);
             bytes_read_.store(0);
         }
-        std::vector<DayHandle> days = job.days;
         RunResult result;
         try {
-            if (job.verify) {
-                std::transform(days.begin(), days.end(), days.begin(),
-                               [](const DayHandle& day) { return reopen(*day); });
-            }
-            if (std::find(days.begin(), days.end(), nullptr) == days.end()) {
-                result = backtest(config_, spec, days, job.verify, cancel_, bytes_read_);
-            } else {  // a file gone since the verification was queued: no replay, and each day's re-hash
-                result.partial = true;
-                for (const DayHandle& day : days) {
-                    result.hashes.push_back(day != nullptr ? file_hash(day->path) : "");
-                }
-            }
+            result = backtest(config_, spec, job.days, job.verify, cancel_, bytes_read_);
         } catch (const std::bad_alloc&) {
             result = RunResult{.partial = true, .reason = "out_of_memory"};
         } catch (const std::exception& e) {

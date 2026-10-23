@@ -4,8 +4,8 @@ import { join } from 'node:path';
 import { fixture, serve } from './serve';
 
 // Each test gets its own chronos-serve on the Lab's fixture days. On both, ACME gives the default market maker $1 a
-// cycle, buying by rule (a) and selling by rule (c): two cycles on 2019-12-27 and three on 2019-12-30, whose stock
-// directory alone lists ZETA.
+// cycle, buying by rule (a) and selling by rule (c): two cycles on 2019-12-27 and three on 2019-12-30, which alone
+// lists ZETA, with one bid, and IDLE, with no market event.
 const test = base.extend<{ data: string; url: string }>({
   data: async ({}, use) => {
     const dir = fixture(true);
@@ -131,8 +131,16 @@ test('Verify shows the run reproduced, Export saves its JSON, and Delete removes
   await expect(page.getByText('Run a backtest, or pick one from the runs.')).toBeVisible();
 });
 
-test('a symbol missing on one day is refused, naming the day', async ({ page, url }) => {
+test('a symbol missing on one day is refused, naming the day; suggestions omit a symbol without events', async ({
+  page,
+  url,
+}) => {
   await page.goto(`${url}#lab`);
+  await expect(page.locator('#lab-symbols option')).toHaveCount(2);
+  expect(await page.locator('#lab-symbols option').evaluateAll((o) => o.map((e) => e.getAttribute('value')))).toEqual([
+    'ACME',
+    'ZETA',
+  ]);
   await page.getByLabel('symbol', { exact: true }).fill('ZETA');
   await page.locator('.form .days summary').click();
   await page.getByLabel('2019-12-27').check();
@@ -143,7 +151,19 @@ test('a symbol missing on one day is refused, naming the day', async ({ page, ur
   await expect(runs(page)).toHaveCount(0);
 });
 
-test('a day edited in place since its run: Verify and Watch say input changed, not a failure', async ({
+// Edits one byte of Monday, the market category of `symbol`'s directory entry, in place, and lists the days again,
+// which builds Monday into the store again.
+async function editDirectory(page: Page, url: string, data: string, symbol: string) {
+  const file = join(data, '12302019.NASDAQ_ITCH50.bin');
+  const at = readFileSync(file).indexOf(`${symbol}    `) + 8;
+  expect(at).toBeGreaterThan(7);
+  const fd = openSync(file, 'r+');
+  writeSync(fd, 'Q', at);
+  closeSync(fd);
+  expect((await page.request.get(`${url}api/days`)).status()).toBe(200);
+}
+
+test("a day rebuilt with the run's own symbol changed: Verify and Watch are refused as a changed input", async ({
   page,
   url,
   data,
@@ -151,22 +171,29 @@ test('a day edited in place since its run: Verify and Watch say input changed, n
   await page.goto(`${url}#lab`);
   await runAcme(page);
   await expect(card(page, 'Total PnL')).toHaveText('+$3.00');
-  // One byte of Monday, ZETA's market category, changes in place. Nothing lists the days again, so chronos-serve keeps
-  // the hash it cached and admits Verify and Watch; only their full re-hash sees the edit.
-  const file = join(data, '12302019.NASDAQ_ITCH50.bin');
-  const at = readFileSync(file).indexOf('ZETA    ') + 8;
-  expect(at).toBeGreaterThan(7);
-  const fd = openSync(file, 'r+'); // the one byte, written where it lies: the size and inode stay
-  writeSync(fd, 'Q', at);
-  closeSync(fd);
+  await editDirectory(page, url, data, 'ACME');
   await page.getByRole('button', { name: 'Verify', exact: true }).click();
-  await expect(page.locator('.prov b')).toHaveText(['input changed']);
-  await expect(page.locator('.prov b')).toHaveClass('muted');
-  await expect(page.locator('.prov')).toContainText('changed 2019-12-30');
+  await expect(page.locator('.bar .notice')).toHaveText('verify refused: a day changed since the run');
   await expect(page.locator('.prov .title').nth(1)).toHaveText('Verifications · none on this code and days yet');
+  await page.getByRole('button', { name: 'Watch in Terminal' }).click();
+  await expect(page.locator('.bar .notice')).toHaveText('bad_request: 2019-12-30: not the day the run replayed');
+  await expect(page.getByTestId('watch')).toBeHidden();
+});
+
+test("a day rebuilt with another symbol changed: the run's segment is the same, so Verify and Watch reproduce it", async ({
+  page,
+  url,
+  data,
+}) => {
+  await page.goto(`${url}#lab`);
+  await runAcme(page);
+  await expect(card(page, 'Total PnL')).toHaveText('+$3.00');
+  await editDirectory(page, url, data, 'ZETA');
+  await page.getByRole('button', { name: 'Verify', exact: true }).click();
+  await expect(page.locator('.prov .title').nth(1)).toHaveText('Verifications · ✓ reproduced');
   await page.getByRole('button', { name: 'Watch in Terminal' }).click();
   await expect(page.getByTestId('session')).toContainText('ACME · gen 2 · paused');
   await page.getByRole('button', { name: 'Max', exact: true }).click();
   await page.getByRole('button', { name: '▶ Play' }).click();
-  await expect(page.getByTestId('watch')).toHaveText('Watching run #1 · input changed', { timeout: 15_000 });
+  await expect(page.getByTestId('watch')).toHaveText('Watching run #1 · ✓ reproduced', { timeout: 15_000 });
 });

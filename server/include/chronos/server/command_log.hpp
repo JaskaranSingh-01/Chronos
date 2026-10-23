@@ -20,8 +20,8 @@
 
 namespace simulator::server {
 
-// The command log's format version, written in every header line.
-inline constexpr int log_protocol = 2;
+// The command log's format version, written in every header line. 3: each day's segment hash.
+inline constexpr int log_protocol = 3;
 
 // The log writer's queue: a push never waits, and once the queue has been full or the writer failed, it stays failed.
 class LogQueue
@@ -94,6 +94,7 @@ struct LoggedDay
     std::string hash{};
     FeedSession session{};
     Timestamp session_midnight{0};
+    std::string segment{};  // the hash of the ticker's segment: the day's identity in the replay
 };
 
 // One generation of a command log: what reproduce() needs.
@@ -111,7 +112,8 @@ struct LoggedGeneration
 bool read_log(const std::filesystem::path& path, std::uint64_t generation, LoggedGeneration& logged,
               std::string& error);
 
-// Re-hashes each of `days`, refusing one whose hash is not the logged one, then replays the applied commands at their
+// Reads each of `days`' segments again, refusing one that does not read back with the logged hash, then replays the
+// applied commands at their
 // boundaries in the fresh `generation` (built from logged.spec over those days), and on to the trailer's boundary, or
 // to the end without one; false on a mismatch, including the trailer's digests.
 bool reproduce(Generation& generation, const LoggedGeneration& logged, std::span<const DayHandle> days = {}) noexcept;

@@ -349,9 +349,16 @@ session can be reproduced. The first line on stdout names the URL and that log; 
 
 - Run it from the repository root, as `--web` defaults to `web/dist`.
 - `--data` names a directory of days, each file named `MMDDYYYY.NASDAQ_ITCH50.bin`; `--date` picks the starting day,
-  the latest by default. A new file is read once before serving, a few seconds a day, for its XXH3-128 hash and the
-  regular hours its own System Events set; `runs/fingerprints.json` keeps both. `GET /api/days` lists the days.
-- Options: `--host`, `--port` (default 8080), `--web`, `--token`, `--fsync` and `--allow-truncated-tail`;
+  the latest by default. A new file is read once before serving, about a minute a day, for its XXH3-128 hash and the
+  regular hours its own System Events set, which `runs/fingerprints.json` keeps, and in the same pass into the
+  **per-symbol store**: one zstd file per symbol, `<SYMBOL>.itch.zst`, holding its frames and every System Event of
+  each day, with an `index.tsv` of each segment's place, size and XXH3-128 hash. It takes about half the size of the
+  days, in `<data>/store` unless `--store` names another, and one `chronos-serve` at a time uses it. Every replay of a
+  symbol, the terminal's, a Lab run's, Verify's and Watch's, reads only that symbol's segments, so a load or a
+  restart costs the symbol's bytes, not the day's. The symbol box suggests the symbols with a market event on every
+  day picked. `GET /api/days` lists the days whose store is built; a day file that changes is built again at the next
+  listing.
+- Options: `--host`, `--port` (default 8080), `--web`, `--token`, `--fsync`, `--allow-truncated-tail` and `--store`;
   `./build/chronos-serve --help` lists them.
 - The slice needs a day's file name, so link it into a directory of its own:
   `mkdir -p data/slice && ln -s ../itch/12302019.NASDAQ_ITCH50.first-256MiB.bin data/slice/12302019.NASDAQ_ITCH50.bin`,
@@ -444,7 +451,7 @@ The page polls the runs about once a second while one is queued or running. Its 
 | `GET /api/backtests/<id>` | the whole run: spec, provenance, results |
 | `POST /api/backtests/<id>/cancel` | cancels a queued or running run; 409 once it has ended |
 | `DELETE /api/backtests/<id>` | removes a run and its file (200 with a `warning` if the file stays); a running one stops and is never saved |
-| `POST /api/backtests/<id>/verify` | re-runs a completed run and records the verdict; 202 (a repeat returns the job already queued or running), 404, 409 if partial, if a day changed or if run with another `--allow-truncated-tail`, 429 if the queue is full |
+| `POST /api/backtests/<id>/verify` | re-runs a completed run and records the verdict; 202 (a repeat returns the job already queued or running), 404, 409 if partial, if a day's segment changed, if recorded before the per-symbol store (`before_store`) or if run with another `--allow-truncated-tail`, 429 if the queue is full |
 
 A run is posted as `{"symbol":"SPY","days":["2019-12-30"],"strategy":"market_maker"}`. Every other key takes
 `simulator backtest`'s default: `params`, `latency` (`order_ns`, `report_ns`), `fees` (`maker`, `taker`, in ticks a
@@ -454,16 +461,20 @@ by default, so a strategy trades only inside each day's feed session, from the d
 `simulator backtest`'s PnL, fills and fill attribution.
 
 - Each finished run is saved to `runs/<id>.json` in the working directory, with the build it ran on (commit, source
-  digest, compiler), each day's hash and regular hours, and its results: the PnL curve at the end of every second with
-  a market event, PnL by day and by hour, the first 50,000 fills and the fill attribution. A restart reloads them.
-- **Verify** re-runs the run over fresh reads of its days, hashing every byte as it replays them. Each verification is
-  recorded with its verdict: `reproduced` (the same digests), `mismatch`, `different_code` (this build's source digest
-  is not the run's, so nothing is proven either way) or `input_changed` (a day's bytes are not the ones the run
-  hashed, even when an edit in place kept the file's size and time). A run's `reproduced` turns true once a
-  verification on the same code and days has matched, and false if one did not.
+  digest, compiler), each day's hash, its symbol's segment (`segment: {hash, size}`) and regular hours, and its
+  results: the PnL curve at the end of every second with a market event, PnL by day and by hour, the first 50,000
+  fills and the fill attribution. A restart reloads them.
+- **Verify** re-runs the run, reading its symbol's segment of each day afresh from the store and checking it as read.
+  The segments are the run's identity: another symbol's change to a day file leaves them, and the verdict, as they
+  were. Each verification is recorded with its verdict: `reproduced` (the same digests), `mismatch`, `different_code`
+  (this build's source digest is not the run's, so nothing is proven either way) or `input_changed` (a segment is not
+  the one the run read: its day was built again from a changed file, or the store file no longer reads back intact).
+  A run's `reproduced` turns true once a verification on the same code and segments has matched, and false if one did
+  not. A run saved before the per-symbol store has no segment hashes: it stays listed, but Verify answers 409
+  `before_store` and Watch is refused; Edit as new queues it again.
 - **Watch in Terminal** replays a completed run in the terminal, paced, at any speed: the WebSocket control
   `{"type":"control","action":"watch","run_id":"<id>"}`, from the controlling tab. The server loads the run's spec
-  and days, refuses a run whose days have changed since, and pauses before the first event. When the replay ends it
+  and days, refuses a run whose segments have changed since, and pauses before the first event. When the replay ends it
   sends `report{kind:"reproduced"}` with the verdict, by the same rules as Verify; a command applied during the Watch
   makes it another run, so the verdict is then `mismatch`. The Watch's command log names the run and reproduces it.
 - A POST or DELETE must be `Content-Type: application/json` (else 415) and carry the `Origin` of the page this server
@@ -703,6 +714,8 @@ A bad argument prints a two-line error on stderr and exits 2. `--json PATH` writ
   a TradingView-style chart, L3 queue positions and Playwright end-to-end tests.
 - Days chained in the terminal, and the Strategy Lab: backtests over one or more days run from the UI, kept,
   compared, verified, and watched in the terminal to a digest-checked verdict.
+- The per-symbol store: each symbol's days as zstd segments, built once per day, so every replay of a symbol reads its
+  own bytes, about 1% of a day, checked against their hash.
 - A GitHub Actions workflow and `.clang-format` / `.clang-tidy` configuration.
 
 **Not yet:**

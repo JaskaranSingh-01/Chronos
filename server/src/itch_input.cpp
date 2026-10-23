@@ -1,8 +1,12 @@
 #include "chronos/server/itch_input.hpp"
 
+#include <fcntl.h>
+#include <sys/file.h>
 #include <sys/stat.h>
+#include <unistd.h>
 
 #include <algorithm>
+#include <cerrno>
 #include <cinttypes>
 #include <cstdint>
 #include <cstdio>
@@ -17,8 +21,8 @@
 #include <xxhash.h>
 
 #include "json_enums.hpp"
+#include "simulator/io/mapped_file.hpp"
 #include "simulator/itch/byte_reader.hpp"
-#include "simulator/itch/itch_decoder.hpp"
 #include "simulator/itch/itch_message_reader.hpp"
 #include "simulator/itch/itch_source.hpp"
 #include "simulator/market/market_book.hpp"
@@ -27,16 +31,17 @@
 namespace simulator::server {
 namespace {
 
-// An ItchSource that owns the registry it registers its one instrument in.
-class TickerSource final : public MarketEventSource
+// One symbol's segment of a day under an ItchSource that owns the bytes and the registry it registers the symbol in.
+class StoreSource final : public MarketEventSource
 {
 private:
+    std::vector<std::byte> bytes_;
     InstrumentRegistry registry_{1};
     ItchSource source_;
 
 public:
-    TickerSource(std::span<const std::byte> bytes, const ItchSourceConfig& config)
-        : source_(bytes, config, registry_)
+    StoreSource(std::vector<std::byte> bytes, const ItchSourceConfig& config)
+        : bytes_(std::move(bytes)), source_(bytes_, config, registry_)
     {}
 
     SourceResult next(MarketEvent& event) noexcept override
@@ -97,10 +102,10 @@ bool day_date(std::string_view name, std::chrono::year_month_day& date) noexcept
     return date.ok();
 }
 
-// The one pass over a new file version: its hash, its feed session and its ITCH 5.0 check. It reads the file a MiB at a
-// time, at disk speed, where faulting the mapping in is several times slower. False, said on stderr, unless it read
-// exactly the mapped size.
-bool identify(const std::filesystem::path& path, Day& day)
+// The one pass over a new file version: its hash, its feed session and its ITCH 5.0 check, its frames fed to `builder`.
+// It reads the file a MiB at a time, at disk speed, where faulting a mapping in is several times slower. False, said
+// on stderr, unless it read exactly the size the version was listed with.
+bool identify(const std::filesystem::path& path, Day& day, StoreBuilder& builder)
 {
     constexpr std::size_t step = std::size_t{1} << 20;
     constexpr std::size_t max_frame = 2 + 0xFFFF;  // the length prefix and the largest ITCH payload
@@ -121,7 +126,9 @@ bool identify(const std::filesystem::path& path, Day& day)
         XXH3_128bits_update(&state, buffer.data() + carry, got);
         ItchMessageReader reader{std::span{buffer}.first(carry + got)};
         ItchMessage message;
-        while (framed && reader.next(message) == ItchReadResult::Message) {
+        for (std::size_t from = 0; framed && reader.next(message) == ItchReadResult::Message;
+             from = reader.position()) {
+            builder.add(std::span{buffer}.subspan(from, reader.position() - from));
             const bool start = std::exchange(first, false);
             if (message.type != 'S' || message.payload.size() != 11) {  // a System Event: locate, tracking, ts, code
                 continue;
@@ -147,6 +154,9 @@ bool identify(const std::filesystem::path& path, Day& day)
         return false;
     }
     day.cut_tail = framed && carry > 0;
+    if (day.cut_tail) {
+        builder.add(std::span{buffer}.first(carry));
+    }
     day.itch50 = day.itch50 && framed;
     day.hash = hex(XXH3_128bits_digest(&state));
     day.session = open && close && *open < *close
@@ -155,19 +165,20 @@ bool identify(const std::filesystem::path& path, Day& day)
     return true;
 }
 
-// Reads a day file's version: its date from its name, its mapping and size, its mtime and inode and its quick check.
-// False if the name is not a day file's, or the file cannot be mapped or dated (said on stderr).
+// Reads a day file's version: its date from its name, its size, its mtime and inode and its quick check. False if the
+// name is not a day file's, or the file cannot be mapped or dated (said on stderr).
 bool open_version(const std::filesystem::path& path, Day& day)
 {
     day.file = path.filename().string();
-    day.path = path;
     struct stat status{};
     if (!day_date(day.file, day.date) || ::stat(path.c_str(), &status) != 0 || !S_ISREG(status.st_mode)) {
         return false;
     }
-    // ponytail: a file truncated in place can SIGBUS a reader of the mapping; copy or read() it if that matters.
-    if (!day.mapped.open(path.c_str())) {
-        std::fprintf(stderr, "skipping %s: %s\n", day.file.c_str(), day.mapped.error());
+    // ponytail: a file truncated in place while its quick check reads the mapping can SIGBUS; pread() the two MiB if
+    // that matters.
+    MappedFile mapped;
+    if (!mapped.open(path.c_str())) {
+        std::fprintf(stderr, "skipping %s: %s\n", day.file.c_str(), mapped.error());
         return false;
     }
     std::error_code error;
@@ -176,10 +187,10 @@ bool open_version(const std::filesystem::path& path, Day& day)
         std::fprintf(stderr, "skipping %s: %s\n", day.file.c_str(), error.message().c_str());
         return false;
     }
-    day.size = day.mapped.bytes().size();
+    day.size = mapped.bytes().size();
     day.inode = static_cast<std::uint64_t>(status.st_ino);
     day.mtime = std::chrono::duration_cast<std::chrono::nanoseconds>(written.time_since_epoch()).count();
-    day.quick_check = quick_check(day.mapped.bytes());
+    day.quick_check = quick_check(mapped.bytes());
     return true;
 }
 
@@ -263,26 +274,6 @@ std::vector<DayHandle> handles(const std::map<std::chrono::year_month_day, DayHa
 
 }  // namespace
 
-std::vector<std::string> symbol_directory(std::span<const std::byte> bytes)
-{
-    std::vector<std::string> tickers;
-    ItchMessageReader reader{bytes};
-    ItchDecoder decoder;
-    ItchMessage message;
-    ItchStockDirectory directory;
-    while (reader.next(message) == ItchReadResult::Message) {
-        if (message.type == 'S' && message.payload.size() == 11 && message.payload[10] == std::byte{'S'}) {
-            break;  // the start of system hours: the day's directory is complete
-        }
-        if (message.type == 'R' && decoder.decode_stock_directory(message, directory) == ItchDecodeResult::Success) {
-            const std::string_view stock{directory.stock.data(), directory.stock.size()};
-            tickers.emplace_back(stock.substr(0, stock.find_last_not_of(' ') + 1));
-        }
-    }
-    std::sort(tickers.begin(), tickers.end());
-    return tickers;
-}
-
 std::uint64_t quick_check(std::span<const std::byte> bytes) noexcept
 {
     const std::size_t edge = std::min(std::size_t{1} << 20, bytes.size());
@@ -301,38 +292,38 @@ std::string day_hash(std::span<const std::byte> bytes)
     return hex(XXH3_128bits(bytes.data(), bytes.size()));
 }
 
-std::string file_hash(const std::filesystem::path& path)
+const Segment* Day::segment(std::string_view symbol) const
 {
-    std::vector<std::byte> buffer(std::size_t{1} << 20);
-    XXH3_state_t state;
-    XXH3_128bits_reset(&state);
-    std::ifstream in{path, std::ios::binary};
-    while (in) {
-        in.read(reinterpret_cast<char*>(buffer.data()), static_cast<std::streamsize>(buffer.size()));
-        XXH3_128bits_update(&state, buffer.data(), static_cast<std::size_t>(in.gcount()));
-    }
-    return in.bad() || !in.eof() ? std::string{} : hex(XXH3_128bits_digest(&state));
+    const auto found = segments.find(symbol);
+    return found == segments.end() ? nullptr : &found->second;
 }
 
-DayHandle reopen(const Day& day)
+std::string segment_hash_as_read(const Day& day, std::string_view symbol)
 {
-    auto fresh = std::make_shared<Day>();
-    if (!fresh->mapped.open(day.path.c_str())) {
-        return nullptr;
+    const Segment* segment = day.segment(symbol);
+    std::vector<std::byte> bytes;
+    std::string error;
+    return segment != nullptr && read_segment(day.store, symbol, day.date, *segment, bytes, error) ? segment->hash
+                                                                                                   : std::string{};
+}
+
+StoreLock::StoreLock(const std::filesystem::path& store)
+{
+    std::error_code error;
+    std::filesystem::create_directories(store, error);
+    fd_ = error ? -1 : ::open((store / ".lock").c_str(), O_RDWR | O_CREAT | O_CLOEXEC, 0644);
+    if (fd_ < 0) {
+        error_ = error ? error.message() : std::strerror(errno);
+    } else if (::flock(fd_, LOCK_EX | LOCK_NB) != 0) {
+        error_ = errno == EWOULDBLOCK ? "in use by another chronos-serve" : std::strerror(errno);
     }
-    fresh->date = day.date;
-    fresh->file = day.file;
-    fresh->path = day.path;
-    fresh->size = fresh->mapped.bytes().size();
-    fresh->mtime = day.mtime;
-    fresh->inode = day.inode;
-    fresh->hash = day.hash;
-    fresh->quick_check = day.quick_check;
-    fresh->itch50 = day.itch50;
-    fresh->cut_tail = day.cut_tail;
-    fresh->session = day.session;
-    fresh->midnight = day.midnight;
-    return fresh;
+}
+
+StoreLock::~StoreLock()
+{
+    if (fd_ >= 0) {
+        ::close(fd_);
+    }
 }
 
 std::string iso_date(std::chrono::year_month_day date)
@@ -359,8 +350,7 @@ SourceFactory chain_factory(const DayLibrary& library, const Instrument& instrum
             watch](const Ticker& ticker, const DayList& days) -> std::unique_ptr<MarketEventSource> {
         std::vector<DayHandle> handles;
         for (std::size_t i = 0; i < days.count; ++i) {
-            const DayHandle day = library.find(days.day[i]);
-            handles.push_back(watch && day != nullptr ? reopen(*day) : day);
+            handles.push_back(library.find(days.day[i]));
         }
         if (name(ticker).empty() || std::find(handles.begin(), handles.end(), nullptr) != handles.end()) {
             return std::make_unique<VectorSource>(std::span<const MarketEvent>{});
@@ -370,9 +360,69 @@ SourceFactory chain_factory(const DayLibrary& library, const Instrument& instrum
     };
 }
 
-DayLibrary::DayLibrary(std::filesystem::path dir, std::filesystem::path cache)
-    : dir_(std::move(dir)), cache_(std::move(cache))
-{}
+DayLibrary::DayLibrary(std::filesystem::path dir, std::filesystem::path cache, std::filesystem::path store)
+    : dir_(std::move(dir)), cache_(std::move(cache)), store_(store.empty() ? dir_ / "store" : std::move(store))
+{
+    std::error_code error;
+    std::filesystem::create_directories(store_, error);
+    std::string why;
+    if (index_.load(store_, why)) {
+        return;
+    }
+    std::fprintf(stderr,
+                 "the store index at %s is invalid (%s): it is moved to index.tsv.bad, and every day is built again\n",
+                 store_.c_str(), why.c_str());
+    std::filesystem::rename(store_ / "index.tsv", store_ / "index.tsv.bad", error);
+    for (std::filesystem::directory_iterator file{store_, error};
+         !error && file != std::filesystem::directory_iterator{}; file.increment(error)) {
+        if (file->path().string().ends_with(".itch.zst")) {
+            std::error_code ignored;
+            std::filesystem::remove(file->path(), ignored);
+        }
+    }
+}
+
+// The store holds a day of `day`'s hash.
+bool DayLibrary::current(const Day& day) const
+{
+    const auto stored = index_.days().find(day.date);
+    return stored != index_.days().end() && stored->second.hash == day.hash;
+}
+
+// The one pass over a new version, building it into the store unless the store already holds the hash it finds; false,
+// said on stderr, if there is not room for the build, the pass fails or the build does not commit.
+bool DayLibrary::build(const std::filesystem::path& path, Day& day)
+{
+    // A day's store takes about 45% of its file: the check is an estimate, the build's abort the guarantee.
+    std::error_code error;
+    const std::uintmax_t free = std::filesystem::space(store_, error).available;
+    if (!error && free < day.size / 5 * 3) {
+        std::fprintf(stderr, "skipping %s: the store needs %" PRIu64 " MiB free, has %" PRIu64 "\n", day.file.c_str(),
+                     day.size / 5 * 3 >> 20, static_cast<std::uint64_t>(free >> 20));
+        return false;
+    }
+    std::fprintf(stderr, "reading %s into the store, %" PRIu64 " bytes\n", day.file.c_str(), day.size);
+    StoreBuilder builder{store_, path, day.date};
+    if (!identify(path, day, builder)) {
+        return false;
+    }
+    if (current(day)) {
+        return true;  // the builder, never committed, cuts back what it wrote
+    }
+    std::string why;
+    if (!builder.commit(day.hash, why)) {
+        std::fprintf(stderr, "skipping %s: store build failed: %s\n", day.file.c_str(), why.c_str());
+        return false;
+    }
+    index_ = builder.index();
+    return true;
+}
+
+StoreUsage DayLibrary::usage()
+{
+    const std::lock_guard scanning{scan_mutex_};
+    return store_usage(store_, index_);
+}
 
 DayHandle DayLibrary::find(std::chrono::year_month_day date) const
 {
@@ -399,11 +449,14 @@ std::vector<DayHandle> DayLibrary::scan()
             continue;
         }
         day->midnight = session_midnight_ns(day->date, us_eastern_utc_offset(day->date));
-        day->symbols = symbol_directory(day->mapped.bytes());
-        if (!from_cache(cache, *day)) {
-            std::fprintf(stderr, "hashing %s, %" PRIu64 " bytes\n", day->file.c_str(), day->size);
-            if (!identify(files->path(), *day)) {
-                continue;
+        if ((!from_cache(cache, *day) || !current(*day)) && !build(files->path(), *day)) {
+            continue;
+        }
+        day->store = store_;
+        day->segments = index_.days().at(day->date).segments;
+        for (const auto& [symbol, segment] : day->segments) {
+            if (segment.events != 0) {
+                day->symbols.push_back(symbol);
             }
         }
         found.emplace(day->date, day);
@@ -427,73 +480,61 @@ std::vector<DayHandle> DayLibrary::scan()
     return handles(found);
 }
 
-struct DaySequenceSource::Hashing
-{
-    XXH3_state_t state;
-    std::uint64_t hashed{0};  // the current day's bytes in the hash
-};
-
 DaySequenceSource::DaySequenceSource(std::vector<DayHandle> days, std::string_view ticker, const Instrument& instrument,
                                      bool allow_truncated_tail, bool hash_as_read)
     : days_(std::move(days)),
       ticker_(ticker),
       instrument_(instrument),
       allow_truncated_tail_(allow_truncated_tail),
-      hashing_(hash_as_read ? std::make_unique<Hashing>() : nullptr)
+      hash_as_read_(hash_as_read)
 {
     if (std::any_of(days_.begin(), days_.end(), [](const DayHandle& day) { return !day->itch50; })) {
         error_ = SourceError::InvalidHeader;
     }
 }
 
-DaySequenceSource::~DaySequenceSource() = default;
-
 SourceResult DaySequenceSource::next(MarketEvent& event) noexcept
 {
-    constexpr std::uint64_t step = std::uint64_t{1} << 20;
     while (error_ == SourceError::None && day_ < days_.size()) {
         const Day& day = *days_[day_];
-        const auto hash_to = [&](std::uint64_t end) {
-            XXH3_128bits_update(&hashing_->state, day.mapped.bytes().data() + hashing_->hashed, end - hashing_->hashed);
-            hashing_->hashed = end;
-        };
         if (source_ == nullptr) {
+            const Segment* segment = day.segment(ticker_);
+            std::vector<std::byte> bytes;
+            std::string why;
+            if (segment != nullptr && !read_segment(day.store, ticker_, day.date, *segment, bytes, why)) {
+                std::fprintf(stderr, "%s\n", why.c_str());
+                error_ = SourceError::StoreRead;
+            }
+            if (hash_as_read_) {
+                hashes_.push_back(segment != nullptr && error_ == SourceError::None ? segment->hash : "");
+            }
+            if (error_ != SourceError::None) {
+                break;
+            }
+            // Without a segment, an empty day: its ItchSource ends in SymbolNotFound.
             auto source =
-                std::make_unique<TickerSource>(day.mapped.bytes(),
-                                               ItchSourceConfig{.ticker = ticker_,
-                                                                .session_date = day.date,
-                                                                .utc_offset = us_eastern_utc_offset(day.date),
-                                                                .allow_truncated_tail = allow_truncated_tail_});
+                std::make_unique<StoreSource>(std::move(bytes),
+                                              ItchSourceConfig{.ticker = ticker_,
+                                                               .session_date = day.date,
+                                                               .utc_offset = us_eastern_utc_offset(day.date),
+                                                               .allow_truncated_tail = allow_truncated_tail_});
             if (source->instrument().price_scale != instrument_.price_scale ||
                 source->instrument().quantity_scale != instrument_.quantity_scale) {
                 error_ = SourceError::InstrumentRejected;
                 break;
             }
             source_ = std::move(source);
-            if (hashing_ != nullptr) {
-                XXH3_128bits_reset(&hashing_->state);
-                hashing_->hashed = 0;
-            }
         }
         const SourceResult result = source_->next(event);
         if (result == SourceResult::Event) {
-            // ponytail: the hash trails the reader to the ticker's next event, re-touching the pages read since:
-            // about 1% more page-ins for an illiquid ticker over a day that misses the page cache; hash in the
-            // reader's scan if that matters.
-            if (hashing_ != nullptr && source_->position() >= hashing_->hashed + step) {
-                hash_to(source_->position() / step * step);  // whole MiBs already replayed
-            }
             return result;
         }
         if (result == SourceResult::Error) {
             error_ = source_->error();
             break;
         }
-        if (hashing_ != nullptr) {
-            hash_to(day.size);
-            hashes_.push_back(hex(XXH3_128bits_digest(&hashing_->state)));
-        }
-        before_ += day.size;
+        const Segment* segment = day.segment(ticker_);
+        before_ += segment != nullptr ? segment->uncompressed : 0;
         source_.reset();
         if (++day_ < days_.size()) {
             event = MarketEvent{.timestamp = days_[day_]->midnight, .type = MarketEventType::Clear};
@@ -517,7 +558,8 @@ std::uint64_t DaySequenceSource::size() const noexcept
 {
     std::uint64_t total = 0;
     for (const DayHandle& day : days_) {
-        total += day->size;
+        const Segment* segment = day->segment(ticker_);
+        total += segment != nullptr ? segment->uncompressed : 0;
     }
     return total;
 }

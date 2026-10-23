@@ -95,7 +95,8 @@ json header_json(const SessionConfig& config, const Record& start, std::span<con
                           {"size", days[i].size},
                           {"hash", days[i].hash},
                           {"session", days[i].session},
-                          {"session_midnight", days[i].session_midnight}});
+                          {"session_midnight", days[i].session_midnight},
+                          {"segment", days[i].segment}});
     }
     return {{"type", "header"},
             {"protocol", log_protocol},
@@ -164,25 +165,29 @@ bool spec_from(const json& header, RunSpec& spec, std::vector<LoggedDay>& days)
                         .size = day.at("size").get<std::uint64_t>(),
                         .hash = day.at("hash").get<std::string>(),
                         .session = day.at("session").get<FeedSession>(),
-                        .session_midnight = day.at("session_midnight").get<Timestamp>()});
+                        .session_midnight = day.at("session_midnight").get<Timestamp>(),
+                        .segment = day.at("segment").get<std::string>()});
     }
     return true;
 }
 
-// The library's record of each of `days`; one it no longer holds is logged empty, so it never reproduces.
+// The library's record of each of `days`, with `ticker`'s segment; one it no longer holds is logged empty, so it never
+// reproduces.
 // ponytail: read when the header is written, so a file replaced and rescanned between a load and its header logs the
 // new version; carry the generation's day handles to the writer if that window matters.
-std::vector<LoggedDay> logged_days(const DayLibrary* library, const DayList& days)
+std::vector<LoggedDay> logged_days(const DayLibrary* library, const DayList& days, std::string_view ticker)
 {
     std::vector<LoggedDay> logged;
     for (std::size_t i = 0; i < days.count; ++i) {
         const DayHandle day = library != nullptr ? library->find(days.day[i]) : nullptr;
+        const Segment* segment = day != nullptr ? day->segment(ticker) : nullptr;
         logged.push_back(day == nullptr ? LoggedDay{}
                                         : LoggedDay{.file = day->file,
                                                     .size = day->size,
                                                     .hash = day->hash,
                                                     .session = day->session,
-                                                    .session_midnight = day->midnight});
+                                                    .session_midnight = day->midnight,
+                                                    .segment = segment != nullptr ? segment->hash : ""});
     }
     return logged;
 }
@@ -425,8 +430,9 @@ void LogWriter::run()
     Record record;
     while (queue_.pop(record)) {
         const json line = record.kind == RecordKind::GenerationStart
-            ? header_json(config_, record, logged_days(days_, record.control.spec.days), build_commit, build_dirty,
-                          build_source_digest)
+            ? header_json(config_, record,
+                          logged_days(days_, record.control.spec.days, name(record.control.spec.ticker)), build_commit,
+                          build_dirty, build_source_digest)
             : record_json(record);
         const std::string text = dump_line(line) + '\n';
         const bool command = record.kind == RecordKind::Lifecycle;
@@ -463,7 +469,10 @@ bool read_log(const std::filesystem::path& path, std::uint64_t generation, Logge
             json expected;  // what the writer would have written for the record just read
             const std::string type = line.at("type").get<std::string>();
             if (type == "header") {
-                if (const int protocol = line.at("protocol").get<int>(); protocol != log_protocol) {
+                if (const int protocol = line.at("protocol").get<int>(); protocol < log_protocol) {
+                    error = where + "log protocol " + std::to_string(protocol) + " predates the per-symbol store";
+                    return false;
+                } else if (protocol != log_protocol) {
                     error = where + "log protocol " + std::to_string(protocol) + ", written by commit " +
                         line.value("commit", "unknown") + ": reproduce it with that commit's build";
                     return false;
@@ -541,8 +550,8 @@ bool reproduce(Generation& generation, const LoggedGeneration& logged, std::span
         return false;
     }
     for (std::size_t i = 0; i < days.size(); ++i) {
-        const std::string hash = file_hash(days[i]->path);  // a kept mapping may show bytes edited since
-        if (hash.empty() || hash != logged.days[i].hash) {  // a day logged empty, or unreadable, never reproduces
+        const std::string hash = segment_hash_as_read(*days[i], name(logged.spec.ticker));
+        if (hash.empty() || hash != logged.days[i].segment) {  // a day logged empty, or unreadable, never reproduces
             return false;
         }
     }

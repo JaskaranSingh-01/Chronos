@@ -378,7 +378,8 @@ void ReplaySession::restart(const RunSpec& spec) noexcept
     load();
 }
 
-// Ends the generation; a Watch's also gets its verdict: its days re-hashed as replayed, against the run's.
+// Ends the generation; a Watch's also gets its verdict: its segments' hashes as read against the run's, a segment that
+// did not read back intact being a changed input.
 void ReplaySession::end() noexcept
 {
     finish(*engine_);
@@ -388,10 +389,13 @@ void ReplaySession::end() noexcept
         return;
     }
     const auto* chain = dynamic_cast<const DaySequenceSource*>(engine_->source.get());
-    const bool rehashed = chain != nullptr && chain->hashes().size() == engine_->spec.days.count;
+    static const std::vector<std::string> none;
+    const std::vector<std::string>& hashes = chain != nullptr ? chain->hashes() : none;
+    const bool unreadable = std::find(hashes.begin(), hashes.end(), "") != hashes.end();
+    const bool rehashed = hashes.size() == engine_->spec.days.count;
     const Digests now = digests(*engine_);
     const Outcome outcome = verdict(
-        rehashed && inputs_hash(chain->hashes()) != std::string_view{watch_.inputs.data(), watch_.inputs.size()},
+        unreadable || (rehashed && inputs_hash(hashes) != std::string_view{watch_.inputs.data(), watch_.inputs.size()}),
         watch_.same_code, engine_->loop.report().replay.succeeded() && now == watch_.expected);
     publish(Record{.generation = generation_.load(),
                    .kind = RecordKind::Verdict,

@@ -218,6 +218,8 @@ std::string_view to_string(SourceError error) noexcept
         return "InvalidTradingState";
     case SourceError::InvalidPrintable:
         return "InvalidPrintable";
+    case SourceError::StoreRead:
+        return "StoreRead";
     }
     return "?";
 }

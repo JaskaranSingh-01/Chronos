@@ -39,13 +39,15 @@ ItchBuilder terminal_day()
 
 // A Lab day: ACME's book of 10.00 x 10.01 from 09:30, then `cycles` ten-second cycles, in each of which the default
 // market maker buys 100 at 10.00 by rule (a), sees the bid drop a tick, and sells 100 at 10.01 by rule (c): $1 each.
-// With `zeta`, a second stock is listed, and never trades.
+// With `zeta`, ZETA is listed too, with one bid, and IDLE with no market event at all.
 ItchBuilder lab_day(std::uint64_t cycles, bool zeta)
 {
     ItchBuilder itch;
     itch.system_event(0, 3 * hour, 'O').stock_directory(1, 3 * hour, "ACME");
     if (zeta) {
-        itch.stock_directory(2, 3 * hour, "ZETA");
+        itch.stock_directory(2, 3 * hour, "ZETA")
+            .stock_directory(3, 3 * hour, "IDLE")
+            .add_order(2, 3 * hour, 1, 'B', 100, "ZETA", 50'000);
     }
     constexpr std::uint64_t ms = 1'000'000;
     itch.system_event(0, open, 'Q')
@@ -84,7 +86,7 @@ bool write(const std::filesystem::path& file, const ItchBuilder& itch)
 
 // Writes DIR/12272019.NASDAQ_ITCH50.bin and DIR/12302019.NASDAQ_ITCH50.bin, a Friday and a Monday, for the web
 // end-to-end tests: the terminal's two alike, or with --lab the Lab's, two cycles on Friday and three on Monday,
-// whose stock directory alone lists ZETA.
+// which alone lists ZETA and IDLE.
 int main(int argc, char** argv)
 {
     const bool lab = argc == 3 && std::string_view{argv[2]} == "--lab";

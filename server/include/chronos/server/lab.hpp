@@ -44,7 +44,8 @@ struct BuildInfo
     std::string platform{};
 };
 
-// A day a run replayed, as the library listed it when the run was submitted.
+// A day a run replayed, as the library listed it when the run was submitted: the day file, and the symbol's segment,
+// whose hash is the day's identity in the run (spec §4); a run recorded before the per-symbol store has none.
 struct RunDay
 {
     std::chrono::year_month_day date{};
@@ -52,6 +53,8 @@ struct RunDay
     std::uint64_t size{0};
     std::string hash{};
     FeedSession session{};
+    std::string segment_hash{};
+    std::uint64_t segment_size{0};
 };
 
 // What a run's results depend on, and where and when it ran (spec §7.3, §8).
@@ -78,7 +81,7 @@ struct Verification
     Outcome outcome{Outcome::Mismatch};
     std::optional<Digests> digests{};  // none when the re-run failed
     std::string source_digest{};       // of the build that verified
-    std::vector<std::chrono::year_month_day> changed{};  // input_changed: the days whose re-hash differs
+    std::vector<std::chrono::year_month_day> changed{};  // input_changed: the days whose segment read differs
 };
 
 // One Lab run: runs/<id>.json, and GET /api/backtests/<id>.
@@ -93,7 +96,7 @@ struct Run
     std::shared_ptr<const RunResult> results{};  // null while queued or running
     std::optional<RunState> verifying{};  // a verification Queued or Running; written, but decode_run drops it
     std::vector<Verification> verifications{};
-    double progress{0};  // the bytes read over the days' sizes while running; not saved
+    double progress{0};  // the bytes read over the segments' sizes while running; not saved
 };
 
 // Why the Backtester refused a request.
@@ -101,9 +104,10 @@ enum class Refusal : std::uint8_t {
     None,
     NotFound,  // no such run, or one being deleted
     Conflict,      // the run is not in a state that allows it
-    InputChanged,   // a day of the run is gone, or its cached hash is not the run's
+    InputChanged,   // a day of the run is gone, or the store's segment of it is not the run's
     OtherSettings,  // the run replayed under another --allow-truncated-tail (spec §8.9)
-    QueueFull       // max_queued jobs wait already
+    QueueFull,      // max_queued jobs wait already
+    BeforeStore     // the run was recorded before the per-symbol store, without segment hashes
 };
 
 // The Lab's runs (spec §5.3-§5.5) and the one worker thread that runs their jobs, runs and verifications, oldest
@@ -137,7 +141,7 @@ private:
     std::map<std::string, Entry, std::less<>> runs_;
     std::deque<Job> queue_;
     std::string running_;  // the id of the run whose job is running; "" if none
-    std::uint64_t running_size_{0};  // its days' sizes
+    std::uint64_t running_size_{0};  // its segments' sizes
     std::atomic<bool> cancel_{false};  // the running job's
     std::atomic<std::uint64_t> bytes_read_{0};
     bool stop_{false};
@@ -162,12 +166,13 @@ public:
     // Cancels a queued run at once, and a running one at its next market event; Conflict once it has ended.
     Refusal cancel(std::string_view id);
     // Queues a verification of a completed run over its days as `library` lists them now, or keeps the one already
-    // queued or running: a backtest() of its spec with hash as read, over fresh mappings. Conflict for a run that is
-    // not completed or partial; InputChanged if a day's cached hash is not the run's; OtherSettings for a run under
-    // another --allow-truncated-tail; QueueFull if max_queued jobs wait.
+    // queued or running: a backtest() of its spec with hash as read, each segment read afresh. Conflict for a run that
+    // is not completed or partial; BeforeStore for one without segment hashes; InputChanged if the store's segment of a
+    // day is not the run's; OtherSettings for a run under another --allow-truncated-tail; QueueFull if max_queued jobs
+    // wait.
     Refusal verify(std::string_view id, const DayLibrary& library);
     // A Watch in Terminal's admission (spec §5.5): fills `control`'s spec and watch from the completed run
-    // control.watch.run_id, if each of its days is listed with the run's hash and it ran with this server's
+    // control.watch.run_id, if each of its days is listed with the run's segment and it ran with this server's
     // allow_truncated_tail. False, with `why`, if not.
     bool watch(Control& control, const DayLibrary& library, std::string& why) const;
     // Erases a queued or idle run, and an idle run's file; a busy one is a tombstone until its job stops. `warning`

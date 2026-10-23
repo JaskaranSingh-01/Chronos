@@ -645,7 +645,10 @@ json run_json(const Run& run, bool with_results)
                         {"file", day.file},
                         {"size", day.size},
                         {"hash", day.hash},
-                        {"session", day.session}});
+                        {"session", day.session},
+                        {"segment",
+                         day.segment_hash.empty() ? json(nullptr)
+                                                  : json{{"hash", day.segment_hash}, {"size", day.segment_size}}}});
     }
     json verifications = json::array();
     for (const Verification& v : run.verifications) {
@@ -1035,11 +1038,16 @@ bool decode_run(std::string_view text, Run& run)
                         .wall_ms = p.at("wall_ms").get<std::int64_t>(),
                         .cpu_ms = p.at("cpu_ms").get<std::int64_t>()};
         for (const json& day : p.at("days")) {
-            r.provenance.days.push_back({.date = date_from(day.at("date")),
-                                         .file = day.at("file").get<std::string>(),
-                                         .size = day.at("size").get<std::uint64_t>(),
-                                         .hash = day.at("hash").get<std::string>(),
-                                         .session = day.at("session").get<FeedSession>()});
+            RunDay& d = r.provenance.days.emplace_back(RunDay{.date = date_from(day.at("date")),
+                                                              .file = day.at("file").get<std::string>(),
+                                                              .size = day.at("size").get<std::uint64_t>(),
+                                                              .hash = day.at("hash").get<std::string>(),
+                                                              .session = day.at("session").get<FeedSession>()});
+            if (const json segment = day.value("segment", json(nullptr));
+                !segment.is_null()) {  // none before the store
+                d.segment_hash = segment.at("hash").get<std::string>();
+                d.segment_size = segment.at("size").get<std::uint64_t>();
+            }
         }
         if (!j.at("results").is_null()) {
             r.results = std::make_shared<const RunResult>(results_from(j.at("results")));

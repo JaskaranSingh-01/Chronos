@@ -103,8 +103,8 @@ void HttpServer::Impl::routes()
 {
     static std::once_flag quiet;  // Crow's log level is one per process: set before any server's threads read it
     std::call_once(quiet, [] { crow::logger::setLogLevel(crow::LogLevel::Warning); });
-    // ponytail: a rescan that finds a new file hashes it here, seconds on one of 4 Crow threads; scan in the
-    // background if that stalls the UI.
+    // ponytail: a rescan that finds a new file builds it into the store here, about a minute a day on one of 4 Crow
+    // threads; build in the background if that stalls the UI.
     CROW_ROUTE(app, "/api/days")([this](const crow::request& request) {
         return api(request, [this] {
             const std::vector<DayHandle> days = hub.library != nullptr ? hub.library->scan() : std::vector<DayHandle>{};
@@ -183,6 +183,8 @@ void HttpServer::Impl::routes()
                     return json_response(409, encode_lab_error("other_settings"));
                 case Refusal::QueueFull:
                     return json_response(429, encode_lab_error("queue_full"));
+                case Refusal::BeforeStore:
+                    return json_response(409, encode_lab_error("before_store"));
                 }
                 return crow::response{404};
             });
@@ -248,7 +250,7 @@ crow::response HttpServer::Impl::change(const crow::request& request, const std:
     });
 }
 
-// POST /api/backtests: a RunSpec over days the library lists, each ITCH 5.0 and listing the symbol; 202 {id}.
+// POST /api/backtests: a RunSpec over days the library lists, each ITCH 5.0 with a market event of the symbol; 202 {id}.
 crow::response HttpServer::Impl::submit(const crow::request& request)
 {
     RunSpec spec;
@@ -257,7 +259,7 @@ crow::response HttpServer::Impl::submit(const crow::request& request)
         return json_response(400, encode_lab_error("bad_request", field));
     }
     std::vector<DayHandle> days;
-    std::vector<std::string> missing;  // the days whose stock directory lacks the symbol
+    std::vector<std::string> missing;  // the days without a market event of the symbol
     for (std::size_t i = 0; i < spec.days.count; ++i) {
         DayHandle day = hub.library != nullptr ? hub.library->find(spec.days.day[i]) : nullptr;
         if (day == nullptr || !day->itch50) {
@@ -278,8 +280,8 @@ crow::response HttpServer::Impl::submit(const crow::request& request)
     return json_response(202, encode_run_id(id));
 }
 
-// GET /api/symbols[?days=YYYY-MM-DD,...]: the tickers in the stock directory of every day listed; without the list,
-// the starting day's.
+// GET /api/symbols[?days=YYYY-MM-DD,...]: the tickers with a market event on every day listed; without the list, the
+// starting day's.
 crow::response HttpServer::Impl::symbols(const crow::request& request)
 {
     const char* listed = request.url_params.get("days");

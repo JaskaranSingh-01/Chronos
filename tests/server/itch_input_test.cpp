@@ -1,7 +1,10 @@
 #include <gtest/gtest.h>
 
+#include <sys/resource.h>
+
 #include <algorithm>
 #include <chrono>
+#include <csignal>
 #include <cstddef>
 #include <filesystem>
 #include <fstream>
@@ -10,12 +13,14 @@
 #include <memory>
 #include <span>
 #include <string>
+#include <thread>
 #include <utility>
 #include <vector>
 
 #include "chronos/server/itch_input.hpp"
 #include "chronos/server/replay_session.hpp"
 #include "itch/itch_test_builder.hpp"
+#include "simulator/io/mapped_file.hpp"
 #include "test_support.hpp"
 
 namespace simulator::server::test {
@@ -34,16 +39,26 @@ std::size_t count(MarketEventSource& source)
     return events;
 }
 
-TEST(ItchInputTest, TheDirectoryListsTheTickersBeforeTheStartOfSystemHours)
+// Spec §3: a day lists the symbols its store holds a market event of, whenever they were listed; a symbol listed but
+// without one has a segment, and is not listed.
+TEST(ItchInputTest, ADayListsTheSymbolsWithMarketEventsInItsStore)
 {
+    const ScratchDir dir{"symbols"};
     itch_test::ItchBuilder itch;
-    itch.system_event(0, 1'000, 'O')  // start of messages: the directory follows
+    itch.system_event(0, 1'000, 'O')
         .stock_directory(2, 2'000, "MSFT")
         .stock_directory(1, 2'000, "AAPL")
-        .system_event(0, 3'000, 'S')  // start of system hours: the directory is complete
-        .stock_directory(3, 4'000, "LATE");
-    EXPECT_EQ(symbol_directory(itch.bytes()), (std::vector<std::string>{"AAPL", "MSFT"}));
-    EXPECT_TRUE(symbol_directory({}).empty());
+        .add_order(1, 2'500, 1, 'B', 100, "AAPL", 2'900'000)
+        .system_event(0, 3'000, 'S')
+        .stock_directory(3, 4'000, "LATE")
+        .trade(3, 4'500, 0, 'S', 100, "LATE", 100'000, 1);
+    write_file(dir.path / "12302019.NASDAQ_ITCH50.bin", itch.bytes());
+    const DayHandle day = DayLibrary{dir.path, dir.path / "fingerprints.json"}.scan().at(0);
+    EXPECT_EQ(day->symbols, (std::vector<std::string>{"AAPL", "LATE"}));
+    ASSERT_NE(day->segment("MSFT"), nullptr);
+    EXPECT_EQ(day->segment("MSFT")->events, 0u);
+    EXPECT_EQ(day->segment("NOPE"), nullptr);
+    EXPECT_EQ(day->store, dir.path / "store");
 }
 
 TEST(ItchInputTest, TheQuickCheckReadsTheFirstAndLastMebibyte)
@@ -96,8 +111,9 @@ TEST(ItchInputTest, ALibraryFindsOnlyDayFilesWithARealDateOldestFirst)
     std::filesystem::remove(dir.path / "12272019.NASDAQ_ITCH50.bin");
     EXPECT_EQ(library.scan(), (std::vector<DayHandle>{days[1]}));
     EXPECT_EQ(library.find(2019y / 12 / 27), nullptr);
-    EXPECT_EQ(days[0]->mapped.bytes().size(), day.bytes().size());  // a handle keeps its day mapped
-    EXPECT_TRUE(std::ranges::equal(days[0]->mapped.bytes(), day.bytes()));  // with its bytes, the file gone
+    DaySequenceSource gone{{days[0]}, "ACME", kEquity, false, false};  // a handle keeps its segments, the file gone
+    EXPECT_EQ(count(gone), 7u);
+    EXPECT_EQ(gone.error(), SourceError::None);
 
     const auto cache_text = [&] {
         std::ifstream in{dir.path / "runs" / "fingerprints.json"};
@@ -166,8 +182,9 @@ TEST(ItchInputTest, TheHashPassRecordsTheHashTheFeedSessionAndTheItchCheck)
     EXPECT_FALSE(days[4]->cut_tail);
 }
 
-// A fresh library (a restarted server) takes an unchanged version from the cache, so a forged cached hash shows; a new
-// mtime, inode, quick check or size is a new version, hashed again. A cache that does not parse is rebuilt.
+// A fresh library (a restarted server) takes an unchanged version from the cache when the store holds its hash, so a
+// forged hash shows; a new mtime, inode, quick check or size is a new version, read again. A cache that does not parse
+// is rebuilt.
 TEST(ItchInputTest, AnUnchangedVersionComesFromTheCacheAndAnyChangeIsHashedAgain)
 {
     const ScratchDir dir{"cache"};
@@ -178,11 +195,20 @@ TEST(ItchInputTest, AnUnchangedVersionComesFromTheCacheAndAnyChangeIsHashedAgain
     const auto rescan = [&] { return DayLibrary{dir.path, cache}.scan().at(0)->hash; };
     const std::string hash = rescan();
     const std::string forged(32, '0');
+    // The cached hash, and the store's record of it, become `forged`: the version is current without a pass.
     const auto forge = [&] {
-        std::ifstream in{cache};
-        std::string text{std::istreambuf_iterator<char>{in}, {}};
-        text.replace(text.find("\"hash\":\"") + 8, 32, forged);
+        const auto read = [](const std::filesystem::path& path) {
+            std::ifstream in{path};
+            return std::string{std::istreambuf_iterator<char>{in}, {}};
+        };
+        std::string text = read(cache);
+        const std::size_t at = text.find("\"hash\":\"") + 8;
+        const std::string was = text.substr(at, 32);
+        text.replace(at, 32, forged);
         std::ofstream{cache} << text;
+        std::string index = read(dir.path / "store" / "index.tsv");
+        index.replace(index.find("\t" + was + "\n"), 34, "\t" + forged + "\n");
+        std::ofstream{dir.path / "store" / "index.tsv"} << index;
     };
 
     forge();
@@ -360,14 +386,11 @@ TEST(ItchInputTest, AFailingDayFailsTheChainAfterTheDaysBeforeIt)
     EXPECT_EQ(lenient.error(), SourceError::None);
 }
 
-// The bytes hashed are the bytes replayed, a MiB at a time, then the rest of each file, a cut tail included.
-TEST(ItchInputTest, HashAsReadEqualsTheHashPassIncludingACutTail)
+// Hash as read keeps each segment's hash as read, a cut tail included.
+TEST(ItchInputTest, HashAsReadKeepsEachSegmentsHashIncludingACutTail)
 {
     const ScratchDir dir{"hash-as-read"};
-    itch_test::ItchBuilder friday = acme_day(2);
-    for (std::uint64_t match = 1; match <= 50'000; ++match) {  // 2.3 MB of prints: two whole MiB, then the rest
-        friday.trade(1, kNineThirty + 9 * kSecond, 0, 'B', 100, "ACME", 100'000, match);
-    }
+    const itch_test::ItchBuilder friday = acme_day(2);
     const itch_test::ItchBuilder monday = acme_day(3);
     const std::span<const std::byte> cut = monday.bytes().first(monday.bytes().size() - 3);
     const std::vector<DayHandle> days =
@@ -375,8 +398,9 @@ TEST(ItchInputTest, HashAsReadEqualsTheHashPassIncludingACutTail)
     DaySequenceSource chain{days, "ACME", kEquity, true, true};
     EXPECT_TRUE(chain.hashes().empty());
     drain(chain);
-    EXPECT_EQ(chain.hashes(), (std::vector<std::string>{days[0]->hash, days[1]->hash}));
-    EXPECT_EQ(days[1]->hash, day_hash(cut));
+    EXPECT_EQ(chain.hashes(),
+              (std::vector<std::string>{days[0]->segment("ACME")->hash, days[1]->segment("ACME")->hash}));
+    EXPECT_EQ(days[1]->segment("ACME")->hash, day_hash(cut));  // ACME's frames and the System Events: the whole day
     EXPECT_TRUE(days[1]->cut_tail);
 
     DaySequenceSource unhashed{days, "ACME", kEquity, true, false};
@@ -457,6 +481,126 @@ TEST(ItchInputTest, TheChainFactoryReplaysOneTickerPerStreamAndASessionSwitchesB
     EXPECT_EQ(session.generation(), 2u);
     EXPECT_EQ(session.loop_report().replay.events, 3u);
     EXPECT_EQ(name(latest(session).spec.ticker), "MSFT");
+}
+
+// Flips a bit of the byte at `at` of `file`, in place.
+void flip(const std::filesystem::path& file, std::uint64_t at)
+{
+    std::fstream edit{file, std::ios::in | std::ios::out | std::ios::binary};
+    edit.seekg(static_cast<std::streamoff>(at));
+    const char was = static_cast<char>(edit.get());
+    edit.seekp(static_cast<std::streamoff>(at));
+    edit.put(static_cast<char>(was ^ 0x01));
+}
+
+// Spec §3: a segment that does not read back intact stops the chain with a store error, said on stderr, never with
+// bytes; with hash as read, its hash as read is "".
+TEST(ItchInputTest, ASegmentThatDoesNotReadBackStopsTheChainWithAStoreError)
+{
+    const ScratchDir dir{"damaged"};
+    const std::vector<DayHandle> days = library_days(
+        dir,
+        {{"12272019.NASDAQ_ITCH50.bin", acme_day(2).bytes()}, {"12302019.NASDAQ_ITCH50.bin", acme_day(3).bytes()}});
+    const Segment monday = *days[1]->segment("ACME");
+    flip(dir.path / "store" / "ACME.itch.zst", monday.offset + monday.compressed - 1);  // its zstd checksum
+    DaySequenceSource chain{days, "ACME", kEquity, false, true};
+    EXPECT_EQ(drain(chain).first.size(), 6u);  // Friday's five events, then its Clear
+    EXPECT_EQ(chain.error(), SourceError::StoreRead);
+    EXPECT_EQ(chain.hashes(), (std::vector<std::string>{days[0]->segment("ACME")->hash, ""}));
+    EXPECT_EQ(segment_hash_as_read(*days[0], "ACME"), days[0]->segment("ACME")->hash);
+    EXPECT_EQ(segment_hash_as_read(*days[1], "ACME"), "");
+    EXPECT_EQ(segment_hash_as_read(*days[0], "NOPE"), "");
+}
+
+// Spec §2.2: chronos-serve never repairs an invalid index. It moves it aside as index.tsv.bad, removes the symbol
+// files, says so on stderr, and builds every day again.
+TEST(ItchInputTest, AnInvalidStoreIndexIsMovedAsideAndEveryDayIsBuiltAgain)
+{
+    const ScratchDir dir{"invalid-index"};
+    const std::vector<DayHandle> days = library_days(dir, {{"12302019.NASDAQ_ITCH50.bin", acme_day().bytes()}});
+    const std::filesystem::path store = dir.path / "store";
+    std::ofstream{store / "index.tsv", std::ios::app} << "not a record\n";
+    DayLibrary library{dir.path, dir.path / "fingerprints.json"};
+    EXPECT_TRUE(std::filesystem::exists(store / "index.tsv.bad"));
+    EXPECT_FALSE(std::filesystem::exists(store / "index.tsv"));
+    EXPECT_FALSE(std::filesystem::exists(store / "ACME.itch.zst"));
+    const DayHandle rebuilt = library.scan().at(0);
+    EXPECT_EQ(*rebuilt->segment("ACME"), *days[0]->segment("ACME"));
+    EXPECT_EQ(library.usage().unreferenced, 0u);
+    EXPECT_EQ(library.usage().bytes, rebuilt->segment("ACME")->compressed);
+}
+
+// A version read again whose hash the store already holds, as after a touch, is current: nothing is built.
+TEST(ItchInputTest, AVersionWhoseHashTheStoreHoldsIsNotBuiltAgain)
+{
+    const ScratchDir dir{"touched"};
+    const std::filesystem::path file = dir.path / "12302019.NASDAQ_ITCH50.bin";
+    write_file(file, acme_day().bytes());
+    DayLibrary library{dir.path, dir.path / "fingerprints.json"};
+    const DayHandle first = library.scan().at(0);
+    std::filesystem::last_write_time(file, std::filesystem::last_write_time(file) + 1s);
+    const DayHandle touched = library.scan().at(0);
+    EXPECT_NE(touched, first);  // a new version, read again
+    EXPECT_EQ(*touched->segment("ACME"), *first->segment("ACME"));
+    EXPECT_EQ(library.usage().unreferenced, 0u);
+}
+
+// Spec §2.5 and §6, recovery: a build that fails at a write, here under RLIMIT_FSIZE, leaves its day unlisted and the
+// days built before as they were; the next scan tries it again.
+TEST(ItchInputTest, ADayWhoseStoreBuildFailsIsUnlistedUntilItBuilds)
+{
+    const ScratchDir dir{"build-fails"};
+    write_file(dir.path / "12272019.NASDAQ_ITCH50.bin", acme_day(2).bytes());
+    DayLibrary library{dir.path, dir.path / "fingerprints.json"};
+    const DayHandle friday = library.scan().at(0);
+    write_file(dir.path / "12302019.NASDAQ_ITCH50.bin", acme_day(40).bytes());
+    rlimit was{};
+    ASSERT_EQ(::getrlimit(RLIMIT_FSIZE, &was), 0);
+    const auto ignored = std::signal(SIGXFSZ, SIG_IGN);  // so a write past the limit fails with EFBIG
+    rlimit low = was;
+    low.rlim_cur = friday->segment("ACME")->compressed + 16;
+    ASSERT_EQ(::setrlimit(RLIMIT_FSIZE, &low), 0);
+    const std::vector<DayHandle> listed = library.scan();
+    ::setrlimit(RLIMIT_FSIZE, &was);
+    std::signal(SIGXFSZ, ignored);
+
+    EXPECT_EQ(listed, std::vector<DayHandle>{friday});
+    EXPECT_EQ(library.usage().unreferenced, 0u);
+    EXPECT_EQ(segment_hash_as_read(*friday, "ACME"), friday->segment("ACME")->hash);
+    ASSERT_EQ(library.scan().size(), 2u);
+    EXPECT_EQ(library.find(2019y / 12 / 30)->segment("ACME")->offset, friday->segment("ACME")->compressed);
+}
+
+// Spec §2.5, concurrency: scans run one at a time, so of two at once the second finds the days the first built.
+TEST(ItchInputTest, ConcurrentScansBuildADayOnce)
+{
+    const ScratchDir dir{"concurrent"};
+    write_file(dir.path / "12272019.NASDAQ_ITCH50.bin", acme_day(2).bytes());
+    write_file(dir.path / "12302019.NASDAQ_ITCH50.bin", acme_day(3).bytes());
+    DayLibrary library{dir.path, dir.path / "fingerprints.json"};
+    std::vector<DayHandle> other;
+    std::thread scanning{[&] { other = library.scan(); }};
+    const std::vector<DayHandle> days = library.scan();
+    scanning.join();
+    EXPECT_EQ(days.size(), 2u);
+    EXPECT_EQ(other, days);  // the same handles: one pass over each day
+    EXPECT_EQ(library.usage().unreferenced, 0u);
+}
+
+// Spec §2.5: one chronos-serve per store; the lock goes with its holder.
+TEST(ItchInputTest, AStoreIsLockedByOneHolderAtATime)
+{
+    const ScratchDir dir{"lock"};
+    {
+        const StoreLock first{dir.path / "store"};
+        EXPECT_EQ(first.error(), "");
+        const StoreLock second{dir.path / "store"};
+        EXPECT_EQ(second.error(), "in use by another chronos-serve");
+    }
+    const StoreLock again{dir.path / "store"};
+    EXPECT_EQ(again.error(), "");
+    std::ofstream{dir.path / "file"} << "not a directory";
+    EXPECT_EQ(StoreLock{dir.path / "file" / "store"}.error(), "Not a directory");
 }
 
 }  // namespace

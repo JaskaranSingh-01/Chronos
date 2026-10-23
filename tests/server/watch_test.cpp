@@ -42,12 +42,11 @@ struct Terminal
     Peer peer{hub, kWall};
     Timestamp wall{kWall};
 
-    // `friday`, Friday's file, is given when a test edits it.
-    explicit Terminal(const std::string& name, const itch_test::ItchBuilder& friday = lab_day(1))
+    explicit Terminal(const std::string& name)
         : dir(name)
     {
         std::filesystem::create_directories(dir.path / "data");
-        write_file(dir.path / "data" / "12272019.NASDAQ_ITCH50.bin", friday.bytes());
+        write_file(dir.path / "data" / "12272019.NASDAQ_ITCH50.bin", lab_day(1).bytes());
         write_file(dir.path / "data" / "12302019.NASDAQ_ITCH50.bin", lab_day(2).bytes());
         library.scan();
     }
@@ -268,35 +267,24 @@ TEST(WatchTest, AWatchIsAdmittedOnlyForACompletedRunOverTheSameDays)
     EXPECT_EQ(refusal(truncated), done + ": run with another --allow-truncated-tail");
 }
 
-// Review gate 1, Watch's half: Friday is edited in place mid-file, keeping its size, mtime and inode, so the cached
-// listing still shows the run's hash and the Watch is admitted; its generation re-hashes a fresh mapping as it replays
-// and reports input_changed, though the edit changed no digest.
-TEST(WatchTest, AWatchSeesADayEditedInPlaceAsInputChanged)
+// Spec §4: a Watch reads each segment afresh. Friday's segment damaged in the store since the run fails its read, so
+// the replay stops with a store error before Monday, and the verdict is input_changed, never a mismatch.
+TEST(WatchTest, AWatchOfADamagedSegmentIsInputChanged)
 {
-    itch_test::ItchBuilder friday = acme_day(4);
-    const std::size_t prints = friday.bytes().size();
-    for (std::uint64_t match = 1; match <= 50'000; ++match) {  // 2.3 MB of prints: a middle the quick check never reads
-        friday.trade(1, kNineThirty + 9 * kSecond, 0, 'B', 100, "ACME", 100'000, match);
-    }
-    Terminal t{"watch-edited", friday};
-    const std::string id = t.run(SessionStrategyKind::MarketMaker, false, TradingWindow::Regular);
-    const std::filesystem::path file = t.dir.path / "data" / "12272019.NASDAQ_ITCH50.bin";
-    const DayHandle before = t.library.find(2019y / 12 / 27);
-    const std::filesystem::file_time_type mtime = std::filesystem::last_write_time(file);
-    {
-        std::fstream edit{file, std::ios::in | std::ios::out | std::ios::binary};
-        edit.seekp(static_cast<std::streamoff>(prints + 25'000 * 46 + 25));  // the low byte of a print's shares
-        edit.put('\x65');  // 101 shares, not 100
-    }
-    std::filesystem::last_write_time(file, mtime);
-    t.library.scan();
-    ASSERT_EQ(t.library.find(2019y / 12 / 27), before);  // the same handle: the listing still shows the run's hash
+    Terminal t{"watch-damaged"};
+    const std::string id = t.run(SessionStrategyKind::MarketMaker, true, TradingWindow::Regular);
+    const Segment friday = *t.library.find(2019y / 12 / 27)->segment("ACME");
+    std::fstream damage{t.dir.path / "data" / "store" / "ACME.itch.zst",
+                        std::ios::in | std::ios::out | std::ios::binary};
+    damage.seekp(static_cast<std::streamoff>(friday.offset + friday.compressed - 1));
+    damage.put('x');  // in its zstd checksum
+    damage.close();
 
     ASSERT_EQ(t.watch(id), "");
     t.play_to_end();
     const Record verdict = t.verdict();
     EXPECT_EQ(verdict.outcome, Outcome::InputChanged);
-    EXPECT_EQ(verdict.digests, verdict.control.watch.expected);
+    EXPECT_EQ(t.session.loop_report().replay.source_error, SourceError::StoreRead);
 }
 
 }  // namespace

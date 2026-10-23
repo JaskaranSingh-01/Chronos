@@ -420,12 +420,17 @@ TEST(PeerTest, ASeekSendsProgressAndTheNewGenerationArrivesAsAState)
     EXPECT_EQ(send(peer, client_message("order", kBuy)).at(0)["code"], "stale_generation");  // generation 1's
 }
 
-// Each day of a load must be listed, ITCH 5.0 and hold the symbol; a load naming none takes the last admitted days.
+// Each day of a load must be listed, ITCH 5.0 and hold a market event of the symbol; a load naming none takes the last
+// admitted days.
 TEST(PeerTest, ASymbolLoadNamesItsDaysOrTakesTheLastAdmittedOnes)
 {
     const ScratchDir data{"peer-loads"};
-    itch_test::ItchBuilder friday;  // AAA alone
-    friday.system_event(0, kSecond, 'O').stock_directory(1, kSecond, "AAA").system_event(0, 2 * kSecond, 'S');
+    itch_test::ItchBuilder friday;  // AAA, and IDLE, listed without a market event
+    friday.system_event(0, kSecond, 'O')
+        .stock_directory(1, kSecond, "AAA")
+        .stock_directory(2, kSecond, "IDLE")
+        .system_event(0, 2 * kSecond, 'S')
+        .add_order(1, kNineThirty, 1, 'B', 100, "AAA", 100'000);
     itch_test::ItchBuilder broken;  // no start of messages
     broken.stock_directory(1, kSecond, "ACME");
     write_file(data.path / "12262019.NASDAQ_ITCH50.bin", broken.bytes());
@@ -464,6 +469,7 @@ TEST(PeerTest, ASymbolLoadNamesItsDaysOrTakesTheLastAdmittedOnes)
     EXPECT_EQ(missing["message"], "ACME is not listed on 2019-12-27");
     EXPECT_EQ(load(R"(,"symbol":"AAA","days":["2019-12-27","2019-12-30","2019-12-31"])")["message"],
               "AAA is not listed on 2019-12-30, 2019-12-31");
+    EXPECT_EQ(load(R"(,"symbol":"IDLE","days":["2019-12-27"])")["message"], "IDLE is not listed on 2019-12-27");
     EXPECT_EQ(load(R"(,"symbol":"ACME","days":["2019-12-26"])")["message"], "2019-12-26: not ITCH 5.0");
     EXPECT_EQ(load(R"(,"symbol":"ACME","days":["2019-12-25"])")["message"], "2019-12-25: no such day");
     EXPECT_EQ(load(R"(,"symbol":"ACME","days":["2019-12-31","2019-12-30"])")["code"], "bad_request");

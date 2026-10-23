@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
+#include <iterator>
 #include <memory>
 #include <string>
 #include <string_view>
@@ -248,18 +249,13 @@ TEST(CommandLogTest, ReplayingTheLogReproducesTheBookExecutionAndPortfolio)
     EXPECT_EQ(outcome(again.book, again.execution, again.portfolio, again.loop.report()), second);
 }
 
-// A two-day generation's header records each day as it was, and the build's source digest. read_log and reproduce()
-// over the same days give the session's digests; a day edited since, even keeping its size, mtime and inode so that
-// the cached listing still matches, is refused.
-TEST(CommandLogTest, ATwoDayLogNamesEachDayAndReproducesUntilADayChanges)
+// A two-day generation's header records each day as it was, with its segment, and the build's source digest. read_log
+// and reproduce() over the same days give the session's digests; a day rebuilt with another segment is refused, even
+// one that replays the same.
+TEST(CommandLogTest, ATwoDayLogNamesEachDayAndReproducesUntilASegmentChanges)
 {
     const ScratchDir dir{"log-days"};
-    const std::filesystem::path friday_file = dir.path / "12272019.NASDAQ_ITCH50.bin";
-    itch_test::ItchBuilder friday = acme_day(4);
-    for (std::uint64_t match = 1; match <= 50'000; ++match) {  // 2.3 MB of prints: a middle the quick check never reads
-        friday.trade(1, kNineThirty + 9 * kSecond, 0, 'B', 100, "ACME", 100'000, match);
-    }
-    write_file(friday_file, friday.bytes());
+    write_file(dir.path / "12272019.NASDAQ_ITCH50.bin", acme_day(4).bytes());
     write_file(dir.path / "12302019.NASDAQ_ITCH50.bin", acme_day(6, 1'000).bytes());
     DayLibrary library{dir.path, dir.path / "fingerprints.json"};
     const std::vector<DayHandle> days = library.scan();
@@ -288,7 +284,7 @@ TEST(CommandLogTest, ATwoDayLogNamesEachDayAndReproducesUntilADayChanges)
         wait_until_written(queue);
     }
     const nlohmann::json header = nlohmann::json::parse(read_lines(scratch.path).at(0));
-    EXPECT_EQ(header["protocol"], 2);
+    EXPECT_EQ(header["protocol"], 3);
     EXPECT_EQ(header["source_digest"].get<std::string>().size(), 64u);
     EXPECT_EQ(header["window"], "full_day");
     EXPECT_EQ(header["run_id"], "");
@@ -302,8 +298,10 @@ TEST(CommandLogTest, ATwoDayLogNamesEachDayAndReproducesUntilADayChanges)
             {"size", days[0]->size},
             {"hash", days[0]->hash},
             {"session", {{"open", midnight + RTH_OPEN_NS}, {"close", midnight + RTH_CLOSE_NS}, {"source", "feed"}}},
-            {"session_midnight", midnight}}));
+            {"session_midnight", midnight},
+            {"segment", days[0]->segment("ACME")->hash}}));
     EXPECT_EQ(header["days"][1]["hash"], days[1]->hash);
+    EXPECT_EQ(header["days"][1]["segment"], days[1]->segment("ACME")->hash);
 
     LoggedGeneration logged;
     std::string error;
@@ -313,20 +311,15 @@ TEST(CommandLogTest, ATwoDayLogNamesEachDayAndReproducesUntilADayChanges)
     Generation again{cfg, logged.spec, factory(logged.spec.ticker, logged.spec.days)};
     ASSERT_TRUE(reproduce(again, logged, days));
     EXPECT_EQ(digests(again), end.digests);
-    EXPECT_EQ(file_hash(friday_file), days[0]->hash);
 
-    const std::filesystem::file_time_type mtime = std::filesystem::last_write_time(friday_file);
-    {
-        std::fstream edit{friday_file, std::ios::in | std::ios::out | std::ios::binary};
-        edit.seekp(static_cast<std::streamoff>(friday.bytes().size() / 2));
-        edit.put('x');
-    }
-    std::filesystem::last_write_time(friday_file, mtime);
-    const std::vector<DayHandle> edited = library.scan();
-    EXPECT_EQ(edited[0]->hash, days[0]->hash);  // the cached listing still matches
-    EXPECT_EQ(edited[0], days[0]);  // as the same handle, with the mapping it kept
-    Generation changed{cfg, logged.spec, std::make_unique<DaySequenceSource>(edited, "ACME", kEquity, false, false)};
-    EXPECT_FALSE(reproduce(changed, logged, edited));
+    std::ifstream in{dir.path / "12272019.NASDAQ_ITCH50.bin", std::ios::binary};
+    std::string friday{std::istreambuf_iterator<char>{in}, {}};
+    friday[friday.find("ACME    ") + 8] = 'Q';  // ACME's market category: no event changes
+    std::ofstream{dir.path / "12272019.NASDAQ_ITCH50.bin", std::ios::binary} << friday;
+    const std::vector<DayHandle> rebuilt = library.scan();
+    ASSERT_NE(rebuilt[0]->segment("ACME")->hash, days[0]->segment("ACME")->hash);
+    Generation changed{cfg, logged.spec, std::make_unique<DaySequenceSource>(rebuilt, "ACME", kEquity, false, false)};
+    EXPECT_FALSE(reproduce(changed, logged, rebuilt));
     EXPECT_FALSE(reproduce(changed, logged, {}));  // and no days at all is no reproduction
 }
 
@@ -360,7 +353,7 @@ TEST(CommandLogTest, TheLogHasAHeaderPerGenerationAndOneFlushedLinePerRecord)
     };
     EXPECT_TRUE(has(0, "\"type\":\"header\""));
     EXPECT_TRUE(has(0, "\"generation\":1"));
-    EXPECT_TRUE(has(0, "\"protocol\":2"));
+    EXPECT_TRUE(has(0, "\"protocol\":3"));
     EXPECT_TRUE(has(0, "\"session_id\":\"test\""));
     EXPECT_TRUE(has(0, "\"order_ns\":100000"));
     EXPECT_TRUE(has(0, "\"max_order_quantity\":500"));
@@ -702,10 +695,12 @@ TEST(CommandLogTest, ReadLogRefusesATruncatedLine)
     EXPECT_EQ(refusal(path, 2), "no header for generation 2");
     write_log(path, {good[0], good[0], good[1]});
     EXPECT_EQ(refusal(path), "line 2: a second header for generation 1");
-    write_log(path, {tampered(0, "\"protocol\":2", "\"protocol\":1"), good[1]});
+    write_log(path, {tampered(0, "\"protocol\":3", "\"protocol\":2"), good[1]});
+    EXPECT_EQ(refusal(path), "line 1: log protocol 2 predates the per-symbol store");
+    write_log(path, {tampered(0, "\"protocol\":3", "\"protocol\":4"), good[1]});
     const std::string commit = nlohmann::json::parse(good[0])["commit"];
     EXPECT_EQ(refusal(path),
-              "line 1: log protocol 1, written by commit " + commit + ": reproduce it with that commit's build");
+              "line 1: log protocol 4, written by commit " + commit + ": reproduce it with that commit's build");
 
     // Two trailers for one generation, the second with a later seq.
     std::vector<std::string> closed = sample_log(config(), true);  // the trailer is last; line n has seq n

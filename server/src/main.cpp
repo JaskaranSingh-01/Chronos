@@ -26,12 +26,15 @@ using namespace simulator::server;
 
 constexpr std::string_view serve_usage =
     "usage: chronos-serve --data DIR [--date YYYY-MM-DD] [--host 127.0.0.1] [--port 8080] [--web web/dist]\n"
-    "                     [--token T] [--fsync] [--allow-truncated-tail]\n"
+    "                     [--token T] [--fsync] [--allow-truncated-tail] [--store DIR]\n"
     "\n"
     "Serves an interactive replay of the days in DIR, the files named MMDDYYYY.NASDAQ_ITCH50.bin; the UI picks the\n"
-    "symbol and its days. A new file is read once, a few seconds a day, and its hash kept in runs/fingerprints.json.\n"
-    "Strategy Lab runs are kept in runs/<id>.json, in the working directory.\n"
+    "symbol and its days. A new file is read once, about a minute a day, into the per-symbol store, which every\n"
+    "replay of a symbol reads, and its hash kept in runs/fingerprints.json. Strategy Lab runs are kept in\n"
+    "runs/<id>.json, in the working directory.\n"
     "  --date YYYY-MM-DD       the starting day (default the latest)\n"
+    "  --store DIR             the per-symbol store (default DIR/store), about half the size of its days;\n"
+    "                          one chronos-serve at a time uses it\n"
     "  --host IP               the address to bind, an IP address (default 127.0.0.1); any other requires a\n"
     "                          token, and one is made and printed once if --token is not given; it guards\n"
     "                          trading, not availability: put a buffering reverse proxy in front\n"
@@ -41,12 +44,14 @@ constexpr std::string_view serve_usage =
     "  --fsync                 sync each command line of the log (sessions/<id>.jsonl) to the device\n"
     "  --allow-truncated-tail  a file cut mid-message ends there instead of failing\n"
     "\n"
-    "exit status: 0 after SIGINT or SIGTERM; 2 bad usage, no day file in DIR or none for --date, a starting day with\n"
-    "no stock directory, a log that cannot be written, or an address that cannot be bound\n";
+    "exit status: 0 after SIGINT or SIGTERM; 2 bad usage, a store in use or that cannot be locked, no day file in\n"
+    "DIR or none for --date, a starting day with no symbol's market events, a log that cannot be written, or an\n"
+    "address that cannot be bound\n";
 
 struct ServeArgs
 {
     std::filesystem::path data;
+    std::filesystem::path store;  // empty: data/store
     std::optional<std::chrono::year_month_day> date{};
     std::string host{"127.0.0.1"};
     std::uint16_t port{8080};
@@ -72,7 +77,7 @@ bool parse(std::span<const std::string_view> args, ServeArgs& out, std::string& 
             continue;
         }
         const bool takes_value = flag == "--data" || flag == "--date" || flag == "--host" || flag == "--port" ||
-            flag == "--web" || flag == "--token";
+            flag == "--web" || flag == "--token" || flag == "--store";
         if (!takes_value) {
             error = "unknown option " + std::string{flag};
             return false;
@@ -102,6 +107,8 @@ bool parse(std::span<const std::string_view> args, ServeArgs& out, std::string& 
             out.host = value;
         } else if (flag == "--web") {
             out.web = value;
+        } else if (flag == "--store") {
+            out.store = value;
         } else {
             out.token = value;
         }
@@ -128,9 +135,19 @@ int main(int argc, char** argv)
         std::fwrite(serve_usage.data(), 1, serve_usage.size(), stdout);
         return 0;
     }
-    DayLibrary library{parsed.data, std::filesystem::path{"runs"} / "fingerprints.json"};
-    // ponytail: startup waits to hash every uncached day, seconds each; hash in the background if that matters.
+    const std::filesystem::path store = parsed.store.empty() ? parsed.data / "store" : parsed.store;
+    const StoreLock lock{store};
+    if (!lock.error().empty()) {
+        std::fprintf(stderr, "error: the store at %s is %s\n", store.c_str(), lock.error().c_str());
+        return 2;
+    }
+    DayLibrary library{parsed.data, std::filesystem::path{"runs"} / "fingerprints.json", store};
+    // ponytail: startup waits to build every day the store lacks, about a minute each; build in the background if
+    // that matters.
     const std::vector<DayHandle> days = library.scan();
+    const StoreUsage usage = library.usage();
+    std::fprintf(stderr, "store: %.1f GiB, %.1f GiB unreferenced\n", static_cast<double>(usage.bytes) / (1 << 30),
+                 static_cast<double>(usage.unreferenced) / (1 << 30));
     if (days.empty()) {
         std::fprintf(stderr, "error: no day file (MMDDYYYY.NASDAQ_ITCH50.bin) in %s\n", parsed.data.c_str());
         return 2;
@@ -141,7 +158,7 @@ int main(int argc, char** argv)
         return 2;
     }
     if (start->symbols.empty()) {
-        std::fprintf(stderr, "error: %s: no stock directory\n", (parsed.data / start->file).c_str());
+        std::fprintf(stderr, "error: %s: no symbol has market events\n", (parsed.data / start->file).c_str());
         return 2;
     }
     const std::string token = required_token(parsed.host, parsed.token);

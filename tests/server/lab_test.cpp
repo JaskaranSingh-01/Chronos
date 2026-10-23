@@ -288,8 +288,8 @@ json verified(const Backtester& lab, const std::string& id, std::size_t verifica
     return run(lab, id);
 }
 
-// A verification re-runs a completed run with hash as read: on the same code and days it reproduces the digests, and
-// reproduced turns true. While one is queued, a repeat keeps it; each completed one is recorded and saved. A run that
+// A verification re-runs a completed run with hash as read: on the same code and segments it reproduces the digests,
+// and reproduced turns true. The provenance records each day's segment. While one is queued, a repeat keeps it; each completed one is recorded and saved. A run that
 // is queued, running, cancelled or unknown cannot be verified.
 TEST(LabTest, AVerificationOnTheSameCodeAndDaysReproducesTheRun)
 {
@@ -314,6 +314,9 @@ TEST(LabTest, AVerificationOnTheSameCodeAndDaysReproducesTheRun)
         EXPECT_EQ(lab.verify(id, days.library), Refusal::None);  // the same job
         EXPECT_EQ(json::parse(lab.list())["queued"], 1);
         const json first = verified(lab, id, 1);
+        const Segment& segment = *days.library.find(2019y / 12 / 27)->segment("ACME");
+        EXPECT_EQ(first["provenance"]["days"][0]["segment"],
+                  (json{{"hash", segment.hash}, {"size", segment.uncompressed}}));
         const json& v = first["verifications"][0];
         EXPECT_EQ(v["outcome"], "reproduced");
         EXPECT_EQ(v["digests"], first["results"]["digests"]);
@@ -333,48 +336,98 @@ TEST(LabTest, AVerificationOnTheSameCodeAndDaysReproducesTheRun)
     EXPECT_EQ(other.verify(id, days.library), Refusal::OtherSettings);
 }
 
-// Review gate 1, Verify's half: Friday is edited in place mid-file, keeping its size, mtime and inode, so the cached
-// listing still shows the run's hash and the verification is queued; its re-hash of a fresh mapping sees the edit:
-// input_changed, naming the day. An edit the listing does see is refused up front.
-TEST(LabTest, AVerificationSeesADayEditedInPlaceAsInputChanged)
+// Flips a bit of the byte at `at` of `file`, in place.
+void flip(const std::filesystem::path& file, std::uint64_t at)
 {
-    const ScratchDir dir{"lab-edited"};
-    const std::filesystem::path friday_file = dir.path / "12272019.NASDAQ_ITCH50.bin";
-    itch_test::ItchBuilder friday = acme_day(4);
-    const std::size_t prints = friday.bytes().size();
-    for (std::uint64_t match = 1; match <= 50'000; ++match) {  // 2.3 MB of prints: a middle the quick check never reads
-        friday.trade(1, kNineThirty + 9 * kSecond, 0, 'B', 100, "ACME", 100'000, match);
-    }
-    write_file(friday_file, friday.bytes());
+    std::fstream edit{file, std::ios::in | std::ios::out | std::ios::binary};
+    edit.seekg(static_cast<std::streamoff>(at));
+    const char was = static_cast<char>(edit.get());
+    edit.seekp(static_cast<std::streamoff>(at));
+    edit.put(static_cast<char>(was ^ 0x01));
+}
+
+// Spec §4: a verification reads each segment afresh, so a store file damaged since the run is a changed input, naming
+// the day, with no digests. A day rebuilt with the run's own symbol changed is refused up front.
+TEST(LabTest, AVerificationOfADamagedSegmentIsInputChangedAndOfARebuiltOneRefused)
+{
+    Days days{"lab-damaged"};
+    Backtester lab{lab_config(), days.runs};
+    const std::string id = days.submit(lab);
+    ASSERT_TRUE(finished(lab, id));
+    const Segment friday = *days.library.find(2019y / 12 / 27)->segment("ACME");
+    flip(days.dir.path / "data" / "store" / "ACME.itch.zst", friday.offset + friday.compressed - 1);  // its checksum
+    ASSERT_EQ(lab.verify(id, days.library), Refusal::None);
+    const json j = verified(lab, id, 1);
+    EXPECT_EQ(j["verifications"][0]["outcome"], "input_changed");
+    EXPECT_EQ(j["verifications"][0]["changed"], json::parse(R"(["2019-12-27"])"));
+    EXPECT_EQ(j["verifications"][0]["digests"], nullptr);
+    EXPECT_EQ(j["reproduced"], nullptr);
+
+    std::ofstream{days.dir.path / "data" / "12272019.NASDAQ_ITCH50.bin", std::ios::app | std::ios::binary} << 'x';
+    days.library.scan();  // rebuilt: the cut tail is in every segment of the day, ACME's too
+    EXPECT_EQ(lab.verify(id, days.library), Refusal::InputChanged);
+}
+
+// Spec §4 and §6, symbol isolation: another symbol's message changed in the day file rebuilds the day, but the run's
+// segment keeps its bytes and hash, so the run still verifies as reproduced.
+TEST(LabTest, AnotherSymbolsChangedMessageLeavesARunReproducible)
+{
+    const ScratchDir dir{"lab-isolation"};
+    const auto friday = [](std::uint32_t zzz) {
+        itch_test::ItchBuilder itch = lab_day(1);
+        itch.stock_directory(2, 17 * 3'600 * kSecond, "ZZZ")
+            .add_order(2, 17 * 3'600 * kSecond, 9, 'B', 100, "ZZZ", zzz);
+        return itch;
+    };
+    const std::filesystem::path file = dir.path / "12272019.NASDAQ_ITCH50.bin";
+    write_file(file, friday(100'000).bytes());
     DayLibrary library{dir.path, dir.path / "fingerprints.json"};
-    const std::vector<DayHandle> before = library.scan();
+    const DayHandle before = library.scan().at(0);
     Backtester lab{lab_config(), dir.path / "runs"};
     RunSpec spec = default_spec(SessionStrategyKind::MarketMaker);
     spec.ticker = ticker("ACME");
     spec.days = {.day = {2019y / 12 / 27}, .count = 1};
     std::string id;
-    ASSERT_EQ(lab.submit(spec, before, id), Refusal::None);
+    ASSERT_EQ(lab.submit(spec, {before}, id), Refusal::None);
     ASSERT_TRUE(finished(lab, id));
 
-    const std::filesystem::file_time_type mtime = std::filesystem::last_write_time(friday_file);
-    {
-        std::fstream edit{friday_file, std::ios::in | std::ios::out | std::ios::binary};
-        edit.seekp(static_cast<std::streamoff>(prints + 25'000 * 46 + 25));  // the low byte of a print's shares
-        edit.put('\x65');  // 101 shares, not 100
-    }
-    std::filesystem::last_write_time(friday_file, mtime);
-    const std::vector<DayHandle> after = library.scan();
-    ASSERT_EQ(after[0], before[0]);  // the same handle: the listing still shows the run's hash
+    write_file(file, friday(100'100).bytes());  // ZZZ's price, the same size
+    const DayHandle after = library.scan().at(0);
+    EXPECT_NE(after->hash, before->hash);
+    EXPECT_EQ(after->segment("ACME")->hash, before->segment("ACME")->hash);  // a new copy of the same bytes
+    EXPECT_GT(after->segment("ACME")->offset, before->segment("ACME")->offset);
+    EXPECT_NE(after->segment("ZZZ")->hash, before->segment("ZZZ")->hash);
     ASSERT_EQ(lab.verify(id, library), Refusal::None);
-    const json j = verified(lab, id, 1);
-    EXPECT_EQ(j["verifications"][0]["outcome"], "input_changed");
-    EXPECT_EQ(j["verifications"][0]["changed"], json::parse(R"(["2019-12-27"])"));
-    EXPECT_EQ(j["verifications"][0]["digests"], j["results"]["digests"]);  // the edit changed no state
-    EXPECT_EQ(j["reproduced"], nullptr);
+    EXPECT_EQ(verified(lab, id, 1)["verifications"][0]["outcome"], "reproduced");
+}
 
-    std::ofstream{friday_file, std::ios::app | std::ios::binary} << 'x';
-    library.scan();
-    EXPECT_EQ(lab.verify(id, library), Refusal::InputChanged);
+// Spec §4: a run saved before the per-symbol store has no segment hashes. It stays listed and viewable, but neither a
+// verification nor a Watch claims it against an identity it did not record.
+TEST(LabTest, ARunRecordedBeforeTheStoreIsListedButNeitherVerifiedNorWatched)
+{
+    Days days{"lab-before-store"};
+    std::string id;
+    {
+        Backtester lab{lab_config(), days.runs};
+        id = days.submit(lab);
+        ASSERT_TRUE(finished(lab, id));
+    }
+    const std::filesystem::path file = days.runs / (id + ".json");
+    json saved = json::parse(read(file));
+    for (json& day : saved["provenance"]["days"]) {
+        day.erase("segment");
+    }
+    std::ofstream{file} << saved.dump();
+
+    Backtester lab{lab_config(), days.runs};
+    EXPECT_EQ(state(lab, id), "completed");
+    EXPECT_EQ(run(lab, id)["provenance"]["days"][0]["segment"], nullptr);
+    EXPECT_EQ(lab.verify(id, days.library), Refusal::BeforeStore);
+    Control control;
+    ASSERT_TRUE(to_padded(id, control.watch.run_id));
+    std::string why;
+    EXPECT_FALSE(lab.watch(control, days.library, why));
+    EXPECT_EQ(why, id + ": recorded before the per-symbol store: queue it again");
 }
 
 // Review gate 2, Verify's half: a run recorded by a build of other source, as a dirty tree at the same commit would

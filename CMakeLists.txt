@@ -223,7 +223,7 @@ target_compile_options(chronos_server PRIVATE ${CHRONOS_WARNINGS})
 
 target_link_libraries(chronos_server
     PUBLIC
-        simulator_lib
+        simulator_store
         Threads::Threads
 )
 
@@ -426,19 +426,26 @@ chronos_serve_test(BadPortExitsTwo 2 --data . --date 2019-12-30 --port 70000)
 chronos_serve_test(MissingFileExitsTwo 2 --data /nonexistent/chronos-data --date 2019-12-30)
 
 # Other failures exit 2 too, so these check the message. Without --date the latest day starts, here the only one; its
-# hash goes to runs/ in the fixture directory, the tests' working directory.
+# hash goes to runs/ in the fixture directory, the tests' working directory. Each test has its own store, as a store is
+# one chronos-serve's at a time and ctest -j runs them together.
 set(serve_fixture ${PROJECT_BINARY_DIR}/chronos-serve-fixture)
 file(WRITE ${serve_fixture}/12302019.NASDAQ_ITCH50.bin "not itch")
 function(chronos_serve_message_test name message)
     add_test(NAME ChronosServeCliTest.${name}
              COMMAND sh -c "out=$(\"$0\" \"$@\" 2>&1); test $? -eq 2 && echo \"$out\" | grep -q '${message}'"
-                     $<TARGET_FILE:chronos-serve> --data ${serve_fixture} ${ARGN}
+                     $<TARGET_FILE:chronos-serve> --data ${serve_fixture} --store ${serve_fixture}/store-${name} ${ARGN}
              WORKING_DIRECTORY ${serve_fixture})
     set_tests_properties(ChronosServeCliTest.${name} PROPERTIES TIMEOUT 20)  # serving would never exit
 endfunction()
 
-chronos_serve_message_test(NoStockDirectoryExitsTwo ": no stock directory")
+chronos_serve_message_test(NoMarketEventsExitsTwo ": no symbol has market events")
 chronos_serve_message_test(DateWithoutADayFileExitsTwo "no day file for 2019-12-27" --date 2019-12-27)
+
+# The store is one chronos-serve's, and simulator reads it (tests/e2e/store_serve_test.sh).
+add_test(NAME ChronosServeCliTest.AStoreIsOneServersAndTheCliReplaysFromIt
+         COMMAND sh ${PROJECT_SOURCE_DIR}/tests/e2e/store_serve_test.sh $<TARGET_FILE:chronos-serve>
+                 $<TARGET_FILE:simulator> $<TARGET_FILE:chronos-e2e-fixture>)
+set_tests_properties(ChronosServeCliTest.AStoreIsOneServersAndTheCliReplaysFromIt PROPERTIES TIMEOUT 60)
 
 # Review gate 2: build_info.cmake's source digest tells two trees at one commit apart (needs git).
 add_test(NAME BuildInfoTest.DirtyTreesAtOneCommitGetTheirOwnSourceDigest
