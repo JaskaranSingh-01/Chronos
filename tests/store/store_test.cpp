@@ -39,7 +39,7 @@ constexpr std::chrono::year_month_day kMonday = 2019y / 12 / 30;
 constexpr std::chrono::year_month_day kFriday = 2019y / 12 / 27;
 const std::string kSourceHash = "0123456789abcdef0123456789abcdef";
 
-std::filesystem::path day_file(const ScratchDir& dir, std::chrono::year_month_day date)
+std::filesystem::path day_path(const ScratchDir& dir, std::chrono::year_month_day date)
 {
     return dir.path / (date == kMonday ? "12302019.NASDAQ_ITCH50.bin" : "12272019.NASDAQ_ITCH50.bin");
 }
@@ -79,8 +79,8 @@ void feed(StoreBuilder& builder, std::span<const std::byte> bytes)
 std::string build(const ScratchDir& dir, std::chrono::year_month_day date, std::span<const std::byte> bytes,
                   StoreLimits limits = {}, std::size_t* peak = nullptr)
 {
-    write_file(day_file(dir, date), {reinterpret_cast<const char*>(bytes.data()), bytes.size()});
-    StoreBuilder builder{dir.path / "store", day_file(dir, date), date, limits};
+    write_file(day_path(dir, date), {reinterpret_cast<const char*>(bytes.data()), bytes.size()});
+    StoreBuilder builder{dir.path / "store", day_path(dir, date), date, limits};
     feed(builder, bytes);
     std::string error;
     builder.commit(kSourceHash, error);
@@ -316,9 +316,9 @@ TEST(StoreBuilderTest, AFailedWriteAbortsTheBuildAndLeavesTheCommittedStore)
     }
     ItchBuilder monday = three_symbols();
     monday.stock_directory(4, 8'000, "AA0").add_order(4, 8'100, 9, 'B', 100, "AA0", 100'000);  // flushed before AAA
-    write_file(day_file(dir, kMonday), {reinterpret_cast<const char*>(monday.bytes().data()), monday.bytes().size()});
+    write_file(day_path(dir, kMonday), {reinterpret_cast<const char*>(monday.bytes().data()), monday.bytes().size()});
 
-    StoreBuilder builder{store, day_file(dir, kMonday), kMonday};
+    StoreBuilder builder{store, day_path(dir, kMonday), kMonday};
     feed(builder, monday.bytes());
     rlimit was{};
     ASSERT_EQ(::getrlimit(RLIMIT_FSIZE, &was), 0);
@@ -345,19 +345,19 @@ TEST(StoreBuilderTest, AFailedWriteAbortsTheBuildAndLeavesTheCommittedStore)
 }
 
 // Spec §2.5: the day file replaced, or written in place, during a build: nothing is committed.
-TEST(StoreBuilderTest, ADayFileChangedWhileItIsReadIsNotCommitted)
+TEST(StoreBuilderTest, ADayFileChangedWhileItIsReadIsNotCommittedButOneChangedAfterACommitIsIgnored)
 {
     const ScratchDir dir{"store-source"};
     const ItchBuilder day = three_symbols();
     for (const bool replace : {true, false}) {
-        write_file(day_file(dir, kMonday), {reinterpret_cast<const char*>(day.bytes().data()), day.bytes().size()});
-        StoreBuilder builder{dir.path / "store", day_file(dir, kMonday), kMonday};
+        write_file(day_path(dir, kMonday), {reinterpret_cast<const char*>(day.bytes().data()), day.bytes().size()});
+        StoreBuilder builder{dir.path / "store", day_path(dir, kMonday), kMonday};
         feed(builder, day.bytes());
         if (replace) {
             write_file(dir.path / "new", "another version");
-            std::filesystem::rename(dir.path / "new", day_file(dir, kMonday));
+            std::filesystem::rename(dir.path / "new", day_path(dir, kMonday));
         } else {
-            std::ofstream{day_file(dir, kMonday), std::ios::app | std::ios::binary} << "more";
+            std::ofstream{day_path(dir, kMonday), std::ios::app | std::ios::binary} << "more";
         }
         std::string error;
         EXPECT_FALSE(builder.commit(kSourceHash, error));
@@ -365,6 +365,18 @@ TEST(StoreBuilderTest, ADayFileChangedWhileItIsReadIsNotCommitted)
         EXPECT_FALSE(std::filesystem::exists(dir.path / "store" / "index.tsv"));
         EXPECT_EQ(std::filesystem::file_size(dir.path / "store" / "AAA.itch.zst"), 0u);
     }
+
+    write_file(day_path(dir, kMonday), {reinterpret_cast<const char*>(day.bytes().data()), day.bytes().size()});
+    StoreBuilder builder{dir.path / "store", day_path(dir, kMonday), kMonday};
+    feed(builder, day.bytes());
+    std::string error;
+    ASSERT_TRUE(builder.commit(kSourceHash, error)) << error;
+    const std::string index = read_file(dir.path / "store" / "index.tsv");
+    const auto size = std::filesystem::file_size(dir.path / "store" / "AAA.itch.zst");
+    std::ofstream{day_path(dir, kMonday), std::ios::app | std::ios::binary} << "more";
+    EXPECT_TRUE(builder.commit(kSourceHash, error));  // the first commit stands
+    EXPECT_EQ(read_file(dir.path / "store" / "index.tsv"), index);
+    EXPECT_EQ(std::filesystem::file_size(dir.path / "store" / "AAA.itch.zst"), size);
 }
 
 // A builder dropped uncommitted, after it flushed as it went, cuts every file back to its committed end.
@@ -376,9 +388,9 @@ TEST(StoreBuilderTest, ABuilderDroppedAfterFlushingLeavesEveryFileAtItsCommitted
     const std::string index_text = read_file(store / "index.tsv");
     ItchBuilder monday = three_symbols();
     monday.stock_directory(4, 8'000, "DDD").add_order(4, 8'100, 9, 'B', 100, "DDD", 100'000);  // a file of its own
-    write_file(day_file(dir, kMonday), {reinterpret_cast<const char*>(monday.bytes().data()), monday.bytes().size()});
+    write_file(day_path(dir, kMonday), {reinterpret_cast<const char*>(monday.bytes().data()), monday.bytes().size()});
     {
-        StoreBuilder builder{store, day_file(dir, kMonday), kMonday, kFlushedAtOnce};
+        StoreBuilder builder{store, day_path(dir, kMonday), kMonday, kFlushedAtOnce};
         feed(builder, monday.bytes());
         EXPECT_GT(std::filesystem::file_size(store / "AAA.itch.zst"),
                   index_of(dir).days().at(kFriday).segments.at("AAA").compressed);  // written, not yet committed
@@ -402,7 +414,7 @@ TEST(StoreBuilderTest, ACommitOfASourceNotNamedForItsDayOrOfAMalformedHashIsRefu
     const std::filesystem::path store = dir.path / "store";
     const ItchBuilder day = three_symbols();
     const std::string text{reinterpret_cast<const char*>(day.bytes().data()), day.bytes().size()};
-    write_file(day_file(dir, kMonday), text);
+    write_file(day_path(dir, kMonday), text);
     write_file(dir.path / "monday.bin", text);
     const auto refused = [&](const std::filesystem::path& source, const std::string& hash) {
         StoreBuilder builder{store, source, kMonday, kFlushedAtOnce};
@@ -414,9 +426,9 @@ TEST(StoreBuilderTest, ACommitOfASourceNotNamedForItsDayOrOfAMalformedHashIsRefu
         return error;
     };
     EXPECT_EQ(refused(dir.path / "monday.bin", kSourceHash), "the day file is not named 12302019.NASDAQ_ITCH50.bin");
-    EXPECT_EQ(refused(day_file(dir, kMonday), "0123456789ABCDEF0123456789ABCDEF"),
+    EXPECT_EQ(refused(day_path(dir, kMonday), "0123456789ABCDEF0123456789ABCDEF"),
               "the day's hash is not 32 lower-case hex digits");
-    EXPECT_EQ(refused(day_file(dir, kMonday), kSourceHash.substr(1)), "the day's hash is not 32 lower-case hex digits");
+    EXPECT_EQ(refused(day_path(dir, kMonday), kSourceHash.substr(1)), "the day's hash is not 32 lower-case hex digits");
     EXPECT_EQ(build(dir, kMonday, day.bytes()), "");  // and the store is as good as it was
     EXPECT_EQ(index_of(dir).days().at(kMonday).segments.size(), 3u);
 }
@@ -444,10 +456,10 @@ TEST(StoreBuilderTest, ARebuiltDaysOldSegmentsAreTheUnreferencedBytes)
 
     ASSERT_EQ(build(dir, kFriday, three_symbols().bytes()), "");
     EXPECT_EQ(store_usage(store, index_of(dir)).unreferenced, rebuilt.unreferenced);
-    write_file(day_file(dir, kFriday), "replaced");
-    StoreBuilder failed{store, day_file(dir, kFriday), kFriday};
+    write_file(day_path(dir, kFriday), "replaced");
+    StoreBuilder failed{store, day_path(dir, kFriday), kFriday};
     feed(failed, changed.bytes());
-    std::filesystem::rename(day_file(dir, kFriday), dir.path / "moved");
+    std::filesystem::rename(day_path(dir, kFriday), dir.path / "moved");
     std::string error;
     EXPECT_FALSE(failed.commit(kSourceHash, error));
     EXPECT_EQ(store_usage(store, index_of(dir)).unreferenced, rebuilt.unreferenced);

@@ -45,11 +45,8 @@ public:
     // The day's next frame, its u16 length and its message; a last one cut short ends every segment. The first error
     // stops the build, and commit() reports it.
     void add(std::span<const std::byte> frame);
-    // Writes the buffers left, syncs the files, and renames the index with the day's record over index.tsv, `hash`
-    // being the day file's as this build read it. The rename is the commit: once it has happened this is true, and
-    // failing to sync the directory after it is ignored. False, with `error`, after an abort: a write failed, the day
-    // file's size, mtime or inode changed since the build began, or the source is not named for the day or `hash` is
-    // not 32 lower-case hex digits, which the index could not load.
+    // Writes the rest and renames the index with the day's record, `hash` its file's as read, over index.tsv: the rename
+    // is the commit, and from then on this is true. False, with `error`, after an abort (a failed write or check).
     bool commit(std::string_view hash, std::string& error);
     // The index in force once committed.
     const StoreIndex& index() const noexcept;

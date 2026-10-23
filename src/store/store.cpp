@@ -364,6 +364,9 @@ void StoreBuilder::add(std::span<const std::byte> frame)
 bool StoreBuilder::commit(std::string_view hash, std::string& error)
 {
     Build& b = *build_;
+    if (b.committed) {
+        return true;
+    }
     if (b.error.empty() && b.source.filename().string() != day_file(b.date)) {
         b.error = "the day file is not named " + day_file(b.date);  // the index would not load
     }
