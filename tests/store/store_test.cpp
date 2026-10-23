@@ -675,7 +675,7 @@ TEST(StoreEquivalenceTest, AnotherSymbolsChangedMessageLeavesThisSegmentAsItWas)
 
 // Spec §6, digest equality on a real day (CHRONOS_ITCH_FILE, CHRONOS_ITCH_DATE as in itch_real_data_test.cpp): the
 // store is built in the temp directory, then every symbol's segment replays to the book that symbol has at the end of
-// the full-day replay of every symbol. Needs about half the day file's size free in TMPDIR.
+// the full-day replay of every symbol. Needs about a third of the day file's size free in TMPDIR.
 TEST(StoreRealDataTest, EverySymbolsSegmentReplaysToItsBookOfTheFullDay)
 {
     const char* path = std::getenv("CHRONOS_ITCH_FILE");
@@ -705,7 +705,7 @@ TEST(StoreRealDataTest, EverySymbolsSegmentReplaysToItsBookOfTheFullDay)
                    registry};
     OrderPool pool{default_books_capacity};
     MarketBooks books{registry, pool};
-    MarketReplay::run(all, books, options);
+    ASSERT_EQ(MarketReplay::run(all, books, options).total.failure, ReplayFailure::None);
     std::map<std::string, SymbolId, std::less<>> ids;
     for (SymbolId id = 0; id < registry.size(); ++id) {
         const auto& symbol = registry.find(id)->native_symbol;
@@ -737,6 +737,7 @@ TEST(StoreRealDataTest, EverySymbolsSegmentReplaysToItsBookOfTheFullDay)
         }
     }
     std::printf("[ RealData ] %zu symbols' segments, %zu differ from the full day\n", compared, differ);
+    EXPECT_GT(compared, 0u);
     EXPECT_EQ(compared, registry.size());
 }
 

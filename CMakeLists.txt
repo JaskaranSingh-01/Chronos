@@ -404,7 +404,7 @@ file(MAKE_DIRECTORY ${empty_store})
 file(WRITE ${bad_store}/index.tsv "not an index\n")
 function(chronos_cli_message_test name message)
     add_test(NAME SimulatorCliTest.${name}
-             COMMAND sh -c "out=$(\"$0\" \"$@\" 2>&1); test $? -eq 2 && echo \"$out\" | grep -q '${message}'"
+             COMMAND sh -c "out=$(\"$0\" \"$@\" 2>&1); test $? -eq 2 && echo \"$out\" | grep -qF '${message}'"
                      $<TARGET_FILE:simulator> ${ARGN})
 endfunction()
 
