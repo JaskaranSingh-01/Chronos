@@ -41,11 +41,13 @@ function ViewerBanner() {
   ) : null;
 }
 
-// Says which Lab run this generation replays, and, once it has ended, the verdict.
+// Says which Lab run this generation replays, and, once it has ended, the verdict. Stop watching loads the plain
+// replay of the generation's symbol and days, stamped with this generation, so a click after it has moved on is dropped.
 function WatchBanner() {
   const runId = useStore((s) => s.runId);
   const verdict = useStore((s) => s.verdict);
   const state = useStore((s) => s.state);
+  const viewer = useStore((s) => s.hello?.role !== 'controller');
   const label = useLab((l) => runLabel(l.runs, runId));
   if (!runId) return null;
   const until =
@@ -53,9 +55,20 @@ function WatchBanner() {
       ? 'its verdict was sent before this tab connected'
       : `${state === 'paused' ? 'press ▶ Play; ' : ''}the verdict comes when its replay ends`;
   return (
-    <p className="banner" data-testid="watch">
-      Watching run {label}
-      {verdict ? <b className={outcomes[verdict.outcome][1]}> · {outcomes[verdict.outcome][0]}</b> : `: ${until}.`}
+    <p className="banner">
+      <span data-testid="watch">
+        Watching run {label}
+        {verdict ? <b className={outcomes[verdict.outcome][1]}> · {outcomes[verdict.outcome][0]}</b> : `: ${until}.`}
+      </span>{' '}
+      <button
+        disabled={viewer}
+        onClick={() => {
+          const { symbol, genDays } = store.get();
+          store.control({ action: 'symbol', symbol, days: genDays });
+        }}
+      >
+        Stop watching
+      </button>
     </p>
   );
 }

@@ -197,3 +197,33 @@ test("a day rebuilt with another symbol changed: the run's segment is the same, 
   await page.getByRole('button', { name: '▶ Play' }).click();
   await expect(page.getByTestId('watch')).toHaveText('Watching run #1 · ✓ reproduced', { timeout: 15_000 });
 });
+
+test('Stop watching returns the plain replay; Restart and Seek keep the Watch; a viewer may not stop it', async ({
+  page,
+  url,
+}) => {
+  await page.goto(`${url}#lab`);
+  await runAcme(page);
+  await expect(card(page, 'Total PnL')).toHaveText('+$3.00');
+  await page.getByRole('button', { name: 'Watch in Terminal' }).click();
+  await expect(page.getByTestId('session')).toContainText('ACME · gen 2 · paused');
+  const viewer = await page.context().newPage();
+  await viewer.goto(url);
+  await expect(viewer.getByTestId('watch')).toContainText('Watching run #1');
+  await expect(viewer.getByRole('button', { name: 'Stop watching' })).toBeDisabled();
+  await page.getByRole('button', { name: '⟲ Restart' }).click();
+  await expect(page.getByTestId('session')).toContainText('ACME · gen 3 · paused');
+  await page.getByLabel('Seek to').fill('09:30:20');
+  await page.getByRole('button', { name: 'Seek', exact: true }).click();
+  await expect(page.getByTestId('clock')).toHaveText('09:30:20.000 ET');
+  await page.getByLabel('Seek to').fill('09:30:05'); // back: a new generation
+  await page.getByRole('button', { name: 'Seek', exact: true }).click();
+  await expect(page.getByTestId('session')).toContainText('ACME · gen 4');
+  await expect(page.getByTestId('watch')).toContainText('Watching run #1');
+  await page.getByLabel('Price').fill('10.00');
+  await expect(page.locator('.ticket button.place')).toBeDisabled(); // the run's strategy trades
+  await page.getByRole('button', { name: 'Stop watching' }).click();
+  await expect(page.getByTestId('session')).toContainText('ACME · gen 5 · paused');
+  await expect(page.getByTestId('watch')).toBeHidden();
+  await expect(page.locator('.ticket button.place')).toBeEnabled();
+});

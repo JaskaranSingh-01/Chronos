@@ -66,7 +66,7 @@ export interface Verification {
   outcome: Outcome;
   digests: Digests | null; // null when the re-run failed
   source_digest: string; // the verifying build's
-  changed: string[]; // input_changed: the days whose re-hash differs
+  changed: string[]; // input_changed: the days whose segment as read differs
 }
 
 export interface Results {
@@ -132,6 +132,7 @@ export interface Run {
       size: number;
       hash: string;
       session: { open: number; close: number; source: 'feed' | 'fallback' };
+      segment: { hash: string; size: number } | null; // the symbol's, its identity; null if recorded before the store
     }[];
     host: string;
     submitted: string;
@@ -256,6 +257,7 @@ const counts = new Intl.NumberFormat('en-US');
 const plain: Record<string, string> = {
   other_settings: 'the run used another --allow-truncated-tail',
   input_changed: 'a day changed since the run',
+  before_store: 'recorded before the per-symbol store: Edit as new queues it again',
   queue_full: 'the queue is full',
   '409': 'it has already ended', // cancel's bare 409
 };

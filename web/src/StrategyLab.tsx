@@ -228,7 +228,9 @@ function Provenance({ run, label }: { run: Run; label: string }) {
     ['source digest', b.source_digest],
     ...p.days.map((d): [string, string] => [
       d.date,
-      `${d.hash} · ${d.session.source === 'fallback' ? '09:30-16:00 fallback' : 'feed session'} · ${d.size} bytes`,
+      `${d.hash} · ${d.session.source === 'fallback' ? '09:30-16:00 fallback' : 'feed session'} · ${d.size} bytes · ${
+        d.segment ? `segment ${d.segment.hash}, ${d.segment.size} bytes` : 'before the per-symbol store'
+      }`,
     ]),
     [
       'engine',

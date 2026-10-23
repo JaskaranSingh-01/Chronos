@@ -578,6 +578,16 @@ describe('createLab', () => {
     expect([lab.get().selected, lab.get().comparing]).toEqual(['n', false]);
   });
 
+  it('says a run recorded before the per-symbol store is queued again with Edit as new', async () => {
+    const { s, env } = server();
+    s.runs = [listed('old')];
+    s.answer = (_method, path) =>
+      path === '/api/backtests/old/verify' ? Response.json({ error: 'before_store' }, { status: 409 }) : undefined;
+    const lab = createLab(env);
+    await lab.verify('old');
+    expect(lab.get().notice).toBe('verify refused: recorded before the per-symbol store: Edit as new queues it again');
+  });
+
   it('verifies a run, says when chronos-serve refuses, and downloads its JSON with the token for Export', async () => {
     const { s, env } = server();
     s.token = 't0k3n';

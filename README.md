@@ -477,6 +477,8 @@ by default, so a strategy trades only inside each day's feed session, from the d
   and days, refuses a run whose segments have changed since, and pauses before the first event. When the replay ends it
   sends `report{kind:"reproduced"}` with the verdict, by the same rules as Verify; a command applied during the Watch
   makes it another run, so the verdict is then `mismatch`. The Watch's command log names the run and reproduces it.
+  Restart and Seek replay the Watch again; **Stop watching**, in its banner, loads the plain replay of the same symbol
+  and days in its place.
 - A POST or DELETE must be `Content-Type: application/json` (else 415) and carry the `Origin` of the page this server
   served (else 403), so no other site can queue or delete a run; with `--token` it also needs the `Authorization` header.
   A body over 64 KiB closes the connection.
