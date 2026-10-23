@@ -75,6 +75,20 @@ target_compile_options(simulator_lib PRIVATE ${CHRONOS_WARNINGS})
 
 
 # -------------------------
+# The per-symbol store (include/simulator/store): each symbol's days as zstd frames, and its index
+# -------------------------
+
+add_library(simulator_store
+
+    src/store/store_index.cpp
+)
+
+target_compile_options(simulator_store PRIVATE ${CHRONOS_WARNINGS})
+
+target_link_libraries(simulator_store PUBLIC simulator_lib)
+
+
+# -------------------------
 # Application
 # -------------------------
 
@@ -262,6 +276,7 @@ add_executable(simulator_tests
     tests/strategies/imbalance_taker_test.cpp
     tests/strategies/market_maker_test.cpp
     tests/metrics/latency_histogram_test.cpp
+    tests/store/store_index_test.cpp
 )
 
 target_compile_definitions(simulator_tests
@@ -273,7 +288,7 @@ target_compile_options(simulator_tests PRIVATE ${CHRONOS_WARNINGS})
 
 target_link_libraries(simulator_tests
     PRIVATE
-        simulator_lib
+        simulator_store
         GTest::gtest_main
 )
 
