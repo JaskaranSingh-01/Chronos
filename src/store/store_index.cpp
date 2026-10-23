@@ -61,25 +61,10 @@ bool number(std::string_view text, std::uint64_t& value) noexcept
     return !text.empty() && ec == std::errc{} && ptr == end && (text.size() == 1 || text[0] != '0');  // one spelling
 }
 
-bool hash(std::string_view text) noexcept
-{
-    return text.size() == 32 &&
-        std::all_of(text.begin(), text.end(), [](char c) { return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'); });
-}
-
 std::string iso(std::chrono::year_month_day date)
 {
     char text[16];
     std::snprintf(text, sizeof text, "%04d-%02u-%02u", int{date.year()}, unsigned{date.month()}, unsigned{date.day()});
-    return text;
-}
-
-// The day file's name for `date`, e.g. 12302019.NASDAQ_ITCH50.bin.
-std::string day_file(std::chrono::year_month_day date)
-{
-    char text[32];
-    std::snprintf(text, sizeof text, "%02u%02u%04d.NASDAQ_ITCH50.bin", unsigned{date.month()}, unsigned{date.day()},
-                  int{date.year()});
     return text;
 }
 
@@ -117,6 +102,20 @@ std::string why(int error)
 std::string symbol_file(std::string_view symbol)
 {
     return encode(symbol) + ".itch.zst";
+}
+
+std::string day_file(std::chrono::year_month_day date)
+{
+    char text[32];
+    std::snprintf(text, sizeof text, "%02u%02u%04d.NASDAQ_ITCH50.bin", unsigned{date.month()}, unsigned{date.day()},
+                  int{date.year()});
+    return text;
+}
+
+bool is_hash(std::string_view text) noexcept
+{
+    return text.size() == 32 &&
+        std::all_of(text.begin(), text.end(), [](char c) { return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'); });
 }
 
 bool StoreIndex::load(const std::filesystem::path& dir, std::string& error)
@@ -163,7 +162,7 @@ bool StoreIndex::load(const std::filesystem::path& dir, std::string& error)
             if (!number(f[3], record.size)) {
                 return fail(where + "bad number");
             }
-            if (!hash(f[4])) {
+            if (!is_hash(f[4])) {
                 return fail(where + "bad hash");
             }
             if (!days.emplace(date, std::move(record)).second) {
@@ -182,7 +181,7 @@ bool StoreIndex::load(const std::filesystem::path& dir, std::string& error)
             !number(f[6], s.messages) || !number(f[7], s.events)) {
             return fail(where + "bad number");
         }
-        if (!hash(f[8])) {
+        if (!is_hash(f[8])) {
             return fail(where + "bad hash");
         }
         if (found == days.end()) {

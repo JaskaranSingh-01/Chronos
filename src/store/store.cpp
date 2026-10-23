@@ -13,6 +13,7 @@
 #include <system_error>
 #include <utility>
 
+#define ZSTD_STATIC_LINKING_ONLY  // ZSTD_findDecompressedSize: zstd is pinned, and linked statically
 #include <zstd.h>
 #define XXH_INLINE_ALL
 #include <xxhash.h>
@@ -335,7 +336,11 @@ void StoreBuilder::add(std::span<const std::byte> frame)
             return;
         }
         const std::string_view stock{directory.stock.data(), directory.stock.size()};
-        Build::Buffer& buffer = b.begin(std::string{stock.substr(0, stock.find_last_not_of(' ') + 1)});
+        const std::string_view symbol = stock.substr(0, stock.find_last_not_of(' ') + 1);
+        if (symbol.empty()) {
+            return;  // ItchSource selects no ticker for it, and the index has no empty symbol
+        }
+        Build::Buffer& buffer = b.begin(std::string{symbol});
         std::vector<Build::Buffer*>& route = b.routes[directory.stock_locate];
         if (std::find(route.begin(), route.end(), &buffer) == route.end()) {
             route.push_back(&buffer);
@@ -359,6 +364,12 @@ void StoreBuilder::add(std::span<const std::byte> frame)
 bool StoreBuilder::commit(std::string_view hash, std::string& error)
 {
     Build& b = *build_;
+    if (b.error.empty() && b.source.filename().string() != day_file(b.date)) {
+        b.error = "the day file is not named " + day_file(b.date);  // the index would not load
+    }
+    if (b.error.empty() && !is_hash(hash)) {
+        b.error = "the day's hash is not 32 lower-case hex digits";
+    }
     for (auto& [symbol, buffer] : b.buffers) {
         b.flush(buffer);
     }
@@ -391,13 +402,15 @@ bool StoreBuilder::commit(std::string_view hash, std::string& error)
         if (fd >= 0) {
             ::close(fd);
         }
-        if (written && (::rename(b.temp.c_str(), (b.store / "index.tsv").c_str()) != 0 || !sync_path(b.store, true))) {
-            b.failed();
-        }
-        if (b.error.empty()) {
+        if (written && ::rename(b.temp.c_str(), (b.store / "index.tsv").c_str()) == 0) {
             b.index = std::move(next);
             b.committed = true;
+            // Best effort: the rename has committed, and a lost one reverts to the old index.
+            (void)sync_path(b.store, true);
             return true;
+        }
+        if (written) {
+            b.failed();
         }
     }
     error = b.error;
@@ -439,24 +452,36 @@ bool read_segment(const std::filesystem::path& store, std::string_view symbol, s
             why = "outside its file";
         } else {
             compressed.resize(segment.compressed);
-            bytes.resize(segment.uncompressed);
             if (!read_at(fd, compressed, segment.offset)) {
                 why = std::strerror(errno);
             }
         }
-    } catch (const std::exception&) {  // a length no allocation can hold
-        why = "cannot allocate " + std::to_string(segment.uncompressed) + " bytes";
+    } catch (const std::exception&) {  // a range no allocation can hold
+        why = "cannot allocate " + std::to_string(segment.compressed) + " bytes";
     }
     ::close(fd);
     if (!why.empty()) {
         return fail(why);
     }
+    // The frames' own lengths are checked against the index's before anything is sized by it.
+    const unsigned long long framed = ZSTD_findDecompressedSize(compressed.data(), compressed.size());
+    if (framed == ZSTD_CONTENTSIZE_ERROR) {
+        return fail("damaged zstd frames");
+    }
+    if (framed == ZSTD_CONTENTSIZE_UNKNOWN) {
+        return fail("zstd frames of no stated length");
+    }
+    if (framed != segment.uncompressed) {
+        return fail("not its length");
+    }
+    try {
+        bytes.resize(segment.uncompressed);
+    } catch (const std::exception&) {  // a length no allocation can hold
+        return fail("cannot allocate " + std::to_string(segment.uncompressed) + " bytes");
+    }
     const std::size_t size = ZSTD_decompress(bytes.data(), bytes.size(), compressed.data(), compressed.size());
     if (ZSTD_isError(size)) {
         return fail(ZSTD_getErrorName(size));
-    }
-    if (size != segment.uncompressed) {
-        return fail("not its length");
     }
     if (hex(XXH3_128bits(bytes.data(), bytes.size())) != segment.hash) {
         return fail("not its hash");

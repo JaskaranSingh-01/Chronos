@@ -46,8 +46,10 @@ public:
     // stops the build, and commit() reports it.
     void add(std::span<const std::byte> frame);
     // Writes the buffers left, syncs the files, and renames the index with the day's record over index.tsv, `hash`
-    // being the day file's as this build read it. False, with `error`, after an abort: a write failed, or the day
-    // file's size, mtime or inode changed since the build began.
+    // being the day file's as this build read it. The rename is the commit: once it has happened this is true, and
+    // failing to sync the directory after it is ignored. False, with `error`, after an abort: a write failed, the day
+    // file's size, mtime or inode changed since the build began, or the source is not named for the day or `hash` is
+    // not 32 lower-case hex digits, which the index could not load.
     bool commit(std::string_view hash, std::string& error);
     // The index in force once committed.
     const StoreIndex& index() const noexcept;
@@ -56,8 +58,8 @@ public:
 };
 
 // Reads `symbol`'s segment on `date`, as `segment` describes it, from its file in `store` into `bytes`: plain reads,
-// then its range within the file, each zstd frame's checksum, its length and its hash are checked. False, with
-// `error` naming the symbol and day, if any is not as described.
+// then its range within the file, the length its zstd frames state (before anything is allocated to it), each frame's
+// checksum and its hash are checked. False, with `error` naming the symbol and day, if any is not as described.
 bool read_segment(const std::filesystem::path& store, std::string_view symbol, std::chrono::year_month_day date,
                   const Segment& segment, std::vector<std::byte>& bytes, std::string& error);
 

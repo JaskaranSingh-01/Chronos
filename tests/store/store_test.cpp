@@ -158,59 +158,97 @@ ItchBuilder three_symbols()
     return itch;
 }
 
+// Each build is also run at a one-byte flush: every frame is written as it is added, so a System Event reaches buffers
+// that are empty because they were just flushed.
+const StoreLimits kFlushedAtOnce{.flush = 1};
+
 TEST(StoreBuilderTest, ASegmentHoldsItsLocatesFramesFromItsDirectoryEntryAndEverySystemEventInFileOrder)
 {
-    const ScratchDir dir{"store-routing"};
-    const ItchBuilder day = three_symbols();
-    ASSERT_EQ(build(dir, kMonday, day.bytes()), "");
+    for (const StoreLimits& limits : {StoreLimits{}, kFlushedAtOnce}) {
+        SCOPED_TRACE(limits.flush);
+        const ScratchDir dir{"store-routing-" + std::to_string(limits.flush)};
+        const ItchBuilder day = three_symbols();
+        ASSERT_EQ(build(dir, kMonday, day.bytes(), limits), "");
 
-    const StoreIndex index = index_of(dir);
-    ASSERT_EQ(index.days().size(), 1u);
-    const StoreDay& monday = index.days().at(kMonday);
-    EXPECT_EQ(monday.file, "12302019.NASDAQ_ITCH50.bin");
-    EXPECT_EQ(monday.size, day.bytes().size());
-    EXPECT_EQ(monday.hash, kSourceHash);
-    ASSERT_EQ(monday.segments.size(), 3u);  // nothing for locate 9
-    for (const auto& [symbol, at] : {std::pair{"AAA", 1}, std::pair{"BBB", 2}, std::pair{"CCC", 3}}) {
-        bool listed = false;
-        const std::vector<std::byte> expected = picked(day.bytes(), [&](std::span<const std::byte> frame) {
-            listed = listed || (type(frame) == 'R' && locate(frame) == at);
-            return type(frame) == 'S' || (listed && locate(frame) == at);
-        });
-        EXPECT_EQ(read_back(dir, kMonday, symbol), expected) << symbol;
-        EXPECT_EQ(monday.segments.at(symbol).uncompressed, expected.size());
+        const StoreIndex index = index_of(dir);
+        ASSERT_EQ(index.days().size(), 1u);
+        const StoreDay& monday = index.days().at(kMonday);
+        EXPECT_EQ(monday.file, "12302019.NASDAQ_ITCH50.bin");
+        EXPECT_EQ(monday.size, day.bytes().size());
+        EXPECT_EQ(monday.hash, kSourceHash);
+        ASSERT_EQ(monday.segments.size(), 3u);  // nothing for locate 9
+        for (const auto& [symbol, at] : {std::pair{"AAA", 1}, std::pair{"BBB", 2}, std::pair{"CCC", 3}}) {
+            bool listed = false;
+            const std::vector<std::byte> expected = picked(day.bytes(), [&](std::span<const std::byte> frame) {
+                listed = listed || (type(frame) == 'R' && locate(frame) == at);
+                return type(frame) == 'S' || (listed && locate(frame) == at);
+            });
+            EXPECT_EQ(read_back(dir, kMonday, symbol), expected) << symbol;
+            EXPECT_EQ(monday.segments.at(symbol).uncompressed, expected.size());
+        }
+        EXPECT_EQ(monday.segments.at("AAA").messages, 9u);  // 4 System Events, its R and H, A E D
+        EXPECT_EQ(monday.segments.at("AAA").events, 3u);
+        EXPECT_EQ(monday.segments.at("BBB").events, 2u);
+        EXPECT_EQ(monday.segments.at("CCC").messages, 6u);  // listed late: the 3 System Events before it, then its own
+        EXPECT_EQ(monday.segments.at("CCC").events, 1u);
+        EXPECT_EQ(std::filesystem::file_size(dir.path / "store" / "AAA.itch.zst"),
+                  monday.segments.at("AAA").compressed);
     }
-    EXPECT_EQ(monday.segments.at("AAA").messages, 9u);  // 4 System Events, its R and H, A E D
-    EXPECT_EQ(monday.segments.at("AAA").events, 3u);
-    EXPECT_EQ(monday.segments.at("BBB").events, 2u);
-    EXPECT_EQ(monday.segments.at("CCC").messages, 6u);  // listed late: the 3 System Events before it, then its own
-    EXPECT_EQ(monday.segments.at("CCC").events, 1u);
-    EXPECT_EQ(std::filesystem::file_size(dir.path / "store" / "AAA.itch.zst"), monday.segments.at("AAA").compressed);
 }
 
 // A frame ItchSource cannot route by locate fails every symbol's replay of the day, so it reaches every segment, as
 // does a last frame cut short.
 TEST(StoreBuilderTest, FramesNoLocateRoutesAndACutTailReachEverySegment)
 {
-    const ScratchDir dir{"store-unroutable"};
     ItchBuilder itch = three_symbols();
     std::vector<std::byte> day(itch.bytes().begin(), itch.bytes().end());
     for (const char t : {'R', 'A', 'H', 'I'}) {  // an R too short to decode, then an A and an H too short to route
         day.insert(day.end(), {std::byte{0}, std::byte{2}, std::byte(t), std::byte{1}});
     }
     day.insert(day.end(), {std::byte{0}, std::byte{12}, std::byte{'S'}, std::byte{0}});  // a System Event, cut
-    ASSERT_EQ(build(dir, kMonday, day), "");
-    for (const auto& [symbol, at] : {std::pair{"AAA", 1}, std::pair{"CCC", 3}}) {
-        bool listed = false;
-        const std::vector<std::byte> expected = picked(day, [&](std::span<const std::byte> frame) {
-            if (frame.size() < 5) {
-                return type(frame) != 'I';  // an I nothing reads, too short to route, is left out
-            }
-            listed = listed || (type(frame) == 'R' && locate(frame) == at);
-            return type(frame) == 'S' || (listed && locate(frame) == at);
-        });
-        EXPECT_EQ(read_back(dir, kMonday, symbol), expected) << symbol;
+    for (const StoreLimits& limits : {StoreLimits{}, kFlushedAtOnce}) {
+        SCOPED_TRACE(limits.flush);
+        const ScratchDir dir{"store-unroutable-" + std::to_string(limits.flush)};
+        ASSERT_EQ(build(dir, kMonday, day, limits), "");
+        for (const auto& [symbol, at] : {std::pair{"AAA", 1}, std::pair{"CCC", 3}}) {
+            bool listed = false;
+            const std::vector<std::byte> expected = picked(day, [&](std::span<const std::byte> frame) {
+                if (frame.size() < 5) {
+                    return type(frame) != 'I';  // an I nothing reads, too short to route, is left out
+                }
+                listed = listed || (type(frame) == 'R' && locate(frame) == at);
+                return type(frame) == 'S' || (listed && locate(frame) == at);
+            });
+            EXPECT_EQ(read_back(dir, kMonday, symbol), expected) << symbol;
+        }
     }
+}
+
+// An R naming no symbol, all spaces, selects no ticker in ItchSource: it and its locate's frames go nowhere, and the
+// index, which has no empty symbol, still loads.
+TEST(StoreBuilderTest, AnRWithoutASymbolRoutesNowhereAndTheDayStillCommitsAndLoads)
+{
+    const ScratchDir dir{"store-nameless"};
+    ItchBuilder itch;
+    itch.system_event(0, 1'000, 'O')
+        .stock_directory(1, 2'000, "AAA")
+        .stock_directory(2, 2'000, "        ")
+        .add_order(1, 3'000, 1, 'B', 100, "AAA", 100'000)
+        .add_order(2, 3'100, 2, 'B', 100, "AAA", 100'000)  // of the nameless locate
+        .system_event(0, 4'000, 'M');
+    ASSERT_EQ(build(dir, kMonday, itch.bytes()), "");
+
+    const StoreIndex index = index_of(dir);
+    ASSERT_EQ(index.days().at(kMonday).segments.size(), 1u);
+    const std::vector<std::byte> expected =
+        picked(itch.bytes(), [](std::span<const std::byte> frame) { return type(frame) == 'S' || locate(frame) == 1; });
+    EXPECT_EQ(read_back(dir, kMonday, "AAA"), expected);
+    std::vector<std::string> files;
+    for (const auto& entry : std::filesystem::directory_iterator{dir.path / "store"}) {
+        files.push_back(entry.path().filename().string());
+    }
+    std::sort(files.begin(), files.end());
+    EXPECT_EQ(files, (std::vector<std::string>{"AAA.itch.zst", "index.tsv"}));
 }
 
 // Many symbols, each flushed at 512 bytes, all of them at a 2 KiB cap: never more than the cap is buffered, and a
@@ -245,12 +283,13 @@ TEST(StoreBuilderTest, ACrashBeforeOrAfterTheRenameReopensToAValidStore)
     ASSERT_EQ(build(dir, kFriday, friday.bytes()), "");
     const std::filesystem::path store = dir.path / "store";
     const std::uint64_t committed = std::filesystem::file_size(store / "AAA.itch.zst");
+    const std::vector<std::byte> before = read_back(dir, kFriday, "AAA");
     std::ofstream{store / "AAA.itch.zst", std::ios::app | std::ios::binary} << std::string(1'000, 't');  // a long tail
     write_file(store / "DDD.itch.zst", "a file it created");
     write_file(store / "index.tsv.tmp", "not an index");
 
-    EXPECT_EQ(read_back(dir, kFriday, "AAA"), read_back(dir, kFriday, "AAA"));
-    EXPECT_FALSE(read_back(dir, kFriday, "AAA").empty());
+    EXPECT_FALSE(before.empty());
+    EXPECT_EQ(read_back(dir, kFriday, "AAA"), before);  // the tail is outside its segment
     EXPECT_EQ(store_usage(store, index_of(dir)).unreferenced, 1'000u + 17);
 
     ItchBuilder monday = three_symbols();
@@ -328,6 +367,60 @@ TEST(StoreBuilderTest, ADayFileChangedWhileItIsReadIsNotCommitted)
     }
 }
 
+// A builder dropped uncommitted, after it flushed as it went, cuts every file back to its committed end.
+TEST(StoreBuilderTest, ABuilderDroppedAfterFlushingLeavesEveryFileAtItsCommittedEnd)
+{
+    const ScratchDir dir{"store-dropped"};
+    const std::filesystem::path store = dir.path / "store";
+    ASSERT_EQ(build(dir, kFriday, three_symbols().bytes()), "");
+    const std::string index_text = read_file(store / "index.tsv");
+    ItchBuilder monday = three_symbols();
+    monday.stock_directory(4, 8'000, "DDD").add_order(4, 8'100, 9, 'B', 100, "DDD", 100'000);  // a file of its own
+    write_file(day_file(dir, kMonday), {reinterpret_cast<const char*>(monday.bytes().data()), monday.bytes().size()});
+    {
+        StoreBuilder builder{store, day_file(dir, kMonday), kMonday, kFlushedAtOnce};
+        feed(builder, monday.bytes());
+        EXPECT_GT(std::filesystem::file_size(store / "AAA.itch.zst"),
+                  index_of(dir).days().at(kFriday).segments.at("AAA").compressed);  // written, not yet committed
+        EXPECT_GT(std::filesystem::file_size(store / "DDD.itch.zst"), 0u);
+    }
+    const StoreIndex index = index_of(dir);
+    for (const auto& [symbol, segment] : index.days().at(kFriday).segments) {
+        EXPECT_EQ(std::filesystem::file_size(store / symbol_file(symbol)), segment.offset + segment.compressed);
+    }
+    EXPECT_EQ(std::filesystem::file_size(store / "DDD.itch.zst"), 0u);
+    EXPECT_EQ(read_file(store / "index.tsv"), index_text);
+    EXPECT_FALSE(std::filesystem::exists(store / "index.tsv.tmp"));
+    EXPECT_EQ(store_usage(store, index).unreferenced, 0u);
+}
+
+// A commit never writes an index StoreIndex::load would refuse: a source not named for its day, or a hash that is not
+// 32 lower-case hex digits, aborts the build.
+TEST(StoreBuilderTest, ACommitOfASourceNotNamedForItsDayOrOfAMalformedHashIsRefused)
+{
+    const ScratchDir dir{"store-guard"};
+    const std::filesystem::path store = dir.path / "store";
+    const ItchBuilder day = three_symbols();
+    const std::string text{reinterpret_cast<const char*>(day.bytes().data()), day.bytes().size()};
+    write_file(day_file(dir, kMonday), text);
+    write_file(dir.path / "monday.bin", text);
+    const auto refused = [&](const std::filesystem::path& source, const std::string& hash) {
+        StoreBuilder builder{store, source, kMonday, kFlushedAtOnce};
+        feed(builder, day.bytes());
+        std::string error;
+        EXPECT_FALSE(builder.commit(hash, error));
+        EXPECT_FALSE(std::filesystem::exists(store / "index.tsv"));
+        EXPECT_EQ(std::filesystem::file_size(store / "AAA.itch.zst"), 0u);
+        return error;
+    };
+    EXPECT_EQ(refused(dir.path / "monday.bin", kSourceHash), "the day file is not named 12302019.NASDAQ_ITCH50.bin");
+    EXPECT_EQ(refused(day_file(dir, kMonday), "0123456789ABCDEF0123456789ABCDEF"),
+              "the day's hash is not 32 lower-case hex digits");
+    EXPECT_EQ(refused(day_file(dir, kMonday), kSourceHash.substr(1)), "the day's hash is not 32 lower-case hex digits");
+    EXPECT_EQ(build(dir, kMonday, day.bytes()), "");  // and the store is as good as it was
+    EXPECT_EQ(index_of(dir).days().at(kMonday).segments.size(), 3u);
+}
+
 // Spec §2.5, dead bytes: a rebuilt day's old segments stay in their files, unreferenced; another day's build, or a
 // failed one, leaves the count as it was.
 TEST(StoreBuilderTest, ARebuiltDaysOldSegmentsAreTheUnreferencedBytes)
@@ -380,7 +473,7 @@ TEST(StoreReadTest, ADamagedOrMisdescribedSegmentIsAnErrorNamingTheSymbolAndDay)
     EXPECT_EQ(read(longer), "AAA on 2019-12-30: not its length");
     Segment shorter = aaa;
     --shorter.uncompressed;
-    EXPECT_EQ(read(shorter), "AAA on 2019-12-30: Destination buffer is too small");
+    EXPECT_EQ(read(shorter), "AAA on 2019-12-30: not its length");
     Segment other = aaa;
     other.hash = kSourceHash;
     EXPECT_EQ(read(other), "AAA on 2019-12-30: not its hash");
@@ -394,6 +487,35 @@ TEST(StoreReadTest, ADamagedOrMisdescribedSegmentIsAnErrorNamingTheSymbolAndDay)
     EXPECT_EQ(read(aaa), "AAA on 2019-12-30: Restored data doesn't match checksum");
     std::filesystem::remove(store / "AAA.itch.zst");
     EXPECT_EQ(read(aaa), "AAA on 2019-12-30: No such file or directory");
+}
+
+// The index's length sizes nothing until the zstd frames themselves state it: a length no frame has, however large, is
+// "not its length", and frames that state none, or are not frames, are errors too.
+TEST(StoreReadTest, AnIndexedLengthIsCheckedAgainstTheFramesBeforeAnythingIsSizedByIt)
+{
+    const ScratchDir dir{"store-length"};
+    ASSERT_EQ(build(dir, kMonday, three_symbols().bytes()), "");
+    const std::filesystem::path store = dir.path / "store";
+    Segment aaa = index_of(dir).days().at(kMonday).segments.at("AAA");
+    const auto read = [&](const Segment& segment) {
+        std::vector<std::byte> bytes;
+        std::string error;
+        EXPECT_FALSE(read_segment(store, "AAA", kMonday, segment, bytes, error));
+        EXPECT_TRUE(bytes.empty());
+        return error;
+    };
+    Segment huge = aaa;
+    huge.uncompressed = std::uint64_t{1} << 62;
+    EXPECT_EQ(read(huge), "AAA on 2019-12-30: not its length");
+
+    aaa.offset = 0;
+    aaa.uncompressed = std::uint64_t{1} << 62;
+    aaa.compressed = 9;
+    write_file(store / "AAA.itch.zst",
+               std::string{"\x28\xB5\x2F\xFD\x00\x00\x01\x00\x00", 9});  // an empty frame, size unstated
+    EXPECT_EQ(read(aaa), "AAA on 2019-12-30: zstd frames of no stated length");
+    write_file(store / "AAA.itch.zst", std::string(9, 'x'));
+    EXPECT_EQ(read(aaa), "AAA on 2019-12-30: damaged zstd frames");
 }
 
 // A read racing chronos-serve's startup discard of an invalid index (spec §2.5) returns the intact segment or fails
