@@ -98,7 +98,7 @@ Admission ReplaySession::control(Control control) noexcept
     const bool bad = (control.type == ControlType::Step && control.steps == 0) ||
         (control.type == ControlType::Speed && control.speed > max_speed) ||
         (control.type == ControlType::Symbol && name(control.spec.ticker).empty()) ||
-        // A Watch needs its factory of fresh mappings; never kept ones (review gate 1).
+        // A Watch needs its own factory, which keeps each segment's hash as read.
         (control.type == ControlType::Watch && (control.watch.run_id[0] == '\0' || !watch_factory_)) ||
         control.spec.days.count > max_days;
     ErrorCode error = bad ? ErrorCode::BadRequest : ErrorCode::None;

@@ -7,8 +7,10 @@ import { serve } from './serve';
 // Spec §9, configuration 3: chronos-serve at max speed with this page attached and trading. With CHRONOS_BENCH_LAB,
 // SYMBOL:strategy, configuration 4 (UI-2 spec §10): that Lab run over the same day is in flight as the page plays, and
 // then runs again on the idle server. CHRONOS_BENCH_FILE names an ITCH day (a cut slice works); the summary is printed,
-// and written to CHRONOS_BENCH_OUT if set.
+// and written to CHRONOS_BENCH_OUT if set. CHRONOS_BENCH_STORE names a store that keeps the day once built; without it,
+// each run builds the day into a temp store, which needs about a third of the day's size free.
 const file = process.env.CHRONOS_BENCH_FILE;
+const store = process.env.CHRONOS_BENCH_STORE ? ['--store', process.env.CHRONOS_BENCH_STORE] : [];
 const date = process.env.CHRONOS_BENCH_DATE ?? '2019-12-30';
 const symbol = process.env.CHRONOS_BENCH_SYMBOL ?? 'AAPL';
 const lab = process.env.CHRONOS_BENCH_LAB;
@@ -42,7 +44,7 @@ test('interactive benchmark', async ({ page }) => {
   try {
     const [y, m, d] = date.split('-');
     symlinkSync(resolve(file!), join(data, `${m}${d}${y}.NASDAQ_ITCH50.bin`));
-    server = await serve(['--data', data, '--date', date, '--allow-truncated-tail']);
+    server = await serve(['--data', data, '--date', date, '--allow-truncated-tail', ...store]);
     const seen: { playing: boolean; eps: number; dropped: number; queue: number; events: number }[] = [];
     page.on('websocket', (ws) =>
       ws.on('framereceived', ({ payload }) => {

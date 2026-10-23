@@ -47,7 +47,7 @@ function WatchBanner() {
   const runId = useStore((s) => s.runId);
   const verdict = useStore((s) => s.verdict);
   const state = useStore((s) => s.state);
-  const viewer = useStore((s) => s.hello?.role !== 'controller');
+  const disabled = useStore((s) => s.hello?.role !== 'controller' || s.status !== 'open');
   const label = useLab((l) => runLabel(l.runs, runId));
   if (!runId) return null;
   const until =
@@ -61,7 +61,7 @@ function WatchBanner() {
         {verdict ? <b className={outcomes[verdict.outcome][1]}> · {outcomes[verdict.outcome][0]}</b> : `: ${until}.`}
       </span>{' '}
       <button
-        disabled={viewer}
+        disabled={disabled}
         onClick={() => {
           const { symbol, genDays } = store.get();
           store.control({ action: 'symbol', symbol, days: genDays });

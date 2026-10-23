@@ -21,6 +21,7 @@
 #include "chronos/server/replay_session.hpp"
 #include "itch/itch_test_builder.hpp"
 #include "simulator/io/mapped_file.hpp"
+#include "simulator/itch/itch_source.hpp"
 #include "test_support.hpp"
 
 namespace simulator::server::test {
@@ -520,19 +521,61 @@ TEST(ItchInputTest, AnInvalidStoreIndexIsMovedAsideAndEveryDayIsBuiltAgain)
     EXPECT_EQ(library.usage().bytes, rebuilt->segment("ACME")->compressed);
 }
 
-// A version read again whose hash the store already holds, as after a touch, is current: nothing is built.
+// A version read again whose hash the store already holds, as after a touch, is current: nothing is written, not even
+// the 4 MiB flushes a build of ACME's 4.6 MB would make.
 TEST(ItchInputTest, AVersionWhoseHashTheStoreHoldsIsNotBuiltAgain)
 {
     const ScratchDir dir{"touched"};
     const std::filesystem::path file = dir.path / "12302019.NASDAQ_ITCH50.bin";
-    write_file(file, acme_day().bytes());
+    const std::filesystem::path acme = dir.path / "store" / "ACME.itch.zst";
+    itch_test::ItchBuilder day = acme_day();
+    for (std::uint64_t match = 1; match <= 100'000; ++match) {
+        day.trade(1, kNineThirty + 9 * kSecond, 0, 'B', 100, "ACME", 100'000, match);
+    }
+    write_file(file, day.bytes());
     DayLibrary library{dir.path, dir.path / "fingerprints.json"};
     const DayHandle first = library.scan().at(0);
+    const std::uintmax_t size = std::filesystem::file_size(acme);
+    const std::filesystem::file_time_type written = std::filesystem::last_write_time(acme) - 1h;
+    std::filesystem::last_write_time(acme, written);
     std::filesystem::last_write_time(file, std::filesystem::last_write_time(file) + 1s);
     const DayHandle touched = library.scan().at(0);
     EXPECT_NE(touched, first);  // a new version, read again
     EXPECT_EQ(*touched->segment("ACME"), *first->segment("ACME"));
+    EXPECT_EQ(std::filesystem::file_size(acme), size);
+    EXPECT_EQ(std::filesystem::last_write_time(acme), written);
     EXPECT_EQ(library.usage().unreferenced, 0u);
+}
+
+// Spec §2.4: where a day's framing breaks mid-file, at a zero length, ACME's segment ends as the day file does: the same
+// events, then InvalidLength.
+TEST(ItchInputTest, ASegmentOfADayWhoseFramingBreaksEndsWithTheDayFilesEventsAndError)
+{
+    const ScratchDir dir{"broken"};
+    const itch_test::ItchBuilder whole = acme_day(4);
+    std::vector<std::byte> broken(whole.bytes().begin(), whole.bytes().end());
+    broken.insert(broken.begin() + static_cast<std::ptrdiff_t>(acme_day(2).bytes().size() - 14),  // before its 'M'
+                  {std::byte{0}, std::byte{0}});
+    const DayHandle day = library_days(dir, {{"12302019.NASDAQ_ITCH50.bin", broken}}).at(0);
+    std::vector<std::byte> segment;
+    std::string error;
+    ASSERT_NE(day->segment("ACME"), nullptr);
+    ASSERT_TRUE(read_segment(day->store, "ACME", day->date, *day->segment("ACME"), segment, error)) << error;
+    const auto stream = [&](std::span<const std::byte> bytes) {
+        InstrumentRegistry registry{1};
+        ItchSource source{bytes,
+                          {.ticker = "ACME", .session_date = day->date, .utc_offset = us_eastern_utc_offset(day->date)},
+                          registry};
+        std::vector<std::pair<Timestamp, MarketEventType>> events;
+        MarketEvent event;
+        while (source.next(event) == SourceResult::Event) {
+            events.emplace_back(event.timestamp, event.type);
+        }
+        return std::pair{events, source.error()};
+    };
+    EXPECT_EQ(stream(segment), stream(broken));
+    EXPECT_EQ(stream(broken).first.size(), 5u);  // the trading state, two orders and two executions
+    EXPECT_EQ(stream(broken).second, SourceError::InvalidLength);
 }
 
 // Spec §2.5 and §6, recovery: a build that fails at a write, here under RLIMIT_FSIZE, leaves its day unlisted and the

@@ -309,7 +309,7 @@ private:
     }
 
 public:
-    // `watch` builds a Watch's generations, over fresh mappings with hash as read; without it, `factory` does.
+    // `watch` builds a Watch's generations, keeping each segment's hash as read; without it, a Watch is refused.
     ReplaySession(SessionConfig config, SourceFactory factory, LogQueue* log = nullptr, SourceFactory watch = {});
 
     ReplaySession(const ReplaySession&) = delete;

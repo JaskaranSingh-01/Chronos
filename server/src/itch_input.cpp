@@ -102,11 +102,16 @@ bool day_date(std::string_view name, std::chrono::year_month_day& date) noexcept
     return date.ok();
 }
 
-// The one pass over a new file version: its hash, its feed session and its ITCH 5.0 check, its frames fed to `builder`.
-// It reads the file a MiB at a time, at disk speed, where faulting a mapping in is several times slower. False, said
-// on stderr, unless it read exactly the size the version was listed with.
-bool identify(const std::filesystem::path& path, Day& day, StoreBuilder& builder)
+// A pass over a new file version: its hash, its feed session and its ITCH 5.0 check, and its frames fed to `builder`
+// if not null. It reads the file a MiB at a time, at disk speed, where faulting a mapping in is several times slower.
+// False, said on stderr, unless it read exactly the size the version was listed with.
+bool identify(const std::filesystem::path& path, Day& day, StoreBuilder* builder)
 {
+    const auto feed = [builder](std::span<const std::byte> frame) {
+        if (builder != nullptr) {
+            builder->add(frame);
+        }
+    };
     constexpr std::size_t step = std::size_t{1} << 20;
     constexpr std::size_t max_frame = 2 + 0xFFFF;  // the length prefix and the largest ITCH payload
     std::vector<std::byte> buffer(max_frame + step);  // the frame the last step cut, then a step
@@ -129,7 +134,7 @@ bool identify(const std::filesystem::path& path, Day& day, StoreBuilder& builder
         ItchMessage message;
         for (std::size_t from = 0; framed && reader.next(message) == ItchReadResult::Message;
              from = reader.position()) {
-            builder.add(std::span{buffer}.subspan(from, reader.position() - from));
+            feed(std::span{buffer}.subspan(from, reader.position() - from));
             const bool start = std::exchange(first, false);
             if (message.type != 'S' || message.payload.size() != 11) {  // a System Event: locate, tracking, ts, code
                 continue;
@@ -145,7 +150,10 @@ bool identify(const std::filesystem::path& path, Day& day, StoreBuilder& builder
                 close = at;
             }
         }
-        framed = framed && reader.error() != ItchReadError::InvalidLength;  // else a short frame: more to read
+        if (framed && reader.error() == ItchReadError::InvalidLength) {  // else a short frame: more to read
+            framed = false;
+            feed(std::span{buffer}.subspan(reader.position(), 2));  // the zero length: every segment fails at it
+        }
         carry = framed ? reader.remaining() : 0;
         std::memmove(buffer.data(), buffer.data() + reader.position(), carry);
     }
@@ -156,7 +164,7 @@ bool identify(const std::filesystem::path& path, Day& day, StoreBuilder& builder
     }
     day.cut_tail = framed && carry > 0;
     if (day.cut_tail) {
-        builder.add(std::span{buffer}.first(carry));
+        feed(std::span{buffer}.first(carry));
     }
     day.itch50 = day.itch50 && framed;
     day.hash = hex(XXH3_128bits_digest(&state));
@@ -327,13 +335,6 @@ StoreLock::~StoreLock()
     }
 }
 
-std::string iso_date(std::chrono::year_month_day date)
-{
-    char text[16];
-    std::snprintf(text, sizeof text, "%04d-%02u-%02u", int{date.year()}, unsigned{date.month()}, unsigned{date.day()});
-    return text;
-}
-
 std::string inputs_hash(std::span<const std::string> hashes)
 {
     XXH3_state_t state;
@@ -390,26 +391,32 @@ bool DayLibrary::current(const Day& day) const
     return stored != index_.days().end() && stored->second.hash == day.hash;
 }
 
-// The one pass over a new version, building it into the store unless the store already holds the hash it finds; false,
-// said on stderr, if there is not room for the build, the pass fails or the build does not commit.
+// Reads a new version, and builds it into the store unless the store already holds its hash: a version of the size the
+// store holds for its date is first read without building. False, said on stderr, if there is not room for the build,
+// a pass fails or the build does not commit.
 bool DayLibrary::build(const std::filesystem::path& path, Day& day)
 {
-    // A day's store takes about a third of its file: the check is an estimate, the build's abort the guarantee. A day
-    // the store already holds is not checked: read again, it most likely commits nothing.
+    if (const auto held = index_.days().find(day.date); held != index_.days().end() && held->second.size == day.size) {
+        std::fprintf(stderr, "checking %s, %" PRIu64 " bytes\n", day.file.c_str(), day.size);
+        if (!identify(path, day, nullptr)) {
+            return false;
+        }
+        if (current(day)) {
+            return true;
+        }
+    }
+    // A day's store takes about a third of its file: the check is an estimate, the build's abort the guarantee.
     std::error_code error;
     const std::uintmax_t free = std::filesystem::space(store_, error).available;
-    if (!index_.days().contains(day.date) && !error && free < day.size / 5 * 3) {
+    if (!error && free < day.size / 5 * 3) {
         std::fprintf(stderr, "skipping %s: the store needs %" PRIu64 " MiB free, has %" PRIu64 " MiB\n",
                      day.file.c_str(), day.size / 5 * 3 >> 20, static_cast<std::uint64_t>(free >> 20));
         return false;
     }
     std::fprintf(stderr, "reading %s into the store, %" PRIu64 " bytes\n", day.file.c_str(), day.size);
     StoreBuilder builder{store_, path, day.date};
-    if (!identify(path, day, builder)) {
+    if (!identify(path, day, &builder)) {
         return false;
-    }
-    if (current(day)) {
-        return true;  // the builder, never committed, cuts back what it wrote
     }
     std::string why;
     if (!builder.commit(day.hash, why)) {
@@ -451,6 +458,7 @@ std::vector<DayHandle> DayLibrary::scan()
             continue;
         }
         day->midnight = session_midnight_ns(day->date, us_eastern_utc_offset(day->date));
+        // ponytail: a day whose build failed is read again each scan; retry only once its version changes, if needed.
         if ((!from_cache(cache, *day) || !current(*day)) && !build(files->path(), *day)) {
             continue;
         }
@@ -470,12 +478,13 @@ std::vector<DayHandle> DayLibrary::scan()
         const std::lock_guard lock{mutex_};
         return handles(days_);
     }
-    std::map<std::chrono::year_month_day, DayHandle> retired;  // released after the lock: a last handle unmaps
+    std::map<std::chrono::year_month_day, DayHandle> retired;  // released after the lock: a last handle frees its Day
     {
         const std::lock_guard lock{mutex_};
         changed = changed || found.size() != days_.size();  // a file went
         retired = std::exchange(days_, found);
     }
+    // ponytail: written as a scan ends, so a killed start reads the days it built again; write per build if needed.
     if (changed) {
         write_cache(cache_, found);
     }

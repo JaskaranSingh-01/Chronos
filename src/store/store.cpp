@@ -33,13 +33,6 @@ std::string hex(XXH128_hash_t hash)
     return text;
 }
 
-std::string iso(std::chrono::year_month_day date)
-{
-    char text[16];
-    std::snprintf(text, sizeof text, "%04d-%02u-%02u", int{date.year()}, unsigned{date.month()}, unsigned{date.day()});
-    return text;
-}
-
 // A market event's type: an order message or a trade.
 bool market_event(std::uint8_t type) noexcept
 {
@@ -376,6 +369,7 @@ bool StoreBuilder::commit(std::string_view hash, std::string& error)
     for (auto& [symbol, buffer] : b.buffers) {
         b.flush(buffer);
     }
+    // ponytail: an fsync per file, about 8,900 a build, is cheap on APFS under one F_FULLFSYNC; Linux: one syncfs().
     for (const auto& [symbol, buffer] : b.buffers) {
         if (b.error.empty() && buffer.opened && !sync_path(buffer.file)) {
             b.failed();
@@ -436,7 +430,7 @@ bool read_segment(const std::filesystem::path& store, std::string_view symbol, s
 {
     bytes.clear();
     const auto fail = [&](const std::string& why) {
-        error = std::string{symbol} + " on " + iso(date) + ": " + why;
+        error = std::string{symbol} + " on " + iso_date(date) + ": " + why;
         bytes.clear();
         return false;
     };

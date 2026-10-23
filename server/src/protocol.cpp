@@ -493,7 +493,7 @@ std::chrono::year_month_day date_from(const json& j)
     return date;
 }
 
-// A day of /api/days; `symbols` counts its stock directory.
+// A day of /api/days; `symbols` counts its symbols with a market event.
 json day_json(const DayHandle& day)
 {
     return {{"date", iso_date(day->date)},

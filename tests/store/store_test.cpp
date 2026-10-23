@@ -61,6 +61,8 @@ std::vector<std::span<const std::byte>> frames(std::span<const std::byte> bytes)
     return all;
 }
 
+// Feeds `bytes` as chronos-serve's pass does: frame by frame, then a cut tail, or where the framing breaks, at a zero
+// length, its two bytes alone.
 void feed(StoreBuilder& builder, std::span<const std::byte> bytes)
 {
     ItchMessageReader reader{bytes};
@@ -71,7 +73,7 @@ void feed(StoreBuilder& builder, std::span<const std::byte> bytes)
         at = reader.position();
     }
     if (at < bytes.size()) {
-        builder.add(bytes.subspan(at));
+        builder.add(bytes.subspan(at, reader.error() == ItchReadError::InvalidLength ? 2 : bytes.size() - at));
     }
 }
 
@@ -622,7 +624,8 @@ Decoded decode(std::span<const std::byte> bytes, std::string_view ticker, bool a
 }
 
 // Spec §2.4 and §6, event-stream equality: for every symbol, its segment decodes to exactly the events its day file
-// does, ending the same way: a whole day, one cut in its last message, and one with frames no locate routes.
+// does, ending the same way: a whole day, one cut in its last message, one with frames no locate routes, and one whose
+// framing breaks mid-file.
 TEST(StoreEquivalenceTest, EverySymbolsSegmentDecodesToTheEventsOfItsDayFile)
 {
     const ItchBuilder busy = busy_day();
@@ -630,8 +633,11 @@ TEST(StoreEquivalenceTest, EverySymbolsSegmentDecodesToTheEventsOfItsDayFile)
     std::vector<std::byte> unroutable(whole.begin(), whole.end() - 14);  // before the end of system hours
     unroutable.insert(unroutable.end(), {std::byte{0}, std::byte{2}, std::byte{'R'}, std::byte{1}});
     unroutable.insert(unroutable.end(), whole.end() - 14, whole.end());
+    std::vector<std::byte> broken(whole.begin(), whole.end());
+    broken.insert(broken.begin() + (frames(whole)[13].data() - whole.data()),  // a zero length after CCC's first order
+                  {std::byte{0}, std::byte{0}});
     const std::vector<std::pair<std::string, std::span<const std::byte>>> days{
-        {"whole", whole}, {"cut", whole.first(whole.size() - 5)}, {"unroutable", unroutable}};
+        {"whole", whole}, {"cut", whole.first(whole.size() - 5)}, {"unroutable", unroutable}, {"broken", broken}};
     for (const auto& [name, bytes] : days) {
         const ScratchDir dir{"store-equal-" + name};
         ASSERT_EQ(build(dir, kMonday, bytes), "") << name;
@@ -647,6 +653,8 @@ TEST(StoreEquivalenceTest, EverySymbolsSegmentDecodesToTheEventsOfItsDayFile)
     EXPECT_EQ(decode(whole, "BBB", false).events.size(), 7u);  // halted by the sweep, then H T, F, C, H H, X, H T
     EXPECT_EQ(decode(whole.first(whole.size() - 5), "CCC", false).error, SourceError::TruncatedMessage);
     EXPECT_EQ(decode(unroutable, "CCC", true).error, SourceError::InvalidPayloadLength);
+    EXPECT_EQ(decode(broken, "AAA", true).events.size(), 3u);  // H, A, E
+    EXPECT_EQ(decode(broken, "CCC", true).error, SourceError::InvalidLength);
 }
 
 // Spec §6, System Events: moving the start of system hours changes every segment of the day, and each decodes to the
@@ -703,7 +711,9 @@ TEST(StoreRealDataTest, EverySymbolsSegmentReplaysToItsBookOfTheFullDay)
     ASSERT_TRUE(file.open(path)) << file.error();
 
     const ScratchDir dir{"store-real"};
-    StoreBuilder builder{dir.path, path, date};
+    const std::filesystem::path source = dir.path / day_file(date);  // commit() takes only a day file's name
+    std::filesystem::create_symlink(std::filesystem::absolute(path), source);
+    StoreBuilder builder{dir.path, source, date};
     feed(builder, file.bytes());
     std::string error;
     ASSERT_TRUE(builder.commit(kSourceHash, error)) << error;

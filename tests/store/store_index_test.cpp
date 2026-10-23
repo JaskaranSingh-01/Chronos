@@ -1,5 +1,7 @@
 #include <gtest/gtest.h>
 
+#include <unistd.h>
+
 #include <chrono>
 #include <filesystem>
 #include <string>
@@ -49,11 +51,13 @@ void write_store(const std::filesystem::path& dir, const std::string& text, std:
     write_file(dir / "A%25B.itch.zst", std::string(9 + extra, 'z'));
 }
 
-TEST(StoreIndexTest, SymbolFilesKeepLettersDigitsAndDotPlusEqualsMinusAndEscapeTheRest)
+// Lower case is escaped too: on a case-insensitive file system, AAPL and aapl would share one file.
+TEST(StoreIndexTest, SymbolFilesKeepCapitalsDigitsAndDotPlusEqualsMinusAndEscapeTheRest)
 {
     EXPECT_EQ(symbol_file("AAPL"), "AAPL.itch.zst");
     EXPECT_EQ(symbol_file("BRK.B"), "BRK.B.itch.zst");
-    EXPECT_EQ(symbol_file("a+=-9"), "a+=-9.itch.zst");
+    EXPECT_EQ(symbol_file("a+=-9"), "%61+=-9.itch.zst");
+    EXPECT_EQ(symbol_file("aapl"), "%61%61%70%6C.itch.zst");
     EXPECT_EQ(symbol_file("A%B"), "A%25B.itch.zst");
     EXPECT_EQ(symbol_file("A/B C"), "A%2FB%20C.itch.zst");
 }
@@ -176,11 +180,13 @@ TEST(StoreIndexTest, RefusesEveryInvalidIndex)
     EXPECT_FALSE(index.load(dir.path, error));
     EXPECT_EQ(error, "index.tsv: not a file");
 
-    const ScratchDir unreadable{"index-unreadable"};
-    write_store(unreadable.path, valid);
-    std::filesystem::permissions(unreadable.path / "index.tsv", std::filesystem::perms::none);
-    EXPECT_FALSE(index.load(unreadable.path, error));
-    EXPECT_EQ(error, "index.tsv: cannot be read");
+    if (::geteuid() != 0) {  // root reads any file
+        const ScratchDir unreadable{"index-unreadable"};
+        write_store(unreadable.path, valid);
+        std::filesystem::permissions(unreadable.path / "index.tsv", std::filesystem::perms::none);
+        EXPECT_FALSE(index.load(unreadable.path, error));
+        EXPECT_EQ(error, "index.tsv: cannot be read");
+    }
 }
 
 }  // namespace

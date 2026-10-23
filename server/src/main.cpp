@@ -44,7 +44,7 @@ constexpr std::string_view serve_usage =
     "  --fsync                 sync each command line of the log (sessions/<id>.jsonl) to the device\n"
     "  --allow-truncated-tail  a file cut mid-message ends there instead of failing\n"
     "\n"
-    "exit status: 0 after SIGINT or SIGTERM; 2 bad usage, a store in use or that cannot be locked, no day file in\n"
+    "exit status: 0 after SIGINT or SIGTERM; 2 bad usage, a store in use or that cannot be locked, no day ready in\n"
     "DIR or none for --date, a starting day with no symbol's market events, a log that cannot be written, or an\n"
     "address that cannot be bound\n";
 
@@ -135,12 +135,15 @@ int main(int argc, char** argv)
         std::fwrite(serve_usage.data(), 1, serve_usage.size(), stdout);
         return 0;
     }
-    const auto no_day_file = [&] {
-        std::fprintf(stderr, "error: no day file (MMDDYYYY.NASDAQ_ITCH50.bin) in %s\n", parsed.data.c_str());
+    const auto no_day = [&] {
+        std::fprintf(stderr,
+                     "error: no day in %s is ready: none is named MMDDYYYY.NASDAQ_ITCH50.bin, or each was skipped "
+                     "(above)\n",
+                     parsed.data.c_str());
         return 2;
     };
     if (!std::filesystem::is_directory(parsed.data)) {  // before the lock, which would create <data>/store
-        return no_day_file();
+        return no_day();
     }
     const std::filesystem::path store = parsed.store.empty() ? parsed.data / "store" : parsed.store;
     const StoreLock lock{store};
@@ -158,11 +161,12 @@ int main(int argc, char** argv)
     std::fprintf(stderr, "store: %.1f GiB, %.1f GiB unreferenced\n", static_cast<double>(usage.bytes) / (1 << 30),
                  static_cast<double>(usage.unreferenced) / (1 << 30));
     if (days.empty()) {
-        return no_day_file();
+        return no_day();
     }
     const DayHandle start = parsed.date ? library.find(*parsed.date) : days.back();
     if (start == nullptr) {
-        std::fprintf(stderr, "error: no day file for %s in %s\n", iso_date(*parsed.date).c_str(), parsed.data.c_str());
+        std::fprintf(stderr, "error: no day file for %s is ready in %s\n", iso_date(*parsed.date).c_str(),
+                     parsed.data.c_str());
         return 2;
     }
     if (start->symbols.empty()) {

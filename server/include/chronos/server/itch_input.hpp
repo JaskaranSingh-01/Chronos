@@ -22,16 +22,13 @@ namespace simulator::server {
 // ponytail: an edit between them at the same size goes unseen; day_hash() of the whole file sees it.
 std::uint64_t quick_check(std::span<const std::byte> bytes) noexcept;
 
-// XXH3-128 of every byte, as 32 hex digits: a day's identity.
+// XXH3-128 of every byte, as 32 hex digits: the day file's version the store's day record names.
 std::string day_hash(std::span<const std::byte> bytes);
 
 // XXH3-128 of the segment hashes in order, as 32 hex digits: the inputs hash of a run, which a Watch compares.
 std::string inputs_hash(std::span<const std::string> hashes);
 
-// YYYY-MM-DD.
-std::string iso_date(std::chrono::year_month_day date);
-
-// One day file of a DayLibrary, identified by the one pass over its bytes that builds it into the store.
+// One day file of a DayLibrary, identified by a pass over its bytes, which builds it into the store if need be.
 struct Day
 {
     std::chrono::year_month_day date{};
@@ -82,8 +79,8 @@ public:
 
 // The days of a directory: each file named exactly MMDDYYYY.NASDAQ_ITCH50.bin with a real date, whose store is current.
 // A new file version (name, size, mtime, inode, or a changed quick check) is current if the JSON cache at `cache`
-// holds its hash and the store a day of that hash; else one pass over its bytes hashes it and builds it into the
-// store (spec §2.5). Any thread; a pass runs outside the lock on the days.
+// holds its hash and the store a day of that hash; else a pass over its bytes hashes it and builds it into the store,
+// unless the store holds a day of that hash (spec §2.5). Any thread; a pass runs outside the lock on the days.
 class DayLibrary
 {
 private:

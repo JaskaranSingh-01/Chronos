@@ -89,12 +89,14 @@ ranked and executed one tick better, so the aggressor never reached our price. W
 
 ### Tests
 
-- `simulator_tests`: 384 pass and 5 skip in both RelWithDebInfo and Debug. Four of the skips are the real-data
-  tests, which need `CHRONOS_ITCH_FILE`; the fifth is the error check of the conformance suite, which does not apply
-  to `VectorSource`. `alloc_counter_test`: 3 pass. `ctest` runs 397 tests, including 5 CLI exit-code tests.
+- `simulator_tests`: 429 pass and 6 skip in both RelWithDebInfo and Debug. Five of the skips are the real-data
+  tests, which need `CHRONOS_ITCH_FILE`; the sixth is the error check of the conformance suite, which does not apply
+  to `VectorSource`. `chronos_server_tests`: 152 pass. `alloc_counter_test`: 3 pass. `ctest` runs 606 tests,
+  including 15 CLI exit-code tests.
 - 0 compiler warnings with `-Wall -Wextra -Wpedantic` under Apple clang 17 and g++ 14, Release and Debug.
-- UBSan (`-DCHRONOS_SANITIZE=undefined`, where any report aborts): 397 of 397 in RelWithDebInfo and in Debug.
-- With `CHRONOS_ITCH_FILE` set to the slice, the 4 real-data tests pass.
+- UBSan (`-DCHRONOS_SANITIZE=undefined`, where any report aborts): its last local run, of 397 tests, passed them all
+  in RelWithDebInfo and in Debug; CI runs it, with ASan and TSan, on every push.
+- With `CHRONOS_ITCH_FILE` set to the slice, the 5 real-data tests pass.
 
 ## Performance
 
@@ -353,11 +355,14 @@ session can be reproduced. The first line on stdout names the URL and that log; 
   regular hours its own System Events set, which `runs/fingerprints.json` keeps, and in the same pass into the
   **per-symbol store**: one zstd file per symbol, `<SYMBOL>.itch.zst`, holding its frames and every System Event of
   each day, with an `index.tsv` of each segment's place, size and XXH3-128 hash. It takes about a third of the size of
-  the days, in `<data>/store` unless `--store` names another, and one `chronos-serve` at a time uses it. Every replay
-  of a symbol, the terminal's, a Lab run's, Verify's and Watch's, reads only that symbol's segments, so a load or a
-  restart costs the symbol's bytes, not the day's. The symbol box suggests the symbols with a market event on every
-  day picked. `GET /api/days` lists the days whose store is built; a day file that changes is built again at the next
-  listing.
+  the days, in `<data>/store` unless `--store` names another, and one `chronos-serve` at a time uses it. A build
+  needs free space of at least 60% of its day file; a day without it, or whose build fails, is skipped with a line on
+  stderr saying why. Every replay of a symbol, the terminal's, a Lab run's, Verify's and Watch's, reads only that
+  symbol's segments, so a load or a restart costs the symbol's bytes, not the day's. The symbol box suggests the
+  symbols with a market event on every day picked. `GET /api/days` lists the days whose store is built; a day file
+  that changes is built again at the next listing. A store file damaged after its build fails its checks when read,
+  naming the symbol and day, and is not rebuilt on its own: delete `<store>/index.tsv` and restart to build every day
+  again.
 - Options: `--host`, `--port` (default 8080), `--web`, `--token`, `--fsync`, `--allow-truncated-tail` and `--store`;
   `./build/chronos-serve --help` lists them.
 - The slice needs a day's file name, so link it into a directory of its own:
@@ -391,10 +396,12 @@ the night; and connect to a server that wants a token. The binaries are `chronos
 `build/` or the directory `CHRONOS_BUILD` names.
 
 The Lab's tests run on the days `chronos-e2e-fixture DIR --lab` writes: on each, the default market maker makes $1 a
-cycle on ACME, buying by rule (a) and selling by rule (c), two cycles on 2019-12-27 and three on 2019-12-30, whose
-directory alone lists ZETA. They run one day and two, compare the two, Watch a run in the terminal at Max and see it
-reproduced, Verify, Export and Delete a run, see ZETA refused on 2019-12-27, and edit a day in place after its run to
-see Verify and Watch report the input changed.
+cycle on ACME, buying by rule (a) and selling by rule (c), two cycles on 2019-12-27 and three on 2019-12-30, which
+alone lists ZETA, with one bid, and IDLE, with no market event. They run one day and two, compare the two, Watch a run
+in the terminal at Max and see it reproduced, Verify, Export and Delete a run, see ZETA refused on 2019-12-27 and IDLE
+left out of the suggestions, and Stop watching a Watch, which Restart and Seek keep. They also edit Monday in place
+after an ACME run: an edit of ACME's directory entry changes its segment, so Verify and Watch are refused, while an
+edit of ZETA's leaves ACME's segment as it was, so both reproduce the run.
 
 **Interactive benchmark** (`chronos-serve` at max speed, with the terminal attached and trading):
 
@@ -404,22 +411,26 @@ CHRONOS_BENCH_FILE=../data/itch/12302019.NASDAQ_ITCH50.bin CHRONOS_BENCH_SYMBOL=
 
 `CHRONOS_BENCH_FILE` names the ITCH file; a cut slice works. `CHRONOS_BENCH_SYMBOL` (default `AAPL`) is the stock to
 replay. `CHRONOS_BENCH_DATE` (default `2019-12-30`) is the file's day, which `chronos-serve` needs for its name.
+`CHRONOS_BENCH_STORE` names the per-symbol store to serve from, such as `../data/itch/store` when no other
+`chronos-serve` is using it: a day it already holds is read once to check its hash, and nothing is written. Without
+it, each run first builds the day into a temp store, about a minute and a third of the day's size on disk.
 `CHRONOS_BENCH_OUT` names a file to write the JSON summary to; it is always printed.
 
-One run on 2026-10-17, on the development machine (Apple M4, `RelWithDebInfo`): AAPL's full day at Max, with the
-terminal attached and sending 39 one-share market orders, replayed 1,519,358 AAPL events in 16.3 s, about 93,000 a
-second; the source still reads all 268,744,780 messages of the day to find them. The page received 18 snapshots a
-second and the server dropped none (`dropped_snapshots`), the command queue was at most 1 deep, and the page drew 60
-frames a second, its slowest frame 17 ms. The snapshot metrics carry no per-event latency, so there is no p50 or p99
-per event yet.
+The figures below were recorded before the per-symbol store, when every replay read the whole day file. One run on
+2026-10-17, on the development machine (Apple M4, `RelWithDebInfo`): AAPL's full day at Max, with the terminal
+attached and sending 39 one-share market orders, replayed 1,519,358 AAPL events in 16.3 s, about 93,000 a second; the
+source then read all 268,744,780 messages of the day to find them, where it now reads AAPL's segment alone. The page
+received 18 snapshots a second and the server dropped none (`dropped_snapshots`), the command queue was at most 1
+deep, and the page drew 60 frames a second, its slowest frame 17 ms. The snapshot metrics carry no per-event latency,
+so there is no p50 or p99 per event yet.
 
 **Configuration 4** (a Lab run in flight): `CHRONOS_BENCH_LAB=SPY:market_maker` also queues that Lab run, over the same
 day with a Full-day window, as the replay starts, and runs it again on the idle server once the replay has ended; the
 summary adds both wall times. Three back-to-back pairs on 2026-10-20, as above (load average 3 to 6): AAPL replayed at
 73,773 to 77,427 events a second without a Lab run and 74,519 to 76,875 with the SPY market maker's day in flight, and
 the run took 19.6 to 20.3 s while the terminal played, 21.4 to 22.6 s on the idle server. Neither slowed the other
-beyond the runs' own spread. Both read the same file, so they share the page cache; a run over other days would
-compete for the disk.
+beyond the runs' own spread. Both then read the same day file and shared its page cache; each now reads only its own
+symbol's segments.
 
 ### Strategy Lab
 

@@ -34,12 +34,14 @@ struct StoreDay
     bool operator==(const StoreDay&) const = default;
 };
 
-// The symbol's file name: the symbol with each byte outside [A-Za-z0-9.+=-] written %XX, then ".itch.zst".
+// The symbol's file name: the symbol with each byte outside [A-Z0-9.+=-] written %XX, then ".itch.zst".
 std::string symbol_file(std::string_view symbol);
 // The day file's name for `date`, e.g. 12302019.NASDAQ_ITCH50.bin.
 std::string day_file(std::chrono::year_month_day date);
 // Whether `text` is a hash as the index spells it: 32 lower-case hex digits.
 bool is_hash(std::string_view text) noexcept;
+// YYYY-MM-DD.
+std::string iso_date(std::chrono::year_month_day date);
 
 // The store's index.tsv (spec §2.1-§2.2): a `day` line per day, then a `segment` line per segment, tab-separated.
 class StoreIndex

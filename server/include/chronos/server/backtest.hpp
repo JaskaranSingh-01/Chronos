@@ -88,7 +88,7 @@ struct RunResult
     FillAttribution anomalies_by{};
     std::vector<FillRow> fills{};  // the first max_fill_rows
     bool truncated{false};
-    std::vector<std::string> hashes{};  // with hash as read: each day's re-hash
+    std::vector<std::string> hashes{};  // with hash as read: each day's segment hash as read, "" if not intact
     std::int64_t wall_ms{0};
     std::int64_t cpu_ms{0};
 

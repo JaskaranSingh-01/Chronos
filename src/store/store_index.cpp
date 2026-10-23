@@ -21,8 +21,7 @@ namespace {
 
 bool plain(char c) noexcept
 {
-    return (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '.' || c == '+' ||
-        c == '=' || c == '-';
+    return (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '.' || c == '+' || c == '=' || c == '-';
 }
 
 std::string encode(std::string_view symbol)
@@ -59,13 +58,6 @@ bool number(std::string_view text, std::uint64_t& value) noexcept
     const char* end = text.data() + text.size();
     const auto [ptr, ec] = std::from_chars(text.data(), end, value);
     return !text.empty() && ec == std::errc{} && ptr == end && (text.size() == 1 || text[0] != '0');  // one spelling
-}
-
-std::string iso(std::chrono::year_month_day date)
-{
-    char text[16];
-    std::snprintf(text, sizeof text, "%04d-%02u-%02u", int{date.year()}, unsigned{date.month()}, unsigned{date.day()});
-    return text;
 }
 
 std::vector<std::string_view> fields(std::string_view line)
@@ -116,6 +108,13 @@ bool is_hash(std::string_view text) noexcept
 {
     return text.size() == 32 &&
         std::all_of(text.begin(), text.end(), [](char c) { return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'); });
+}
+
+std::string iso_date(std::chrono::year_month_day date)
+{
+    char text[16];
+    std::snprintf(text, sizeof text, "%04d-%02u-%02u", int{date.year()}, unsigned{date.month()}, unsigned{date.day()});
+    return text;
 }
 
 bool StoreIndex::load(const std::filesystem::path& dir, std::string& error)
@@ -219,11 +218,11 @@ std::string StoreIndex::text() const
 {
     std::string text;
     for (const auto& [date, day] : days_) {
-        text += "day\t" + iso(date) + '\t' + day.file + '\t' + std::to_string(day.size) + '\t' + day.hash + '\n';
+        text += "day\t" + iso_date(date) + '\t' + day.file + '\t' + std::to_string(day.size) + '\t' + day.hash + '\n';
     }
     for (const auto& [date, day] : days_) {
         for (const auto& [symbol, s] : day.segments) {
-            text += "segment\t" + iso(date) + '\t' + encode(symbol) + '\t' + std::to_string(s.offset) + '\t' +
+            text += "segment\t" + iso_date(date) + '\t' + encode(symbol) + '\t' + std::to_string(s.offset) + '\t' +
                 std::to_string(s.compressed) + '\t' + std::to_string(s.uncompressed) + '\t' +
                 std::to_string(s.messages) + '\t' + std::to_string(s.events) + '\t' + s.hash + '\n';
         }
