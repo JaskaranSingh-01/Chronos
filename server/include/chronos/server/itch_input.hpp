@@ -90,8 +90,8 @@ private:
     std::filesystem::path dir_;
     std::filesystem::path cache_;
     std::filesystem::path store_;
-    std::mutex scan_mutex_;  // one scan, and so one build, at a time: no file is read twice, and the cache and the
-    // store have one writer
+    // One scan, and so one build, at a time: no file is read twice, and the cache and the store have one writer.
+    std::mutex scan_mutex_;
     StoreIndex index_;  // the store's; under scan_mutex_
     mutable std::mutex mutex_;
     std::map<std::chrono::year_month_day, DayHandle> days_;

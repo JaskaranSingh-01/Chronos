@@ -113,9 +113,8 @@ bool read_log(const std::filesystem::path& path, std::uint64_t generation, Logge
               std::string& error);
 
 // Reads each of `days`' segments again, refusing one that does not read back with the logged hash, then replays the
-// applied commands at their
-// boundaries in the fresh `generation` (built from logged.spec over those days), and on to the trailer's boundary, or
-// to the end without one; false on a mismatch, including the trailer's digests.
+// applied commands at their boundaries in the fresh `generation` (built from logged.spec over those days), and on to
+// the trailer's boundary, or to the end without one; false on a mismatch, including the trailer's digests.
 bool reproduce(Generation& generation, const LoggedGeneration& logged, std::span<const DayHandle> days = {}) noexcept;
 
 }  // namespace simulator::server

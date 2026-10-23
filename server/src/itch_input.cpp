@@ -110,6 +110,7 @@ bool identify(const std::filesystem::path& path, Day& day, StoreBuilder& builder
     constexpr std::size_t step = std::size_t{1} << 20;
     constexpr std::size_t max_frame = 2 + 0xFFFF;  // the length prefix and the largest ITCH payload
     std::vector<std::byte> buffer(max_frame + step);  // the frame the last step cut, then a step
+    day.itch50 = false;  // not the cache's
     std::size_t carry = 0;
     std::uint64_t hashed = 0;
     XXH3_state_t state;
@@ -393,12 +394,13 @@ bool DayLibrary::current(const Day& day) const
 // said on stderr, if there is not room for the build, the pass fails or the build does not commit.
 bool DayLibrary::build(const std::filesystem::path& path, Day& day)
 {
-    // A day's store takes about 45% of its file: the check is an estimate, the build's abort the guarantee.
+    // A day's store takes about a third of its file: the check is an estimate, the build's abort the guarantee. A day
+    // the store already holds is not checked: read again, it most likely commits nothing.
     std::error_code error;
     const std::uintmax_t free = std::filesystem::space(store_, error).available;
-    if (!error && free < day.size / 5 * 3) {
-        std::fprintf(stderr, "skipping %s: the store needs %" PRIu64 " MiB free, has %" PRIu64 "\n", day.file.c_str(),
-                     day.size / 5 * 3 >> 20, static_cast<std::uint64_t>(free >> 20));
+    if (!index_.days().contains(day.date) && !error && free < day.size / 5 * 3) {
+        std::fprintf(stderr, "skipping %s: the store needs %" PRIu64 " MiB free, has %" PRIu64 " MiB\n",
+                     day.file.c_str(), day.size / 5 * 3 >> 20, static_cast<std::uint64_t>(free >> 20));
         return false;
     }
     std::fprintf(stderr, "reading %s into the store, %" PRIu64 " bytes\n", day.file.c_str(), day.size);

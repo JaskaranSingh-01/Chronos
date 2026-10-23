@@ -352,9 +352,9 @@ session can be reproduced. The first line on stdout names the URL and that log; 
   the latest by default. A new file is read once before serving, about a minute a day, for its XXH3-128 hash and the
   regular hours its own System Events set, which `runs/fingerprints.json` keeps, and in the same pass into the
   **per-symbol store**: one zstd file per symbol, `<SYMBOL>.itch.zst`, holding its frames and every System Event of
-  each day, with an `index.tsv` of each segment's place, size and XXH3-128 hash. It takes about half the size of the
-  days, in `<data>/store` unless `--store` names another, and one `chronos-serve` at a time uses it. Every replay of a
-  symbol, the terminal's, a Lab run's, Verify's and Watch's, reads only that symbol's segments, so a load or a
+  each day, with an `index.tsv` of each segment's place, size and XXH3-128 hash. It takes about a third of the size of
+  the days, in `<data>/store` unless `--store` names another, and one `chronos-serve` at a time uses it. Every replay
+  of a symbol, the terminal's, a Lab run's, Verify's and Watch's, reads only that symbol's segments, so a load or a
   restart costs the symbol's bytes, not the day's. The symbol box suggests the symbols with a market event on every
   day picked. `GET /api/days` lists the days whose store is built; a day file that changes is built again at the next
   listing.

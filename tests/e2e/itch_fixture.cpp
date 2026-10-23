@@ -47,7 +47,7 @@ ItchBuilder lab_day(std::uint64_t cycles, bool zeta)
     if (zeta) {
         itch.stock_directory(2, 3 * hour, "ZETA")
             .stock_directory(3, 3 * hour, "IDLE")
-            .add_order(2, 3 * hour, 1, 'B', 100, "ZETA", 50'000);
+            .add_order(2, 3 * hour, 5, 'B', 100, "ZETA", 50'000);  // a reference no ACME order has
     }
     constexpr std::uint64_t ms = 1'000'000;
     itch.system_event(0, open, 'Q')

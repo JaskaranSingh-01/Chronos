@@ -1,6 +1,7 @@
 #!/bin/sh
-# chronos-serve builds the fixture days into its store at startup; a second chronos-serve on that store exits 2; then
-# simulator replays a symbol from the store to the digest it reaches from the day file.
+# chronos-serve builds the Lab fixture days into its store at startup; a second chronos-serve on that store exits 2;
+# then simulator replays and backtests ACME from the store, a cut of Monday's file (ACME, ZETA and IDLE), with the
+# results it reaches from the day file.
 #   sh tests/e2e/store_serve_test.sh CHRONOS_SERVE SIMULATOR CHRONOS_E2E_FIXTURE
 serve=$1
 simulator=$2
@@ -8,7 +9,7 @@ fixture=$3
 dir=$(mktemp -d)
 first=
 trap 'if [ -n "$first" ]; then kill "$first" 2>/dev/null; fi; rm -rf "$dir"' EXIT
-"$fixture" "$dir/data" && cd "$dir" || exit 1
+"$fixture" "$dir/data" --lab && cd "$dir" || exit 1
 "$serve" --data data --port 0 > first.log 2>&1 &
 first=$!
 waited=0
@@ -28,12 +29,16 @@ if [ $code -ne 2 ] || ! echo "$second" | grep -q 'error: the store at data/store
 fi
 kill "$first" && wait "$first"
 first=
-digest() {
-    "$simulator" replay "$@" --symbol ACME --date 2019-12-30 | grep '^Digest'
+# A run's results, without its input, its message counts and its timings, which differ with the input.
+results() {
+    "$simulator" "$@" --symbol ACME --date 2019-12-30 2>/dev/null |
+        grep -vE '^  (file|store) |^  messages |^(Elapsed|Memory) '
 }
-from_file=$(digest data/12302019.NASDAQ_ITCH50.bin)
-from_store=$(digest --store data/store)
-if [ -z "$from_file" ] || [ "$from_file" != "$from_store" ]; then
-    echo "from the day file: $from_file; from the store: $from_store"
-    exit 1
-fi
+for command in replay 'backtest --strategy mm'; do
+    from_file=$(results $command data/12302019.NASDAQ_ITCH50.bin)
+    from_store=$(results $command --store data/store)
+    if [ -z "$from_file" ] || [ "$from_file" != "$from_store" ]; then
+        printf '%s from the day file:\n%s\n%s from the store:\n%s\n' "$command" "$from_file" "$command" "$from_store"
+        exit 1
+    fi
+done

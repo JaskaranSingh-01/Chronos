@@ -483,16 +483,6 @@ TEST(ItchInputTest, TheChainFactoryReplaysOneTickerPerStreamAndASessionSwitchesB
     EXPECT_EQ(name(latest(session).spec.ticker), "MSFT");
 }
 
-// Flips a bit of the byte at `at` of `file`, in place.
-void flip(const std::filesystem::path& file, std::uint64_t at)
-{
-    std::fstream edit{file, std::ios::in | std::ios::out | std::ios::binary};
-    edit.seekg(static_cast<std::streamoff>(at));
-    const char was = static_cast<char>(edit.get());
-    edit.seekp(static_cast<std::streamoff>(at));
-    edit.put(static_cast<char>(was ^ 0x01));
-}
-
 // Spec §3: a segment that does not read back intact stops the chain with a store error, said on stderr, never with
 // bytes; with hash as read, its hash as read is "".
 TEST(ItchInputTest, ASegmentThatDoesNotReadBackStopsTheChainWithAStoreError)

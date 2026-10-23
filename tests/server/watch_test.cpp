@@ -274,11 +274,7 @@ TEST(WatchTest, AWatchOfADamagedSegmentIsInputChanged)
     Terminal t{"watch-damaged"};
     const std::string id = t.run(SessionStrategyKind::MarketMaker, true, TradingWindow::Regular);
     const Segment friday = *t.library.find(2019y / 12 / 27)->segment("ACME");
-    std::fstream damage{t.dir.path / "data" / "store" / "ACME.itch.zst",
-                        std::ios::in | std::ios::out | std::ios::binary};
-    damage.seekp(static_cast<std::streamoff>(friday.offset + friday.compressed - 1));
-    damage.put('x');  // in its zstd checksum
-    damage.close();
+    flip(t.dir.path / "data" / "store" / "ACME.itch.zst", friday.offset + friday.compressed - 1);  // its checksum
 
     ASSERT_EQ(t.watch(id), "");
     t.play_to_end();

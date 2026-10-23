@@ -279,6 +279,16 @@ inline void write_file(const std::filesystem::path& path, std::span<const std::b
     out.write(reinterpret_cast<const char*>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
 }
 
+// Flips a bit of the byte at `at` of `file`, in place: the byte always changes.
+inline void flip(const std::filesystem::path& file, std::uint64_t at)
+{
+    std::fstream edit{file, std::ios::in | std::ios::out | std::ios::binary};
+    edit.seekg(static_cast<std::streamoff>(at));
+    const char was = static_cast<char>(edit.get());
+    edit.seekp(static_cast<std::streamoff>(at));
+    edit.put(static_cast<char>(was ^ 0x01));
+}
+
 inline constexpr std::uint64_t kNineThirty = 34'200 * kSecond;  // ns after midnight
 
 // An ITCH 5.0 day of one stock, ACME: the start of messages, its directory entry and trading state, the start of

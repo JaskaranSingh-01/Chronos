@@ -33,7 +33,7 @@ constexpr std::string_view serve_usage =
     "replay of a symbol reads, and its hash kept in runs/fingerprints.json. Strategy Lab runs are kept in\n"
     "runs/<id>.json, in the working directory.\n"
     "  --date YYYY-MM-DD       the starting day (default the latest)\n"
-    "  --store DIR             the per-symbol store (default DIR/store), about half the size of its days;\n"
+    "  --store DIR             the per-symbol store (default DIR/store), about a third the size of its days;\n"
     "                          one chronos-serve at a time uses it\n"
     "  --host IP               the address to bind, an IP address (default 127.0.0.1); any other requires a\n"
     "                          token, and one is made and printed once if --token is not given; it guards\n"
@@ -135,10 +135,19 @@ int main(int argc, char** argv)
         std::fwrite(serve_usage.data(), 1, serve_usage.size(), stdout);
         return 0;
     }
+    const auto no_day_file = [&] {
+        std::fprintf(stderr, "error: no day file (MMDDYYYY.NASDAQ_ITCH50.bin) in %s\n", parsed.data.c_str());
+        return 2;
+    };
+    if (!std::filesystem::is_directory(parsed.data)) {  // before the lock, which would create <data>/store
+        return no_day_file();
+    }
     const std::filesystem::path store = parsed.store.empty() ? parsed.data / "store" : parsed.store;
     const StoreLock lock{store};
     if (!lock.error().empty()) {
-        std::fprintf(stderr, "error: the store at %s is %s\n", store.c_str(), lock.error().c_str());
+        const bool busy = lock.error() == "in use by another chronos-serve";
+        std::fprintf(stderr, "error: the store at %s %s\n", store.c_str(),
+                     ((busy ? "is " : "cannot be locked: ") + lock.error()).c_str());
         return 2;
     }
     DayLibrary library{parsed.data, std::filesystem::path{"runs"} / "fingerprints.json", store};
@@ -149,8 +158,7 @@ int main(int argc, char** argv)
     std::fprintf(stderr, "store: %.1f GiB, %.1f GiB unreferenced\n", static_cast<double>(usage.bytes) / (1 << 30),
                  static_cast<double>(usage.unreferenced) / (1 << 30));
     if (days.empty()) {
-        std::fprintf(stderr, "error: no day file (MMDDYYYY.NASDAQ_ITCH50.bin) in %s\n", parsed.data.c_str());
-        return 2;
+        return no_day_file();
     }
     const DayHandle start = parsed.date ? library.find(*parsed.date) : days.back();
     if (start == nullptr) {

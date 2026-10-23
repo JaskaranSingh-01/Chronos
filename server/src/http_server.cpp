@@ -103,8 +103,8 @@ void HttpServer::Impl::routes()
 {
     static std::once_flag quiet;  // Crow's log level is one per process: set before any server's threads read it
     std::call_once(quiet, [] { crow::logger::setLogLevel(crow::LogLevel::Warning); });
-    // ponytail: a rescan that finds a new file builds it into the store here, about a minute a day on one of 4 Crow
-    // threads; build in the background if that stalls the UI.
+    // ponytail: a rescan building a new file holds its Crow thread about a minute a day, and each concurrent
+    // /api/days waits on the scan mutex holding its own: four tie up all four; build in the background if that stalls.
     CROW_ROUTE(app, "/api/days")([this](const crow::request& request) {
         return api(request, [this] {
             const std::vector<DayHandle> days = hub.library != nullptr ? hub.library->scan() : std::vector<DayHandle>{};
@@ -250,7 +250,7 @@ crow::response HttpServer::Impl::change(const crow::request& request, const std:
     });
 }
 
-// POST /api/backtests: a RunSpec over days the library lists, each ITCH 5.0 with a market event of the symbol; 202 {id}.
+// POST /api/backtests: a RunSpec over listed days, each ITCH 5.0 with a market event of the symbol; 202 {id}.
 crow::response HttpServer::Impl::submit(const crow::request& request)
 {
     RunSpec spec;

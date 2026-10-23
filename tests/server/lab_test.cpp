@@ -289,8 +289,8 @@ json verified(const Backtester& lab, const std::string& id, std::size_t verifica
 }
 
 // A verification re-runs a completed run with hash as read: on the same code and segments it reproduces the digests,
-// and reproduced turns true. The provenance records each day's segment. While one is queued, a repeat keeps it; each completed one is recorded and saved. A run that
-// is queued, running, cancelled or unknown cannot be verified.
+// and reproduced turns true. The provenance records each day's segment. While one is queued, a repeat keeps it; each
+// completed one is recorded and saved. A run that is queued, running, cancelled or unknown cannot be verified.
 TEST(LabTest, AVerificationOnTheSameCodeAndDaysReproducesTheRun)
 {
     Days days{"lab-verify"};
@@ -334,16 +334,6 @@ TEST(LabTest, AVerificationOnTheSameCodeAndDaysReproducesTheRun)
     lenient.allow_truncated_tail = true;
     Backtester other{lenient, days.runs};  // a server started with the other --allow-truncated-tail
     EXPECT_EQ(other.verify(id, days.library), Refusal::OtherSettings);
-}
-
-// Flips a bit of the byte at `at` of `file`, in place.
-void flip(const std::filesystem::path& file, std::uint64_t at)
-{
-    std::fstream edit{file, std::ios::in | std::ios::out | std::ios::binary};
-    edit.seekg(static_cast<std::streamoff>(at));
-    const char was = static_cast<char>(edit.get());
-    edit.seekp(static_cast<std::streamoff>(at));
-    edit.put(static_cast<char>(was ^ 0x01));
 }
 
 // Spec §4: a verification reads each segment afresh, so a store file damaged since the run is a changed input, naming
