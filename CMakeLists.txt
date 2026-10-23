@@ -78,14 +78,43 @@ target_compile_options(simulator_lib PRIVATE ${CHRONOS_WARNINGS})
 # The per-symbol store (include/simulator/store): each symbol's days as zstd frames, and its index
 # -------------------------
 
+include(FetchContent)
+
+# zstd (BSD-3), pinned: built static from its own CMake files, without its programs, tests, legacy formats, threads or
+# dictionary builder.
+FetchContent_Declare(
+    zstd
+    URL https://github.com/facebook/zstd/releases/download/v1.5.7/zstd-1.5.7.tar.gz
+    URL_HASH SHA256=eb33e51f49a15e023950cd7825ca74a4a2b43db8354825ac24fc1b7ee09e6fa3
+    SOURCE_SUBDIR build/cmake
+)
+set(ZSTD_BUILD_PROGRAMS OFF CACHE BOOL "" FORCE)
+set(ZSTD_BUILD_SHARED OFF CACHE BOOL "" FORCE)
+set(ZSTD_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+set(ZSTD_LEGACY_SUPPORT OFF CACHE BOOL "" FORCE)
+set(ZSTD_MULTITHREAD_SUPPORT OFF CACHE BOOL "" FORCE)
+set(ZSTD_BUILD_DICTBUILDER OFF CACHE BOOL "" FORCE)
+
+# xxHash (BSD-2), header-only and pinned, downloaded only: the XXH3-128 that identifies a day and each segment.
+FetchContent_Declare(
+    xxhash
+    URL https://github.com/Cyan4973/xxHash/archive/refs/tags/v0.8.3.tar.gz
+    URL_HASH SHA256=aae608dfe8213dfd05d909a57718ef82f30722c392344583d3f39050c7f29a80
+    SOURCE_SUBDIR none
+)
+
+FetchContent_MakeAvailable(zstd xxhash)
+
 add_library(simulator_store
 
+    src/store/store.cpp
     src/store/store_index.cpp
 )
 
 target_compile_options(simulator_store PRIVATE ${CHRONOS_WARNINGS})
 
-target_link_libraries(simulator_store PUBLIC simulator_lib)
+target_link_libraries(simulator_store PUBLIC simulator_lib PRIVATE libzstd_static)
+target_include_directories(simulator_store SYSTEM PRIVATE ${zstd_SOURCE_DIR}/lib ${xxhash_SOURCE_DIR})
 
 
 # -------------------------
@@ -135,8 +164,6 @@ target_link_libraries(simulator
 
 find_package(Threads REQUIRED)
 
-include(FetchContent)
-
 FetchContent_Declare(
     json
     URL https://github.com/nlohmann/json/releases/download/v3.11.3/json.tar.xz
@@ -164,15 +191,7 @@ FetchContent_Declare(
     PATCH_COMMAND patch -p1 -i ${PROJECT_SOURCE_DIR}/cmake/crow-1.3.4.patch
 )
 
-# xxHash (BSD-2), header-only and pinned: the full-file XXH3-128 that identifies a day.
-FetchContent_Declare(
-    xxhash
-    URL https://github.com/Cyan4973/xxHash/archive/refs/tags/v0.8.3.tar.gz
-    URL_HASH SHA256=aae608dfe8213dfd05d909a57718ef82f30722c392344583d3f39050c7f29a80
-    SOURCE_SUBDIR none
-)
-
-FetchContent_MakeAvailable(asio crow xxhash)
+FetchContent_MakeAvailable(asio crow)
 
 add_library(crow_headers INTERFACE)
 target_include_directories(crow_headers SYSTEM INTERFACE ${crow_SOURCE_DIR}/include ${asio_SOURCE_DIR}/asio/include)
@@ -277,6 +296,7 @@ add_executable(simulator_tests
     tests/strategies/market_maker_test.cpp
     tests/metrics/latency_histogram_test.cpp
     tests/store/store_index_test.cpp
+    tests/store/store_test.cpp
 )
 
 target_compile_definitions(simulator_tests
@@ -295,6 +315,7 @@ target_link_libraries(simulator_tests
 target_include_directories(simulator_tests
     PRIVATE
         ${PROJECT_SOURCE_DIR}/include
+        ${PROJECT_SOURCE_DIR}/tests
 )
 
 include(GoogleTest)
