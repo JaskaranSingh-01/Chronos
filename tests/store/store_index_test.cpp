@@ -125,12 +125,17 @@ TEST(StoreIndexTest, RefusesEveryInvalidIndex)
         {replaced("\t1000\t", "\t+1000\t"), "line 1: bad number"},
         {replaced("\t40\t90\t", "\t40\t9x\t"), "line 3: bad number"},
         {replaced("\tAAPL\t40\t30\t", "\tAAPL\t40\t18446744073709551615\t"), "line 5: bad number"},  // overflows
+        {replaced("\t1000\t", "\t18446744073709551616\t"), "line 1: bad number"},  // over 2^64-1
+        {replaced("\t1000\t", "\t01000\t"), "line 1: bad number"},  // a second spelling
+        {replaced("\t40\t90\t", "\t40\t\t"), "line 3: bad number"},
+        {replaced("\t7\t5\t" + kHash, "\t7\t5\t" + kHash.substr(1)), "line 3: bad hash"},
         {replaced("\t1000\t" + kHash, "\t1000\t0123456789abcdef0123456789abcde"), "line 1: bad hash"},
         {replaced("\t1000\t" + kHash, "\t1000\t0123456789ABCDEF0123456789abcdef"), "line 1: bad hash"},
         {replaced("\tA%25B\t", "\tA%2fB\t"), "line 4: bad symbol"},
         {replaced("\tA%25B\t", "\tA%42\t"), "line 4: bad symbol"},
         {replaced("\tA%25B\t", "\tA%B\t"), "line 4: bad symbol"},
         {replaced("\tA%25B\t", "\tABCDEFGHI\t"), "line 4: bad symbol"},
+        {replaced("\tA%25B\t", "\tA%20\t"), "line 4: bad symbol"},  // a trailing space is ITCH padding
         {replaced("day\t2019-12-30\t12302019", "day\t2019-12-27\t12272019"), "line 2: day repeated"},
         {valid + aapl27, "line 7: segment repeated"},
         {replaced("2019-12-27\tAAPL", "2019-12-31\tAAPL"), "line 3: segment without its day"},
@@ -144,7 +149,17 @@ TEST(StoreIndexTest, RefusesEveryInvalidIndex)
         std::string error;
         EXPECT_FALSE(index.load(dir.path, error)) << why;
         EXPECT_EQ(error, why);
+        EXPECT_TRUE(index.days().empty()) << why;  // never half-loaded
     }
+
+    const ScratchDir moved{"index-moved"};  // a rebuilt day's segment lies before an older day's in the file
+    std::string text = replaced("2019-12-27\tAAPL\t0\t40\t", "2019-12-27\tAAPL\t30\t40\t");
+    const std::string later = "2019-12-30\tAAPL\t40\t30\t";
+    text.replace(text.find(later), later.size(), "2019-12-30\tAAPL\t0\t30\t");
+    write_store(moved.path, text);
+    StoreIndex reordered;
+    std::string reason;
+    EXPECT_TRUE(reordered.load(moved.path, reason)) << reason;
 
     const ScratchDir dir{"index-files"};
     write_store(dir.path, valid, 10);
@@ -160,6 +175,12 @@ TEST(StoreIndexTest, RefusesEveryInvalidIndex)
     std::filesystem::create_directory(dir.path / "index.tsv");
     EXPECT_FALSE(index.load(dir.path, error));
     EXPECT_EQ(error, "index.tsv: not a file");
+
+    const ScratchDir unreadable{"index-unreadable"};
+    write_store(unreadable.path, valid);
+    std::filesystem::permissions(unreadable.path / "index.tsv", std::filesystem::perms::none);
+    EXPECT_FALSE(index.load(unreadable.path, error));
+    EXPECT_EQ(error, "index.tsv: cannot be read");
 }
 
 }  // namespace

@@ -10,6 +10,7 @@
 #include <fstream>
 #include <iterator>
 #include <limits>
+#include <system_error>
 #include <utility>
 #include <vector>
 
@@ -50,13 +51,14 @@ bool decode(std::string_view text, std::string& symbol)
         }
         symbol += static_cast<char>(byte);
     }
-    return !symbol.empty() && symbol.size() <= 8 && encode(symbol) == text;
+    return !symbol.empty() && symbol.size() <= 8 && symbol.back() != ' ' && encode(symbol) == text;
 }
 
 bool number(std::string_view text, std::uint64_t& value) noexcept
 {
     const char* end = text.data() + text.size();
-    return !text.empty() && std::from_chars(text.data(), end, value).ptr == end && text[0] != '+';
+    const auto [ptr, ec] = std::from_chars(text.data(), end, value);
+    return !text.empty() && ec == std::errc{} && ptr == end && (text.size() == 1 || text[0] != '0');  // one spelling
 }
 
 bool hash(std::string_view text) noexcept
@@ -120,8 +122,8 @@ std::string symbol_file(std::string_view symbol)
 bool StoreIndex::load(const std::filesystem::path& dir, std::string& error)
 {
     days_.clear();
-    const auto fail = [&](std::string why) {
-        error = std::move(why);
+    const auto fail = [&](std::string message) {
+        error = std::move(message);
         return false;
     };
     std::uint64_t size = 0;
@@ -132,6 +134,9 @@ bool StoreIndex::load(const std::filesystem::path& dir, std::string& error)
     }
     std::ifstream in{dir / "index.tsv", std::ios::binary};
     const std::string text{std::istreambuf_iterator<char>{in}, {}};
+    if (!in.is_open() || text.size() != size) {
+        return fail("index.tsv: cannot be read");
+    }
     std::map<std::chrono::year_month_day, StoreDay> days;
     std::size_t line = 0;
     for (std::size_t at = 0; at < text.size();) {
