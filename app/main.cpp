@@ -6,6 +6,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <ctime>
+#include <filesystem>
 #include <numeric>
 #include <span>
 #include <string>
@@ -30,6 +31,7 @@
 #include "simulator/market/market_books.hpp"
 #include "simulator/market/market_replay.hpp"
 #include "simulator/metrics/latency_histogram.hpp"
+#include "simulator/store/store.hpp"
 #include "simulator/strategies/imbalance_taker.hpp"
 #include "simulator/strategies/market_maker.hpp"
 
@@ -106,14 +108,54 @@ void print_book(const MarketBook& book, std::size_t depth, unsigned scale)
                 book.is_locked() ? "yes" : "no", static_cast<int>(state.size()), state.data());
 }
 
+// What both commands replay: the day file, mapped, or with --store the symbol's segment of the day, read into
+// `segment`. False, said on stderr, if it cannot be read.
+bool open_input(const ReplayArgs& args, MappedFile& file, std::vector<std::byte>& segment,
+                std::span<const std::byte>& input)
+{
+    if (args.store.empty()) {
+        if (!file.open(std::string{args.file}.c_str())) {
+            std::fprintf(stderr, "error: %s\n", file.error());
+            return false;
+        }
+        input = file.bytes();
+        return true;
+    }
+    const std::filesystem::path store{args.store};
+    StoreIndex index;
+    std::string error;
+    if (!index.load(store, error)) {
+        std::fprintf(stderr, "error: the store index at %s is invalid; chronos-serve rebuilds it\n", store.c_str());
+        return false;
+    }
+    const auto day = index.days().find(args.date);
+    if (day == index.days().end() || !day->second.segments.contains(args.symbol)) {
+        std::fprintf(stderr, "error: no %.*s on %04d-%02u-%02u in %s\n", static_cast<int>(args.symbol.size()),
+                     args.symbol.data(), static_cast<int>(args.date.year()), static_cast<unsigned>(args.date.month()),
+                     static_cast<unsigned>(args.date.day()), store.c_str());
+        return false;
+    }
+    if (!read_segment(store, args.symbol, args.date, day->second.segments.find(args.symbol)->second, segment, error)) {
+        std::fprintf(stderr, "error: %s\n", error.c_str());
+        return false;
+    }
+    input = segment;
+    return true;
+}
+
 // The run header both commands print.
-void print_config(const char* command, const ReplayArgs& args, const MappedFile& file)
+void print_config(const char* command, const ReplayArgs& args, std::span<const std::byte> input)
 {
     const auto offset = args.utc_offset.count();
 
     std::printf("Chronos %s\n", command);
-    std::printf("  file             %.*s (%zu bytes)\n", static_cast<int>(args.file.size()), args.file.data(),
-                file.bytes().size());
+    if (args.store.empty()) {
+        std::printf("  file             %.*s (%zu bytes)\n", static_cast<int>(args.file.size()), args.file.data(),
+                    input.size());
+    } else {
+        std::printf("  store            %.*s (the symbol's segment, %zu bytes)\n", static_cast<int>(args.store.size()),
+                    args.store.data(), input.size());
+    }
     if (args.all_symbols) {
         std::printf("  symbols          all\n");
     } else if (!args.symbols.empty()) {
@@ -399,7 +441,7 @@ bool write_json(const ReplayArgs& args, std::span<const std::byte> input, const 
                  json_escape(cpu_model()).c_str(), ::sysconf(_SC_NPROCESSORS_ONLN),
                  static_cast<long long>(::sysconf(_SC_PHYS_PAGES)) * ::sysconf(_SC_PAGESIZE), os.sysname, os.release);
     std::fprintf(out, "  \"input\": {\"path\": \"%s\", \"bytes\": %zu, \"fingerprint\": \"%016" PRIx64 "\"},\n",
-                 json_escape(args.file).c_str(), input.size(), fingerprint(input));
+                 json_escape(args.store.empty() ? args.file : args.store).c_str(), input.size(), fingerprint(input));
     std::fprintf(out, "  \"run\": {\"symbols\": \"%s\", \"capacity\": %zu, \"check_invariants_every\": %" PRIu64 "},\n",
                  json_escape(symbols_mode(args)).c_str(), args.capacity, args.check_invariants_every);
     std::fprintf(out,
@@ -493,8 +535,9 @@ ReplayOptions replay_options(const ReplayArgs& args, Timestamp midnight, Latency
 int replay(const ReplayArgs& args)
 {
     MappedFile file;
-    if (!file.open(std::string{args.file}.c_str())) {
-        std::fprintf(stderr, "error: %s\n", file.error());
+    std::vector<std::byte> segment;
+    std::span<const std::byte> input;
+    if (!open_input(args, file, segment, input)) {
         return 2;
     }
 
@@ -504,10 +547,10 @@ int replay(const ReplayArgs& args)
                                   .allow_truncated_tail = args.allow_truncated_tail};
     const Timestamp midnight = session_midnight_ns(args.date, args.utc_offset);
 
-    print_config("replay", args, file);
+    print_config("replay", args, input);
 
     InstrumentRegistry registry{1};
-    ItchSource source{file.bytes(), config, registry};
+    ItchSource source{input, config, registry};
     MarketBook book{0, args.capacity};  // the registry's first id: ItchSource registers the only instrument
 
     LatencyHistogram latency;
@@ -542,9 +585,9 @@ int replay(const ReplayArgs& args)
     fill_record(run, report, book, stats.messages, invariants);
     run.metrics.latency = options.latency;
     run.metrics.latency_batch = options.latency_batch;
-    print_metrics(run, file.bytes().size());
+    print_metrics(run, input.size());
 
-    if (!args.json.empty() && !write_json(args, file.bytes(), run)) {
+    if (!args.json.empty() && !write_json(args, input, run)) {
         return 2;
     }
     return run.succeeded ? 0 : 1;
@@ -587,7 +630,7 @@ int replay_books(const ReplayArgs& args)
                                   .allow_truncated_tail = args.allow_truncated_tail};
     const Timestamp midnight = session_midnight_ns(args.date, args.utc_offset);
 
-    print_config("replay", args, file);
+    print_config("replay", args, file.bytes());
 
     // ITCH locates are 16-bit, so a day has at most 65,536 instruments.
     InstrumentRegistry registry{args.all_symbols ? std::size_t{1} << 16 : args.symbols.size()};
@@ -822,8 +865,9 @@ void print_anomaly_samples(const ExecutionSimulator& execution, Timestamp midnig
 int backtest(const ReplayArgs& args)
 {
     MappedFile file;
-    if (!file.open(std::string{args.file}.c_str())) {
-        std::fprintf(stderr, "error: %s\n", file.error());
+    std::vector<std::byte> segment;
+    std::span<const std::byte> input;
+    if (!open_input(args, file, segment, input)) {
         return 2;
     }
 
@@ -852,13 +896,13 @@ int backtest(const ReplayArgs& args)
                            .taker_fee_per_share = static_cast<std::int64_t>(b.taker_fee_ticks)};
 
     InstrumentRegistry registry{1};
-    ItchSource source{file.bytes(), config, registry};
+    ItchSource source{input, config, registry};
     MarketBook book{0, args.capacity};  // the registry's first id: ItchSource registers the only instrument
     const Instrument& instrument = source.instrument();
     const unsigned price_scale = instrument.price_scale;
     const unsigned money_scale = instrument.price_scale + instrument.quantity_scale;
 
-    print_config("backtest", args, file);
+    print_config("backtest", args, input);
     std::printf("  latency          order %" PRIu64 " ns, report %" PRIu64 " ns\n", b.order_latency_ns,
                 b.report_latency_ns);
     if (mm) {
@@ -918,10 +962,10 @@ int backtest(const ReplayArgs& args)
 
         const bool invariants = print_final_book(book, replay, args.depth, price_scale, midnight);
         fill_record(record, replay, book, source.statistics().messages, invariants);
-        print_metrics(record, file.bytes().size());
+        print_metrics(record, input.size());
 
         if (!args.json.empty() &&
-            !write_json(args, file.bytes(), record,
+            !write_json(args, input, record,
                         backtest_json(b, limits, instrument, report, execution.statistics(), portfolio))) {
             return 2;
         }

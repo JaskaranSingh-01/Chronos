@@ -14,12 +14,16 @@ namespace simulator {
 inline constexpr std::string_view usage =
     "usage: simulator replay <itch-file> (--symbol AAPL | --symbols AAPL,MSFT | --all)\n"
     "                        --date 2019-12-30 [options]\n"
-    "       simulator backtest <itch-file> --symbol AAPL --date 2019-12-30 [options] [backtest options]\n"
+    "       simulator replay --store DIR --symbol AAPL --date 2019-12-30 [options]\n"
+    "       simulator backtest (<itch-file> | --store DIR) --symbol AAPL --date 2019-12-30 [options]\n"
+    "                          [backtest options]\n"
     "       simulator -h | --help | --version\n"
     "\n"
     "options, both commands:\n"
     "  --symbol AAPL           one symbol, 1-8 characters (backtest takes only --symbol)\n"
     "  --date YYYY-MM-DD       the session date (required)\n"
+    "  --store DIR             read the --symbol's day from the per-symbol store chronos-serve builds\n"
+    "                          (its --store, by default <data>/store) in place of <itch-file>\n"
     "  --utc-offset -05:00     offset from UTC (+HH:MM or -HH:MM); default US Eastern for --date\n"
     "  --allow-truncated-tail  a file cut mid-message ends there instead of failing\n"
     "  --depth N               book levels to print per side, at most 1000 (default 5)\n"
@@ -66,7 +70,8 @@ inline constexpr std::string_view usage =
     "     no stock directory message for --symbol, ...), an out-of-order timestamp, or a failed\n"
     "     book invariant (e.g. a book crossed in regular trading hours while it is trading);\n"
     "     rejected events alone are counted, not failures\n"
-    "  2  bad usage, an input file that cannot be opened, or a --json file that cannot be written\n";
+    "  2  bad usage, an input file that cannot be opened, a symbol the store does not hold on --date,\n"
+    "     a store that cannot be read, or a --json file that cannot be written\n";
 
 enum class CliCommand : std::uint8_t {
     Replay,
@@ -114,6 +119,7 @@ struct ReplayArgs
 {
     CliCommand command{CliCommand::Replay};
     std::string_view file;
+    std::string_view store;                 // --store: the per-symbol store to read --symbol from, in place of file
     std::string_view symbol;                // 1-8 chars, an ITCH ticker
     std::vector<std::string_view> symbols;  // --symbols, each like symbol
     bool all_symbols{false};                // --all

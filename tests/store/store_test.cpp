@@ -8,14 +8,24 @@
 #include <csignal>
 #include <cstddef>
 #include <cstdint>
+#include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <map>
 #include <string>
+#include <string_view>
+#include <tuple>
 #include <vector>
 
 #include "itch/itch_test_builder.hpp"
+#include "simulator/cli/replay_args.hpp"
+#include "simulator/io/mapped_file.hpp"
 #include "simulator/itch/itch_message_reader.hpp"
+#include "simulator/itch/itch_source.hpp"
+#include "simulator/market/market_books.hpp"
+#include "simulator/market/market_replay.hpp"
 #include "simulator/store/store.hpp"
 #include "store_test_support.hpp"
 
@@ -53,8 +63,15 @@ std::vector<std::span<const std::byte>> frames(std::span<const std::byte> bytes)
 
 void feed(StoreBuilder& builder, std::span<const std::byte> bytes)
 {
-    for (const std::span<const std::byte> frame : frames(bytes)) {
-        builder.add(frame);
+    ItchMessageReader reader{bytes};
+    ItchMessage message;
+    std::size_t at = 0;
+    while (reader.next(message) == ItchReadResult::Message) {
+        builder.add(bytes.subspan(at, reader.position() - at));
+        at = reader.position();
+    }
+    if (at < bytes.size()) {
+        builder.add(bytes.subspan(at));
     }
 }
 
@@ -404,6 +421,201 @@ TEST(StoreReadTest, AReadOfAStoreRebuiltInPlaceIsTheIntactSegmentOrAnError)
     ASSERT_EQ(build(dir, kMonday, day.bytes()), "");  // the same bytes rebuilt: the same segment
     ASSERT_TRUE(read_segment(store, "AAA", kMonday, aaa, bytes, error)) << error;
     EXPECT_EQ(bytes, intact);
+}
+
+// Spec §2.4: every event type over AAA and BBB, interleaved; a System Event before any symbol's message; BBB halted by
+// the sweep at the start of system hours and again mid-day; CCC listed after it; a message no R names.
+ItchBuilder busy_day(std::uint64_t start_of_system_hours = 3'000)
+{
+    ItchBuilder itch;
+    itch.system_event(0, 1'000, 'O')
+        .stock_directory(1, 2'000, "AAA")
+        .stock_directory(2, 2'000, "BBB")
+        .trading_action(1, 2'500, "AAA", 'T')
+        .system_event(0, start_of_system_hours, 'S')
+        .trading_action(2, 3'500, "BBB", 'T')
+        .system_event(0, 4'000, 'Q')
+        .add_order(1, 5'000, 1, 'B', 100, "AAA", 100'000)
+        .add_order_mpid(2, 5'100, 2, 'S', 200, "BBB", 200'000, "MPID")
+        .executed(1, 5'200, 1, 50, 1)
+        .executed_with_price(2, 5'300, 2, 20, 2, true, 199'900)
+        .stock_directory(3, 6'000, "CCC")
+        .add_order(3, 6'100, 3, 'B', 300, "CCC", 300'000)
+        .replace(1, 6'200, 1, 4, 50, 100'100)
+        .trading_action(2, 6'300, "BBB", 'H')
+        .cancel(2, 6'400, 2, 30)
+        .trade(1, 6'500, 0, 'B', 10, "AAA", 100'050, 3)
+        .trading_action(2, 6'600, "BBB", 'T')
+        .erase(1, 6'700, 4)
+        .erase(3, 6'800, 3)
+        .add_order(9, 6'900, 5, 'B', 100, "ZZZ", 100'000)
+        .system_event(0, 7'000, 'M');
+    return itch;
+}
+
+using Event =
+    std::tuple<Timestamp, OrderId, OrderId, std::int64_t, std::uint64_t, SymbolId, MarketEventType, Side, TradingState>;
+
+// What an ItchSource of `ticker` decodes from `bytes`: each event, then how the stream ended.
+struct Decoded
+{
+    std::vector<Event> events;
+    SourceResult end{SourceResult::Event};
+    SourceError error{SourceError::None};
+    bool truncated_tail{false};
+
+    bool operator==(const Decoded&) const = default;
+};
+
+Decoded decode(std::span<const std::byte> bytes, std::string_view ticker, bool allow_truncated_tail)
+{
+    InstrumentRegistry registry{1};
+    ItchSource source{bytes,
+                      {.ticker = ticker,
+                       .session_date = kMonday,
+                       .utc_offset = us_eastern_utc_offset(kMonday),
+                       .allow_truncated_tail = allow_truncated_tail},
+                      registry};
+    Decoded decoded;
+    MarketEvent e;
+    while ((decoded.end = source.next(e)) == SourceResult::Event) {
+        decoded.events.emplace_back(e.timestamp, e.order_id, e.new_order_id, e.price.ticks, e.quantity.value(),
+                                    e.symbol, e.type, e.side, e.trading_state);
+    }
+    decoded.error = source.error();
+    decoded.truncated_tail = source.truncated_tail();
+    return decoded;
+}
+
+// Spec §2.4 and §6, event-stream equality: for every symbol, its segment decodes to exactly the events its day file
+// does, ending the same way: a whole day, one cut in its last message, and one with frames no locate routes.
+TEST(StoreEquivalenceTest, EverySymbolsSegmentDecodesToTheEventsOfItsDayFile)
+{
+    const ItchBuilder busy = busy_day();
+    const std::span<const std::byte> whole = busy.bytes();
+    std::vector<std::byte> unroutable(whole.begin(), whole.end() - 14);  // before the end of system hours
+    unroutable.insert(unroutable.end(), {std::byte{0}, std::byte{2}, std::byte{'R'}, std::byte{1}});
+    unroutable.insert(unroutable.end(), whole.end() - 14, whole.end());
+    const std::vector<std::pair<std::string, std::span<const std::byte>>> days{
+        {"whole", whole}, {"cut", whole.first(whole.size() - 5)}, {"unroutable", unroutable}};
+    for (const auto& [name, bytes] : days) {
+        const ScratchDir dir{"store-equal-" + name};
+        ASSERT_EQ(build(dir, kMonday, bytes), "") << name;
+        for (const std::string symbol : {"AAA", "BBB", "CCC"}) {
+            const std::vector<std::byte> segment = read_back(dir, kMonday, symbol);
+            for (const bool allow : {false, true}) {
+                EXPECT_EQ(decode(segment, symbol, allow), decode(bytes, symbol, allow))
+                    << name << " " << symbol << (allow ? " allowing a cut tail" : "");
+            }
+        }
+    }
+    EXPECT_EQ(decode(whole, "AAA", false).events.size(), 6u);  // H, A, E, U, P, D: the sweep skips AAA, which has an H
+    EXPECT_EQ(decode(whole, "BBB", false).events.size(), 7u);  // halted by the sweep, then H T, F, C, H H, X, H T
+    EXPECT_EQ(decode(whole.first(whole.size() - 5), "CCC", false).error, SourceError::TruncatedMessage);
+    EXPECT_EQ(decode(unroutable, "CCC", true).error, SourceError::InvalidPayloadLength);
+}
+
+// Spec §6, System Events: moving the start of system hours changes every segment of the day, and each decodes to the
+// day's new stream, the halt sweep at the new time.
+TEST(StoreEquivalenceTest, AChangedSystemEventChangesEverySegmentAndItsStream)
+{
+    const ScratchDir before{"store-system-before"};
+    const ScratchDir after{"store-system-after"};
+    const ItchBuilder moved = busy_day(3'100);
+    ASSERT_EQ(build(before, kMonday, busy_day().bytes()), "");
+    ASSERT_EQ(build(after, kMonday, moved.bytes()), "");
+    for (const std::string symbol : {"AAA", "BBB", "CCC"}) {
+        EXPECT_NE(index_of(before).days().at(kMonday).segments.at(symbol).hash,
+                  index_of(after).days().at(kMonday).segments.at(symbol).hash)
+            << symbol;
+        EXPECT_EQ(decode(read_back(after, kMonday, symbol), symbol, false), decode(moved.bytes(), symbol, false));
+    }
+    EXPECT_EQ(std::get<0>(decode(read_back(after, kMonday, "BBB"), "BBB", false).events[0]),
+              session_midnight_ns(kMonday, us_eastern_utc_offset(kMonday)) + 3'100);
+}
+
+// Spec §6, symbol isolation: another symbol's message changed leaves this symbol's segment byte for byte.
+TEST(StoreEquivalenceTest, AnotherSymbolsChangedMessageLeavesThisSegmentAsItWas)
+{
+    const ScratchDir before{"store-isolation-before"};
+    const ScratchDir after{"store-isolation-after"};
+    ItchBuilder changed = busy_day();
+    changed.add_order(2, 7'100, 6, 'B', 100, "BBB", 199'000);
+    ASSERT_EQ(build(before, kMonday, busy_day().bytes()), "");
+    ASSERT_EQ(build(after, kMonday, changed.bytes()), "");
+    const auto segment = [](const ScratchDir& dir, const std::string& symbol) {
+        return index_of(dir).days().at(kMonday).segments.at(symbol);
+    };
+    EXPECT_EQ(segment(after, "AAA"), segment(before, "AAA"));
+    EXPECT_EQ(read_back(after, kMonday, "AAA"), read_back(before, kMonday, "AAA"));
+    EXPECT_NE(segment(after, "BBB").hash, segment(before, "BBB").hash);
+}
+
+// Spec §6, digest equality on a real day (CHRONOS_ITCH_FILE, CHRONOS_ITCH_DATE as in itch_real_data_test.cpp): the
+// store is built in the temp directory, then every symbol's segment replays to the book that symbol has at the end of
+// the full-day replay of every symbol. Needs about half the day file's size free in TMPDIR.
+TEST(StoreRealDataTest, EverySymbolsSegmentReplaysToItsBookOfTheFullDay)
+{
+    const char* path = std::getenv("CHRONOS_ITCH_FILE");
+    if (path == nullptr || *path == '\0') {
+        GTEST_SKIP() << "set CHRONOS_ITCH_FILE to a NASDAQ ITCH 5.0 file";
+    }
+    const char* day = std::getenv("CHRONOS_ITCH_DATE");
+    std::chrono::year_month_day date{};
+    ASSERT_TRUE(parse_date(day != nullptr && *day != '\0' ? day : "2019-12-30", date));
+    const Timestamp midnight = session_midnight_ns(date, us_eastern_utc_offset(date));
+    const ReplayOptions options{.session_midnight = midnight};
+    MappedFile file;
+    ASSERT_TRUE(file.open(path)) << file.error();
+
+    const ScratchDir dir{"store-real"};
+    StoreBuilder builder{dir.path, path, date};
+    feed(builder, file.bytes());
+    std::string error;
+    ASSERT_TRUE(builder.commit(kSourceHash, error)) << error;
+
+    InstrumentRegistry registry{std::size_t{1} << 16};
+    ItchSource all{file.bytes(),
+                   {.all_tickers = true,
+                    .session_date = date,
+                    .utc_offset = us_eastern_utc_offset(date),
+                    .allow_truncated_tail = true},
+                   registry};
+    OrderPool pool{default_books_capacity};
+    MarketBooks books{registry, pool};
+    MarketReplay::run(all, books, options);
+    std::map<std::string, SymbolId, std::less<>> ids;
+    for (SymbolId id = 0; id < registry.size(); ++id) {
+        const auto& symbol = registry.find(id)->native_symbol;
+        ids.emplace(
+            std::string{symbol.data(),
+                        static_cast<std::size_t>(std::find(symbol.begin(), symbol.end(), '\0') - symbol.begin())},
+            id);
+    }
+
+    std::size_t compared = 0;
+    std::size_t differ = 0;
+    for (const auto& [symbol, segment] : builder.index().days().at(date).segments) {
+        std::vector<std::byte> bytes;
+        ASSERT_TRUE(read_segment(dir.path, symbol, date, segment, bytes, error)) << error;
+        InstrumentRegistry one{1};
+        ItchSource source{bytes,
+                          {.ticker = symbol,
+                           .session_date = date,
+                           .utc_offset = us_eastern_utc_offset(date),
+                           .allow_truncated_tail = true},
+                          one};
+        MarketBook book{0, std::size_t{1} << 20};
+        MarketReplay::run(source, book, options);
+        const MarketBook& full = *books.find(ids.at(symbol));
+        ++compared;
+        if (book.digest() != full.digest() || book.last_sequence() != full.last_sequence()) {
+            ++differ;
+            ADD_FAILURE() << symbol << ": digest " << book.digest() << ", the full day's " << full.digest();
+        }
+    }
+    std::printf("[ RealData ] %zu symbols' segments, %zu differ from the full day\n", compared, differ);
+    EXPECT_EQ(compared, registry.size());
 }
 
 }  // namespace

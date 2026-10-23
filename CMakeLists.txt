@@ -154,7 +154,7 @@ target_include_directories(simulator PRIVATE ${PROJECT_BINARY_DIR}/generated)
 
 target_link_libraries(simulator
     PRIVATE
-        simulator_lib
+        simulator_store
 )
 
 
@@ -396,6 +396,22 @@ chronos_cli_test(VersionExitsZero 0 --version)
 chronos_cli_test(BadOptionExitsTwo 2 replay day.bin --symbol AAPL --date 2019-12-30 --frobnicate)
 chronos_cli_test(MissingFileExitsTwo 2 replay /nonexistent/chronos-missing.itch --symbol AAPL --date 2019-12-30)
 chronos_cli_test(FailedRunExitsOne 1 replay /dev/null --symbol AAPL --date 2019-12-30)
+
+# --store: a symbol the store lacks on the day, or an index that is invalid, exits 2 and says which.
+set(empty_store ${PROJECT_BINARY_DIR}/empty-store)
+set(bad_store ${PROJECT_BINARY_DIR}/bad-store)
+file(MAKE_DIRECTORY ${empty_store})
+file(WRITE ${bad_store}/index.tsv "not an index\n")
+function(chronos_cli_message_test name message)
+    add_test(NAME SimulatorCliTest.${name}
+             COMMAND sh -c "out=$(\"$0\" \"$@\" 2>&1); test $? -eq 2 && echo \"$out\" | grep -q '${message}'"
+                     $<TARGET_FILE:simulator> ${ARGN})
+endfunction()
+
+chronos_cli_message_test(StoreWithoutTheSymbolExitsTwo "no AAPL on 2019-12-30 in ${empty_store}"
+                         replay --store ${empty_store} --symbol AAPL --date 2019-12-30)
+chronos_cli_message_test(InvalidStoreIndexExitsTwo "the store index at ${bad_store} is invalid; chronos-serve rebuilds it"
+                         backtest --store ${bad_store} --symbol AAPL --date 2019-12-30)
 
 # chronos-serve's usage exit codes; serving itself is ServerTest's.
 function(chronos_serve_test name exit_code)

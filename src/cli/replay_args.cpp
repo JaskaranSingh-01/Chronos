@@ -179,6 +179,9 @@ bool parse_replay_args(std::span<const std::string_view> args, ReplayArgs& out, 
             ok = parse_symbols(value, parsed.symbols);
         } else if (arg == "--date") {
             ok = has_date = parse_date(value, parsed.date);
+        } else if (arg == "--store") {
+            parsed.store = value;
+            ok = !value.empty();
         } else if (arg == "--utc-offset") {
             ok = has_offset = parse_utc_offset(value, parsed.utc_offset);
         } else if (arg == "--depth") {
@@ -238,7 +241,11 @@ bool parse_replay_args(std::span<const std::string_view> args, ReplayArgs& out, 
     const bool many = !parsed.symbols.empty() || parsed.all_symbols;
     const int selections = !parsed.symbol.empty() + !parsed.symbols.empty() + parsed.all_symbols;
 
-    if (parsed.file.empty()) {
+    if (!parsed.store.empty() && !parsed.file.empty()) {
+        error = "--store replaces <itch-file>: give one";
+    } else if (!parsed.store.empty() && many) {
+        error = "--store reads one symbol: use --symbol";
+    } else if (parsed.file.empty() && parsed.store.empty()) {
         error = "missing <itch-file>";
     } else if (selections == 0) {
         error = backtest ? "missing --symbol" : "missing --symbol (or --symbols A,B,C or --all)";

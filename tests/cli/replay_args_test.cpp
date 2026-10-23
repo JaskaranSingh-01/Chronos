@@ -301,6 +301,29 @@ TEST(ReplayArgsTest, BacktestTakesOnlyOneSymbol)
     }
 }
 
+TEST(ReplayArgsTest, StoreReadsOneSymbolInPlaceOfTheDayFile)
+{
+    for (const std::string_view command : {"replay", "backtest"}) {
+        const Parsed p = parse({command, "--store", "data/itch/store", "--symbol", "AAPL", "--date", "2019-12-30"});
+        ASSERT_TRUE(p.ok) << p.error;
+        EXPECT_EQ(p.args.store, "data/itch/store");
+        EXPECT_TRUE(p.args.file.empty());
+    }
+    auto error = [](std::vector<std::string_view> argv) {
+        const Parsed p = parse(std::move(argv));
+        EXPECT_FALSE(p.ok);
+        return p.error;
+    };
+    EXPECT_EQ(error({"replay", "day.bin", "--store", "s", "--symbol", "AAPL", "--date", "2019-12-30"}),
+              "--store replaces <itch-file>: give one");
+    EXPECT_EQ(error({"replay", "--store", "s", "--all", "--date", "2019-12-30"}),
+              "--store reads one symbol: use --symbol");
+    EXPECT_EQ(error({"replay", "--store", "s", "--symbols", "A,B", "--date", "2019-12-30"}),
+              "--store reads one symbol: use --symbol");
+    EXPECT_EQ(error({"replay", "--store", "", "--symbol", "AAPL", "--date", "2019-12-30"}),
+              "bad value for --store: ''");
+}
+
 TEST(ReplayArgsTest, ParsesLatencyForReplayOnlyAndJsonForBoth)
 {
     const Parsed off = parse({"replay", "day.bin", "--all", "--date", "2019-12-30"});
@@ -432,6 +455,7 @@ TEST(ReplayArgsTest, UsageDocumentsEveryOption)
     const std::vector<Argv> examples{
         {"replay", "day.bin", "--symbol", "AAPL", "--date", "2019-12-30"},
         {"replay", "day.bin", "--symbols", "AAPL,MSFT", "--date", "2019-12-30"},
+        {"replay", "--store", "store", "--symbol", "AAPL", "--date", "2019-12-30"},
         replay({"--utc-offset", "-04:00"}),
         replay({"--allow-truncated-tail"}),
         replay({"--depth", "10"}),

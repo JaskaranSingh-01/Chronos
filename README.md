@@ -250,6 +250,13 @@ pass, each into its own book:
 The second command is the full-day run of [Verified results](#verified-results). Its replay loop took about 131 s
 of wall time on the machine described under [Performance](#performance).
 
+Once `chronos-serve` has built a day into its per-symbol store (see [Trading Terminal](#trading-terminal)), `replay`
+and `backtest` read one symbol's day from the store in place of the day file, its own bytes alone:
+
+```bash
+./build/simulator replay --store data/itch/store --symbol AAPL --date 2019-12-30
+```
+
 ### Backtest
 
 ```bash
@@ -594,12 +601,16 @@ From the comment in [`include/simulator/sim/execution_simulator.hpp`](include/si
 ```text
 usage: simulator replay <itch-file> (--symbol AAPL | --symbols AAPL,MSFT | --all)
                         --date 2019-12-30 [options]
-       simulator backtest <itch-file> --symbol AAPL --date 2019-12-30 [options] [backtest options]
+       simulator replay --store DIR --symbol AAPL --date 2019-12-30 [options]
+       simulator backtest (<itch-file> | --store DIR) --symbol AAPL --date 2019-12-30 [options]
+                          [backtest options]
        simulator -h | --help | --version
 
 options, both commands:
   --symbol AAPL           one symbol, 1-8 characters (backtest takes only --symbol)
   --date YYYY-MM-DD       the session date (required)
+  --store DIR             read the --symbol's day from the per-symbol store chronos-serve builds
+                          (its --store, by default <data>/store) in place of <itch-file>
   --utc-offset -05:00     offset from UTC (+HH:MM or -HH:MM); default US Eastern for --date
   --allow-truncated-tail  a file cut mid-message ends there instead of failing
   --depth N               book levels to print per side, at most 1000 (default 5)
@@ -644,9 +655,10 @@ exit status:
   0  the run succeeded and every check passed (also --help and --version)
   1  the run failed: a source error (a file cut mid-message without --allow-truncated-tail,
      no stock directory message for --symbol, ...), an out-of-order timestamp, or a failed
-     book invariant (e.g. a book crossed in regular trading hours); rejected events alone
-     are counted, not failures
-  2  bad usage, an input file that cannot be opened, or a --json file that cannot be written
+     book invariant (e.g. a book crossed in regular trading hours while it is trading);
+     rejected events alone are counted, not failures
+  2  bad usage, an input file that cannot be opened, a symbol the store does not hold on --date,
+     a store that cannot be read, or a --json file that cannot be written
 ```
 
 A bad argument prints a two-line error on stderr and exits 2. `--json PATH` writes one JSON object with
