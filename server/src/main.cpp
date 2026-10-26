@@ -43,7 +43,7 @@ constexpr std::string_view serve_usage =
     "  --token T               /api needs 'Authorization: Bearer T'; a WebSocket's first message is auth{T}\n"
     "  --fsync                 sync each command line of the log (sessions/<id>.jsonl) to the device\n"
     "  --allow-truncated-tail  a file cut mid-message ends there instead of failing\n"
-    "  --book B                every book's price levels: list (default) or ladder, as simulator's --book\n"
+    "  --book B                every book's price levels: ladder (default) or list, as simulator's --book\n"
     "\n"
     "exit status: 0 after SIGINT or SIGTERM; 2 bad usage, a store in use or that cannot be locked, no day ready in\n"
     "DIR or none for --date, a starting day with no symbol's market events, a log that cannot be written, or an\n"
@@ -60,7 +60,7 @@ struct ServeArgs
     std::string token;
     bool fsync{false};
     bool allow_truncated_tail{false};
-    BookBackend book{BookBackend::List};
+    BookBackend book{BookBackend::Ladder};
     bool help{false};
 };
 

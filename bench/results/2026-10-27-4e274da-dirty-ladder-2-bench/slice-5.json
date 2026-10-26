@@ -1,0 +1,12 @@
+{
+  "schema": 1,
+  "date": "2026-10-26T21:55:21Z",
+  "build": {"commit": "4e274da5cfd702c871a738612963c604e3a520dd", "dirty": true, "type": "Release", "compiler": "Apple LLVM 17.0.0 (clang-1700.0.13.5)"},
+  "machine": {"cpu": "Apple M4", "cores": 10, "memory_bytes": 17179869184, "os": "Darwin 27.0.0"},
+  "input": {"path": "/private/tmp/claude-503/-Users-jaskaran-singh-Desktop-code-qu-Chronos/6acf5368-dd94-416b-9e97-2e80c6d6c058/scratchpad/slice/12302019.NASDAQ_ITCH50.first-256MiB.bin", "bytes": 268435456, "fingerprint": "812aade968a7dc04"},
+  "run": {"symbols": "all", "capacity": 4194304, "book": "ladder", "threads": 2, "check_invariants_every": 0},
+  "result": {"events": 6529870, "messages": 7844756, "rejected": 0, "digest": "b00db289f7c388b2", "books": 8906, "books_not_empty": 8888, "peak_live_orders": 1004059, "succeeded": true},
+  "time": {"wall_s": 0.905, "user_s": 1.493, "sys_s": 0.221, "cpu_s": 1.715, "events_per_s": 7214448, "ns_per_event": 138.61},
+  "memory": {"allocations": 0, "allocations_per_event": 0.0000, "heap_blocks_change": 0, "heap_bytes_change": 0, "reserved_bytes": 1063256120, "windows_reserved_bytes": 134217728, "windows_touched_bytes": 18239488, "peak_rss_bytes": 1010483200, "peak_footprint_bytes": 741917800, "major_faults": 0},
+  "latency": {"batch_events": 1024, "batches": 6376, "timer_tick_ns": 41.00, "of": "the book thread", "ns_per_event": {"p50": 79, "p90": 287, "p99": 431, "p99_9": 767, "max": 28316}}
+}

@@ -31,7 +31,7 @@ TEST(ReplayArgsTest, ParsesEveryOption)
 {
     const Parsed p = parse({"replay", "day.bin", "--symbol", "MSFT", "--date", "2019-12-30", "--utc-offset", "+05:30",
                             "--allow-truncated-tail", "--depth", "10", "--check-invariants", "10000", "--capacity",
-                            "4096", "--book", "ladder", "--threads", "1"});
+                            "4096", "--book", "list", "--threads", "1"});
 
     ASSERT_TRUE(p.ok) << p.error;
     EXPECT_EQ(p.args.file, "day.bin");
@@ -42,7 +42,7 @@ TEST(ReplayArgsTest, ParsesEveryOption)
     EXPECT_EQ(p.args.depth, 10u);
     EXPECT_EQ(p.args.check_invariants_every, 10'000u);
     EXPECT_EQ(p.args.capacity, 4'096u);
-    EXPECT_EQ(p.args.book, BookBackend::Ladder);
+    EXPECT_EQ(p.args.book, BookBackend::List);
     EXPECT_EQ(p.args.threads, 1u);
 }
 
@@ -57,7 +57,7 @@ TEST(ReplayArgsTest, DefaultsAndUsEasternOffsetFromDate)
     EXPECT_EQ(winter.args.depth, 5u);
     EXPECT_EQ(winter.args.check_invariants_every, 0u);
     EXPECT_EQ(winter.args.capacity, 1'048'576u);
-    EXPECT_EQ(winter.args.book, BookBackend::List);
+    EXPECT_EQ(winter.args.book, BookBackend::Ladder);
     EXPECT_EQ(winter.args.threads, 2u);
 
     const Parsed summer = parse({"replay", "day.bin", "--symbol", "AAPL", "--date", "2012-06-21"});

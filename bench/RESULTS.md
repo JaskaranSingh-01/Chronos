@@ -1,3 +1,121 @@
+# The ladder a cent apart (2026-10-27)
+
+The ladder's window counted price units: 256 of them are $0.0256 in ITCH prices, about one cent level per side. Its
+slots are now a cent apart (`ladder_step(price_scale)`, 100 units at ITCH's four decimals), so the window spans
+$2.56, and a price off the cent grid is placed by the list's walk. Measured as in the engine round below, ladder × 2
+is now the fastest configuration and the default.
+
+## The record
+
+| | |
+|---|---|
+| Engine code | `4e274da` plus the ladder step, uncommitted when measured, so every JSON says `"dirty": true` |
+| Baseline binary | `b6f3517`, built as in the engine round's record |
+| Compiler, build | Apple LLVM 17.0.0 (clang-1700.0.13.5), CMake `Release` (`-O3 -DNDEBUG`) |
+| Machine | Apple M4 (4 performance + 6 efficiency cores), 16 GiB, Darwin 27.0.0, on AC power, Low Power Mode off |
+| Input | `data/itch/12302019.NASDAQ_ITCH50.bin`, as in the engine round |
+| Capacity | `--capacity` 4,194,304, the `--all` default |
+| Cache | no purge; about 500,000 major faults in every full-day run |
+
+| Folder | What |
+|---|---|
+| `results/2026-10-27-4e274da-dirty-ladder-correctness/` | correctness mode, ladder × 1 and ladder × 2 |
+| `results/2026-10-27-4e274da-dirty-quiet-{baseline,list-1,list-2,ladder-1,ladder-2}/` | performance mode, interleaved, the night of 2026-10-27: the default and the README come from it |
+| `results/2026-10-27-4e274da-dirty-quiet-matrix.md` | its medians side by side |
+| `results/2026-10-27-4e274da-dirty-interleaved-*/` and `-matrix.md` | a first interleaved matrix earlier that night, superseded (see Caveats) |
+| `results/2026-10-27-4e274da-dirty-ladder-2-bench/` | the default's 5 slice runs, micro-benchmarks and profile |
+
+The commands are the engine round's below, with the load gate at 4 (`< 4` in `quiet()`) and these names:
+
+```
+P=bench/results/2026-10-27-4e274da-dirty-quiet
+SLICE=<the slice> FLAGS="--book ladder --threads 2" FULL_RUNS=0 SLICE_RUNS=5 BENCH_REPS=5 bench/run.sh ladder-2-bench
+```
+
+## Correctness mode
+
+| Configuration | Exit | Digest | Rejected | Periodic checks passed | Allocations | Heap change |
+|---|---|---|---|---|---|---|
+| ladder × 1 | 0 | `6897f945bcef75c2` | 0 | 258,271 | 0 | +0 blocks +0 bytes |
+| ladder × 2 | 0 | `6897f945bcef75c2` | 0 | 258,271 | 0 | +0 blocks +0 bytes |
+
+The two-thread log equals the one-thread log line for line, timings, the `threads` line and the windows line aside.
+
+## Performance mode
+
+Full day, `--all`, median of 3 interleaved runs, each started once the load average was below 4:
+
+| | baseline `b6f3517` | list × 1 | list × 2 | ladder × 1 | ladder × 2 |
+|---|---|---|---|---|---|
+| wall s | 66.13 | 80.99 | 57.22 | 78.11 | 54.13 |
+| CPU s (both threads) | 57.07 | 71.71 | 101.24 | 68.80 | 94.30 |
+| events/s | 3,999,129 | 3,265,535 | 4,622,252 | 3,385,625 | 4,885,679 |
+| ns/event | 250.1 | 306.2 | 216.3 | 295.4 | 204.7 |
+| p50 / p90 / p99 / p99.9 | 215 / 383 / 607 / 2,431 | 271 / 447 / 735 / 2,943 | 207 / 287 / 463 / 863 | 255 / 431 / 703 / 3,199 | 191 / 287 / 447 / 863 |
+| allocations | 43,910,763 | 0 | 0 | 0 | 0 |
+| heap change bytes | not measured | 0 | 0 | 0 | 0 |
+
+Events/s, min-max:
+
+| | min-max |
+|---|---|
+| baseline | 3,784,162-4,009,271 |
+| list × 1 | 3,223,637-3,320,002 |
+| list × 2 | 4,614,364-4,743,695 |
+| ladder × 1 | 2,916,927-3,442,524 |
+| ladder × 2 | 4,715,459-4,970,876 |
+
+Ladder × 1's slowest run (round 1) is the outlier of its range; its other two ran at 3.39 and 3.44 M.
+
+## Selection (spec §5.3)
+
+```
+list-1 median 3265535 range 96365 gates pass
+list-2 median 4622252 range 129331 gates pass
+ladder-1 median 3385625 range 525597 gates pass
+ladder-2 median 4885679 range 255417 gates pass
+best one-thread ladder-1 best two-thread ladder-2 margin 1500054, larger range 525597
+default ladder-2 median 4885679 against the baseline's 3999129: PASS
+```
+
+The default is `--book ladder --threads 2`: 22.2 % faster than the baseline, and 5.7 % faster than list × 2, a margin
+(263,427 events/s) just above ladder × 2's own range. `simulator` and `chronos-serve` both default to the ladder;
+`chronos-serve` keeps its sessions on one thread.
+
+## Memory
+
+| | baseline | list × 1 | list × 2 | ladder × 1 | ladder × 2 |
+|---|---|---|---|---|---|
+| peak footprint MB | 593 | 740 | 744 | 759 | 763 |
+| reserved MB | – | 925 | 929 | 1,060 | 1,063 |
+| peak RSS MB (with the mapped file) | 1,812 | 1,884 | 1,912 | 1,904 | 2,057 |
+
+The ladder's windows are as large as before (134.2 MB reserved, 18.2 MB touched by the books made): a slot is still
+one entry, now a cent wide.
+
+## Slices, micro-benchmarks and profile
+
+From `results/2026-10-27-4e274da-dirty-ladder-2-bench/`. Its build also held the next change, the trade each market
+event printed, read in `EventLoop`; the replay does not run `EventLoop`, so only that folder's `BM_EventLoop` differs
+from this code.
+
+- **Slice**, `--all`, 5 runs: digest `b00db289f7c388b2` in every run, median 7,888,560 events/s (7,214,448-8,869,149),
+  0 allocations.
+- **Micro-benchmarks**: the book operations' medians are within 10 % between list (`book:0`) and ladder (`book:1`),
+  but for `BM_Add` at depth 1,000,000 (59.2 against 69.1 ns); every median and its cv is in the folder's
+  `summary.md`.
+- **Profile** (`sample`, 1 ms, ladder × 2), self time inside `MarketReplay::run`: `new_level` 40.4 %, `remove`
+  17.2 %, `find` 9.6 %, `MarketBook::apply` 9.3 %, `add` 5.6 %. Placing a new level is still the largest cost: the
+  ladder scans its window for the nearest level towards the best, then walks the list past any level off the grid.
+
+## Caveats
+
+- The first interleaved matrix, from 00:21 to 01:07 that night, ran every configuration about 2.4 times slower in
+  CPU time (the baseline 141 s against 57 s), most likely in Low Power Mode, which was found on at 02:10: a run then
+  measured the baseline at 1.59 M events/s, and was stopped and discarded. Its top two match the matrix above
+  (ladder × 2, then list × 2), but its numbers are not used.
+- The engine round's own caveats below apply here too.
+
 # Engine round: zero allocations, the level backends and the pipeline (2026-10-24 to 2026-10-26)
 
 Price levels moved into a preallocated pool, found through an open-addressing index, as a list per side or a list

@@ -9,8 +9,8 @@ orders never change the replayed history. At run time it needs only the C++ stan
 
 **Data:** NASDAQ's public TotalView-ITCH 5.0 sample for 2019-12-30, `12302019.NASDAQ_ITCH50`: 8,251,407,909 bytes
 decompressed, 268,744,780 messages. The replay numbers come from the benchmark runs of the default configuration in
-[`bench/results/2026-10-24-b6f3517-dirty-interleaved-list-2/`](bench/results/2026-10-24-b6f3517-dirty-interleaved-list-2/summary.md),
-measured on 2026-10-24 and 2026-10-26. Every configuration and the previous engine gave the same counts and digest.
+[`bench/results/2026-10-27-4e274da-dirty-quiet-ladder-2/`](bench/results/2026-10-27-4e274da-dirty-quiet-ladder-2/summary.md),
+measured on 2026-10-27. Every configuration and the previous engine gave the same counts and digest.
 
 ### Full day, every symbol in one pass
 
@@ -22,9 +22,9 @@ measured on 2026-10-24 and 2026-10-26. Every configuration and the previous engi
 | Books | 8,906, every one empty after the last event (20:00:00.097 ET) |
 | Peak live orders | 1,924,078, all books together |
 | Invariants | pass for all 8,906 books at the end of the run |
-| Combined digest | `6897f945bcef75c2`, identical in all 34 full-day runs of the engine round: four configurations and the previous engine |
+| Combined digest | `6897f945bcef75c2`, identical in all 66 full-day runs of the engine round and the ladder's: four configurations and the previous engine |
 
-From [`full-1.log`](bench/results/2026-10-24-b6f3517-dirty-interleaved-list-2/full-1.log):
+From [`full-1.log`](bench/results/2026-10-27-4e274da-dirty-quiet-ladder-2/full-1.log):
 
 ```text
 Source
@@ -63,8 +63,8 @@ What this evidence shows, and what it does not:
   rise from head to tail (FIFO), the ladder's windows match its levels, and the pools' and indices' counts match.
   `--check-invariants N` also checks the book of every N-th applied event. Only those periodic checks test "not
   crossed during regular trading hours", because the end-of-run check falls after 16:00. The runs above used the
-  end-of-run check only; the engine round's correctness runs (`--check-invariants 1024`) passed 258,271 periodic
-  checks in each configuration ([`bench/RESULTS.md`](bench/RESULTS.md)).
+  end-of-run check only; the correctness runs (`--check-invariants 1024`) passed 258,271 periodic checks in each
+  configuration, the ladder's at a cent included ([`bench/RESULTS.md`](bench/RESULTS.md)).
 - **The combined digest** is FNV-1a over (symbol, last sequence, book digest) for every book. With every book empty
   at the end, it fingerprints each symbol's count of Adds and Replaces. It is a regression check across code
   changes, not a proof of correctness.
@@ -104,36 +104,36 @@ ranked and executed one tick better, so the aggressor never reached our price. W
 
 ## Performance
 
-Chronos processes **4,913,837** market events per second: the full NASDAQ day of 2019-12-30, every symbol
-(264,469,515 events), on one machine, an Apple M4, with `--book list --threads 2`.
+Chronos processes **4,885,679** market events per second: the full NASDAQ day of 2019-12-30, every symbol
+(264,469,515 events), on one machine, an Apple M4, with the default `--book ladder --threads 2`.
 
 Full day, `--all`, median of 3 runs. Each round ran the four configurations and the previous engine (commit
 `b6f3517`) back to back, in rotating order, so every column met the same machine. Every run gave digest
 `6897f945bcef75c2` and 0 rejections.
 
-| | baseline `b6f3517` | list × 1 | **list × 2** | ladder × 1 | ladder × 2 |
+| | baseline `b6f3517` | list × 1 | list × 2 | ladder × 1 | **ladder × 2** |
 |---|---|---|---|---|---|
-| CPU s (user + sys, both threads) | 56.7 | 68.7 | 95.1 | 71.6 | 110.9 |
-| wall s | 65.7 | 76.9 | 53.8 | 79.8 | 61.9 |
-| events/s | 4,026,805 | 3,440,288 | **4,913,837** | 3,314,434 | 4,270,030 |
-| ns/event, mean | 248.3 | 290.7 | 203.5 | 301.7 | 234.2 |
-| ns/event p50 / p99 / p99.9 | 215 / 639 / 3,199 | 255 / 671 / 2,559 | 191 / 431 / 735 | 271 / 671 / 2,815 | 223 / 495 / 799 |
+| CPU s (user + sys, both threads) | 57.1 | 71.7 | 101.2 | 68.8 | 94.3 |
+| wall s | 66.1 | 81.0 | 57.2 | 78.1 | 54.1 |
+| events/s | 3,999,129 | 3,265,535 | 4,622,252 | 3,385,625 | **4,885,679** |
+| ns/event, mean | 250.1 | 306.2 | 216.3 | 295.4 | 204.7 |
+| ns/event p50 / p99 / p99.9 | 215 / 607 / 2,431 | 271 / 735 / 2,943 | 207 / 463 / 863 | 255 / 703 / 3,199 | 191 / 447 / 863 |
 | allocations in `run()` | 43,910,763 | 0 | 0 | 0 | 0 |
 | heap change | not measured | 0 | 0 | 0 | 0 |
-| peak footprint MB | 593 | 740 | 744 | 758 | 762 |
-| reserved MB | – | 925 | 929 | 1,059 | 1,063 |
-| results | [baseline](bench/results/2026-10-24-b6f3517-dirty-interleaved-baseline/summary.md) | [list-1](bench/results/2026-10-24-b6f3517-dirty-interleaved-list-1/summary.md) | [list-2](bench/results/2026-10-24-b6f3517-dirty-interleaved-list-2/summary.md) | [ladder-1](bench/results/2026-10-24-b6f3517-dirty-interleaved-ladder-1/summary.md) | [ladder-2](bench/results/2026-10-24-b6f3517-dirty-interleaved-ladder-2/summary.md) |
+| peak footprint MB | 593 | 740 | 744 | 759 | 763 |
+| reserved MB | – | 925 | 929 | 1,060 | 1,063 |
+| results | [baseline](bench/results/2026-10-27-4e274da-dirty-quiet-baseline/summary.md) | [list-1](bench/results/2026-10-27-4e274da-dirty-quiet-list-1/summary.md) | [list-2](bench/results/2026-10-27-4e274da-dirty-quiet-list-2/summary.md) | [ladder-1](bench/results/2026-10-27-4e274da-dirty-quiet-ladder-1/summary.md) | [ladder-2](bench/results/2026-10-27-4e274da-dirty-quiet-ladder-2/summary.md) |
 
-The default, list × 2, against the baseline: events/s +22.0 %. On one thread the round is slower than the baseline
-(list −14.6 %, ladder −17.7 %); the profile below shows where the book thread's time goes.
+The default, ladder × 2, against the baseline: events/s +22.2 %, and +5.7 % over list × 2. On one thread the
+ladder, its slots a cent apart, has a median 3.7 % above the list's, within the spread of its runs, and both are
+slower than the baseline (ladder −15.3 %, list −18.3 %); the profile below shows where the book thread's time goes.
 
 - **Machine:** Apple M4 (4 performance + 6 efficiency cores), 16 GiB, macOS 27.0.1, Apple clang 17.0.0, CMake
   `Release` (`-O3 -DNDEBUG`), one or two threads.
 - **Interleaved runs.** A one-thread replay that lands on an efficiency core runs about half as fast, so runs made
-  one configuration after another on a busy machine are not comparable: this round's first, sequential matrix
-  measured one thread at about 1.48 M events/s, and the baseline measured alone that morning gave 2.00 M. Each run
-  above started once the load average was below 4.5; round 3 was re-run whole on 2026-10-26, after the Mac slept
-  through one of its runs.
+  one configuration after another on a busy machine are not comparable: the engine round's first, sequential
+  matrix measured list × 1 at 1.48 M events/s, against 3.44 M interleaved. Each run above started once the
+  load average was below 4, with the Mac on AC power and Low Power Mode off.
 - **Per-event figures are a batch-derived per-event estimate.** Each sample is the mean ns/event of a batch of 1,024
   events, as `steady_clock` ticks every 41.67 ns on this machine and cannot time a single event. They show how the
   cost of an event varies across the day, not the latency of any one event. With two threads they are the book
@@ -147,9 +147,9 @@ The default, list × 2, against the baseline: events/s +22.0 %. On one thread th
 - **Memory.** Peak RSS counts the resident pages of the mapped input, so the table shows the peak footprint, the
   process's own memory. The reserved bytes are set up before the replay: the order pool, the order and level
   indices, the level pool, and the ladder's windows or the ring.
-- **Profile** (`/usr/bin/sample`, 1 ms, list × 2), self time of the book thread inside `MarketReplay::run`:
-  `new_level` 43.9 % (placing a new price level, a walk of the list from the best), `remove` 15.1 %, `find` 8.9 %,
-  `MarketBook::apply` 8.5 %.
+- **Profile** (`/usr/bin/sample`, 1 ms, ladder × 2), self time of the book thread inside `MarketReplay::run`:
+  `new_level` 40.4 % (placing a new price level: the ladder's scan of its window for a neighbour, then the list's
+  walk from there), `remove` 17.2 %, `find` 9.6 %, `MarketBook::apply` 9.3 %.
 
 [`bench/RESULTS.md`](bench/RESULTS.md) has the protocol, the min-max ranges, the slice runs, the Google Benchmark
 micro-benchmarks, the profiles, the decisions (including a rejected candidate) and the caveats. Reproduce with
@@ -271,9 +271,9 @@ pass, each into its own book:
 ./build/simulator replay data/itch/12302019.NASDAQ_ITCH50.bin --all --date 2019-12-30
 ```
 
-The second command is the full-day run of [Verified results](#verified-results). With the defaults (`--book list
+The second command is the full-day run of [Verified results](#verified-results). With the defaults (`--book ladder
 --threads 2`) its replay loop takes about 54 s of wall time on the machine described under
-[Performance](#performance), and about 77 s with `--threads 1`.
+[Performance](#performance), and about 78 s with `--threads 1`.
 
 Once `chronos-serve` has built a day into its per-symbol store (see [Trading Terminal](#trading-terminal)), `replay`
 and `backtest` read one symbol's day from the store in place of the day file, its own bytes alone:
@@ -667,8 +667,8 @@ options, both commands:
   --check-invariants N    check the book every N applied events (default 0 = only at the end)
   --capacity N            order slots reserved for the book, at most 1073741824 (default 1048576);
                           with --symbols or --all, shared by every book (default 4194304)
-  --book B                the price levels: list (default), each side a list found through an index;
-                          or ladder, which adds a window of 256 price units around each side's best
+  --book B                the price levels: ladder (default), a window of 256 cents around each
+                          side's best over its list and index; or list, the list and index alone
   --threads N             2 (default): one thread decodes, one applies; 1: one thread does both
   --json PATH             also write the results, metrics, build and input as JSON;
                           backtest adds its config, fills, fees and PnL
@@ -765,9 +765,8 @@ A bad argument prints a two-line error on stderr and exits 2. `--json PATH` writ
 
 **Not yet:**
 - **Regulatory sell fees:** SEC Section 31 and FINRA TAF.
-- **More performance work, each gated on the profile:** placing a new price level, now 44 % of the book thread's
-  time, by a ladder whose window counts exchange ticks (today's counts price units: 256 of them are $0.0256 in ITCH,
-  about one cent level per side), then cheaper ITCH decoding.
+- **More performance work, each gated on the profile:** placing new price levels, still 40 % of the book thread's
+  time (the ladder's scan of its window, the list's walk), then cheaper ITCH decoding.
 - **LOBSTER:** a second real adapter, and a check of `MarketBook` against LOBSTER's own book after every message.
 - **`MergedSource`:** a k-way merge by timestamp, for multi-venue or multi-day replay.
 - **Replay through `EventLoop`:** run the replay through `EventLoop` with a null strategy once its throughput is
