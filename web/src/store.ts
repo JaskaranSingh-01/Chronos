@@ -49,6 +49,7 @@ export interface Env {
   load(key: string): string | null;
   save(key: string, value: string): void;
   host(): string;
+  frame(f: () => void): void; // runs `f` before the next paint
 }
 
 const tapeSize = 512;
@@ -272,9 +273,17 @@ export function createStore(env: Env) {
   let socket: { send(text: string): void } | null = null;
   const listeners = new Set<() => void>();
 
+  // The state changes with every message, but its listeners hear of it once a frame: a run watched at Max sends
+  // thousands of messages a second, and the screen shows 60.
+  let notifying = false;
   const set = (next: State) => {
     state = next;
-    listeners.forEach((f) => f());
+    if (notifying) return;
+    notifying = true;
+    env.frame(() => {
+      notifying = false;
+      listeners.forEach((f) => f());
+    });
   };
   const api = (path: string) => env.fetch(path, token ? { headers: { Authorization: `Bearer ${token}` } } : undefined);
 
@@ -451,6 +460,7 @@ export const store = createStore({
   load: (key) => sessionStorage.getItem(key),
   save: (key, value) => sessionStorage.setItem(key, value),
   host: () => location.host,
+  frame: (f) => void requestAnimationFrame(f),
 });
 
 // A controller that has not loaded a symbol yet: generation 1 is the empty ticker.

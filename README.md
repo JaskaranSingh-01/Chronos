@@ -480,6 +480,22 @@ the run took 19.6 to 20.3 s while the terminal played, 21.4 to 22.6 s on the idl
 beyond the runs' own spread. Both then read the same day file and shared its page cache; each now reads only its own
 symbol's segments.
 
+**Where the page's time goes:**
+
+```bash
+CHRONOS_LAG_FILE=../data/itch/12302019.NASDAQ_ITCH50.bin npx playwright test lag
+```
+
+It plays a symbol at each speed, switches to the Lab and back while it plays, then runs the default strategy and
+watches it at Max. For each window it prints the WebSocket messages and bytes a second, the time the socket's handler
+took, the long tasks and the frame gaps. `CHRONOS_LAG_SYMBOL`, `CHRONOS_LAG_DATE`, `CHRONOS_LAG_STORE` and
+`CHRONOS_LAG_OUT` work as the benchmark's options do. On 2026-10-27, AAPL with the market maker: watching the run at
+Max brings about 14,000 messages a second, its orders' reports. Every message used to tell every listener, and the
+chart then redrew every fill marker, so the handler took 67 % of the main thread and the page drew 31 frames a second,
+41 of them over 50 ms. The store now tells its listeners once a frame: 1.9 %, and 60 frames a second, none over 50 ms.
+Switching to the Lab cost one 96 ms task, as the symbol list's 8,906 options were added one by one to a mounted list;
+the list now mounts whole, and the switch has no long task.
+
 ### Strategy Lab
 
 `chronos-serve` also runs backtests in the background, one at a time on a worker thread, while the terminal plays:

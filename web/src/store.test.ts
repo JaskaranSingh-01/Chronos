@@ -525,6 +525,7 @@ describe('createStore', () => {
     const sent: string[] = [];
     const fetched: string[] = [];
     const saved = new Map<string, string>();
+    const frames: (() => void)[] = [];
     let socket: Parameters<Env['connect']>[1] | undefined;
     let connects = 0;
     const env: Env = {
@@ -544,9 +545,10 @@ describe('createStore', () => {
       load: (key) => saved.get(key) ?? null,
       save: (key, value) => void saved.set(key, value),
       host: () => '127.0.0.1:8080',
+      frame: (f) => void frames.push(f),
     };
     const histories = () => fetched.filter((path) => path.startsWith('/api/history')).length;
-    return { env, sent, fetched, saved, socket: () => socket!, connects: () => connects, histories };
+    return { env, sent, fetched, saved, frames, socket: () => socket!, connects: () => connects, histories };
   }
 
   const json = (m: ServerMessage) => JSON.stringify(m);
@@ -601,6 +603,18 @@ describe('createStore', () => {
     const asking = createStore(none.env);
     await asking.start();
     expect(asking.get().status).toBe('token');
+  });
+
+  it('applies each message as it comes, but tells its listeners once a frame', async () => {
+    const f = fake();
+    const store = await connected(f, hello(), snapshot({ type: 'state', last_report_seq: 0 }));
+    f.frames.splice(0).forEach((frame) => frame());
+    let heard = 0;
+    store.subscribe(() => heard++);
+    [1, 2, 3].forEach((seq) => f.socket().message(json(fill(seq))));
+    expect([store.get().fills.length, heard, f.frames.length]).toEqual([3, 0, 1]);
+    f.frames.splice(0).forEach((frame) => frame());
+    expect([heard, f.frames.length]).toEqual([1, 0]);
   });
 
   it('in token mode a reconnect authenticates before it resyncs', async () => {

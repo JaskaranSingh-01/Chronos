@@ -10,10 +10,11 @@ const speeds: [number, string][] = [
   [0, 'Max'],
 ];
 
-// The day's symbols, memoised: a snapshot re-renders the bar, and these are thousands of options.
+// The day's symbols, memoised: a snapshot re-renders the bar, and these are thousands of options. Keyed by their
+// count, so a list that arrives mounts whole: options added one by one to a mounted list cost React O(n²).
 export const Symbols = memo(function Symbols({ id, symbols }: { id: string; symbols: string[] }) {
   return (
-    <datalist id={id}>
+    <datalist id={id} key={symbols.length}>
       {symbols.map((s) => (
         <option key={s} value={s} />
       ))}
