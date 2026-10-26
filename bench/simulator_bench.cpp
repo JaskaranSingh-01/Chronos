@@ -1,10 +1,10 @@
 // Micro-benchmarks of the replay hot paths (cmake -DCHRONOS_BENCH=ON): MarketBook::apply
 // per event type at depth 1,000 (in cache) and 1,000,000 (not) for each level backend
 // (book:0 list, book:1 ladder), a churn of levels around a moving touch, the backend chosen
-// at run time against one fixed at compile time, ItchSource::next, and OrderPool release +
-// acquire, as the mean ns per operation of a manually timed batch; the CPU column also counts
-// untimed setup, so it is not comparable. BM_EventLoop is the exception: ms per EventLoop run
-// over 1,000,000 events.
+// at run time against one fixed at compile time, ItchSource::next, OrderPool release +
+// acquire, and the SPSC ring between two threads, as the mean ns per operation of a manually
+// timed batch; the CPU column also counts untimed setup, so it is not comparable. BM_EventLoop
+// is the exception: ms per EventLoop run over 1,000,000 events.
 
 #include <benchmark/benchmark.h>
 
@@ -17,6 +17,7 @@
 #include <random>
 #include <span>
 #include <string>
+#include <thread>
 #include <vector>
 
 #include "itch/itch_test_builder.hpp"
@@ -24,6 +25,7 @@
 #include "simulator/itch/itch_source.hpp"
 #include "simulator/market/instrument_registry.hpp"
 #include "simulator/market/market_book.hpp"
+#include "simulator/market/spsc_ring.hpp"
 #include "simulator/market/vector_source.hpp"
 #include "simulator/orders/order_book.hpp"
 #include "simulator/orders/order_pool.hpp"
@@ -434,6 +436,40 @@ void BM_PoolReleaseAcquire(benchmark::State& state)
     }
 }
 
+// 2^20 events, each with a position as the pipeline's slots hold them, through a ring of 65,536 from a producer
+// thread to this one, both spinning: ns per event through the ring alone (spec §5.1).
+void BM_Ring(benchmark::State& state)
+{
+    struct Slot
+    {
+        MarketEvent event{};
+        std::uint64_t position{0};
+    };
+    constexpr std::uint64_t events = std::uint64_t{1} << 20;
+    SpscRing<Slot> ring{65'536};
+
+    for (auto _ : state) {
+        const clock_type::time_point start = clock_type::now();
+        std::thread producer{[&ring] {
+            for (std::uint64_t i = 0; i < events; ++i) {
+                const Slot slot{.event = {.order_id = i}, .position = i};
+                while (!ring.try_push(slot)) {
+                }
+            }
+        }};
+        Slot slot;
+        std::uint64_t sum = 0;
+        for (std::uint64_t i = 0; i < events; ++i) {
+            while (!ring.try_pop(slot)) {
+            }
+            sum += slot.position;
+        }
+        producer.join();
+        state.SetIterationTime(seconds(clock_type::now() - start) / static_cast<double>(events));
+        benchmark::DoNotOptimize(sum);
+    }
+}
+
 // n valid events 1 us apart: adds off the mid (never crossed), interleaved with partial executes and deletes.
 std::vector<MarketEvent> loop_stream(std::size_t n)
 {
@@ -551,6 +587,7 @@ BENCHMARK(BM_PoolReleaseAcquire)
     ->Arg(4'194'304)
     ->UseManualTime()
     ->Iterations(kIterations);
+BENCHMARK(BM_Ring)->UseManualTime()->Iterations(8);
 BENCHMARK(BM_EventLoop)->ArgName("mm")->Arg(0)->Arg(1)->UseManualTime()->Unit(benchmark::kMillisecond)->Iterations(5);
 
 } // namespace

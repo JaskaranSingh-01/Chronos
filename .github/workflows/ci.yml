@@ -10,7 +10,8 @@
 # - isolation: the engine (include/, src/, app/) never includes server or web code, and
 #   simulator_lib links only the standard library; and nothing on the replay path calls an
 #   allocator or grows a container outside its setup (scripts/check-hot-path.sh).
-# - server-tsan: chronos_server_tests under ThreadSanitizer (Linux clang; TSan does not start on macOS 27).
+# - server-tsan: chronos_server_tests, and simulator_tests with the replay's SPSC ring and its two-thread pipeline,
+#   under ThreadSanitizer (Linux clang; TSan does not start on macOS 27).
 # - web: the Trading Terminal and the Strategy Lab (web/): typecheck, build and Vitest, then the Playwright end-to-end
 #   tests against a Release chronos-serve on the fixture days chronos-e2e-fixture writes (with --lab, the Lab's).
 name: CI
@@ -85,9 +86,11 @@ jobs:
           -DCMAKE_CXX_COMPILER=clang++
           -DCHRONOS_SANITIZE=thread
       - name: Build
-        run: cmake --build build --parallel 4 --target chronos_server_tests
+        run: cmake --build build --parallel 4 --target chronos_server_tests simulator_tests
       - name: Test
-        run: TSAN_OPTIONS=halt_on_error=1 ./build/chronos_server_tests --gtest_brief=1
+        run: |
+          TSAN_OPTIONS=halt_on_error=1 ./build/chronos_server_tests --gtest_brief=1
+          TSAN_OPTIONS=halt_on_error=1 ./build/simulator_tests --gtest_brief=1
 
   web:
     runs-on: ubuntu-latest
