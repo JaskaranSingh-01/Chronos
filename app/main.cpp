@@ -8,6 +8,7 @@
 #include <ctime>
 #include <filesystem>
 #include <numeric>
+#include <optional>
 #include <span>
 #include <string>
 #include <string_view>
@@ -30,6 +31,7 @@
 #include "simulator/itch/itch_source.hpp"
 #include "simulator/market/market_books.hpp"
 #include "simulator/market/market_replay.hpp"
+#include "simulator/market/pipeline_source.hpp"
 #include "simulator/metrics/latency_histogram.hpp"
 #include "simulator/store/store.hpp"
 #include "simulator/strategies/imbalance_taker.hpp"
@@ -186,6 +188,7 @@ void print_config(const char* command, const ReplayArgs& args, std::span<const s
     std::printf("  capacity         %zu orders%s\n", args.capacity,
                 args.symbol.empty() ? ", shared by every book" : "");
     std::printf("  book             %s\n", book_name(args.book));
+    std::printf("  threads          %u%s\n", args.threads, args.threads == 2 ? ": one decodes, one applies" : "");
 }
 
 // "Applied N, rejected M" (after `indent`) and the rejections by reason.
@@ -208,7 +211,8 @@ void print_failure(const ReplayReport& report, const ReplayArgs& args, std::uint
         return;
     }
     std::printf("\nFAILED: %.*s", static_cast<int>(report.message.size()), report.message.data());
-    if (failed_message_type != 0) {
+    // On two threads the source reads ahead of the book thread: after its failure, the type is not the event's.
+    if (failed_message_type != 0 && (args.threads == 1 || report.failure == ReplayFailure::SourceError)) {
         std::printf(" in message type '%c'", failed_message_type);
     }
     std::printf(" at position %" PRIu64 " (byte offset)\n", report.failed_position);
@@ -276,7 +280,7 @@ struct RunMetrics
     std::uint64_t allocations{0};      // operator new calls during run()
     std::int64_t heap_blocks_change{0};  // the heap's blocks in use after run() minus before (spec §3.3)
     std::int64_t heap_bytes_change{0};
-    std::uint64_t reserved_bytes{0};   // set up before run(): the book storage, and the books of --symbols or --all
+    std::uint64_t reserved_bytes{0};   // set up before run(): the book storage, the books, the registry, the ring
     std::uint64_t windows_reserved_bytes{0};  // --book ladder: the windows' part of reserved_bytes
     std::uint64_t windows_touched_bytes{0};   // and of those, the windows of the books made
     std::uint64_t major_faults{0};     // page faults that waited for I/O
@@ -284,6 +288,49 @@ struct RunMetrics
     std::uint64_t peak_footprint{0};   // bytes, macOS only; excludes clean file pages such as the mapped file
     const LatencyHistogram* latency{nullptr};  // --latency only
     std::uint64_t latency_batch{0};
+    unsigned threads{1};  // with 2, latency is the book thread's alone
+};
+
+// The replay's source: the input's own, or with --threads 2 a PipelineSource reading it on a thread of its own (spec
+// §4.1). Its thread and ring are made here, before the measured interval; run() starts and stops it inside.
+class ReplayInput
+{
+private:
+    MarketEventSource& source_;
+    std::optional<PipelineSource> pipeline_;
+
+public:
+    ReplayInput(MarketEventSource& source, unsigned threads)
+        : source_(source)
+    {
+        if (threads == 2) {
+            pipeline_.emplace(source);
+        }
+    }
+
+    MarketEventSource& source() noexcept
+    {
+        return pipeline_ ? static_cast<MarketEventSource&>(*pipeline_) : source_;
+    }
+
+    // The ring's.
+    std::size_t bytes() const noexcept
+    {
+        return pipeline_ ? pipeline_->bytes() : 0;
+    }
+
+    template <class Replay>
+    auto run(Replay&& replay)
+    {
+        if (pipeline_) {
+            pipeline_->start();
+        }
+        auto result = replay();
+        if (pipeline_) {
+            pipeline_->stop();
+        }
+        return result;
+    }
 };
 
 // Runs run() and records its wall and CPU time, allocations, faults and the process peaks.
@@ -373,10 +420,10 @@ void print_metrics(const RunRecord& run, std::uint64_t file_bytes)
     }
     if (m.latency != nullptr) {
         const LatencyHistogram& h = *m.latency;
-        std::printf("Latency           ns/event over %" PRIu64 " batches of %" PRIu64 " events (timer tick %.1f ns): "
+        std::printf("Latency           ns/event%s over %" PRIu64 " batches of %" PRIu64 " events (timer tick %.1f ns): "
                     "p50 %" PRIu64 ", p90 %" PRIu64 ", p99 %" PRIu64 ", p99.9 %" PRIu64 ", max %" PRIu64 "\n",
-                    h.count(), m.latency_batch, timer_tick_ns(), h.percentile(0.5), h.percentile(0.9),
-                    h.percentile(0.99), h.percentile(0.999), h.max());
+                    m.threads == 2 ? " on the book thread" : "", h.count(), m.latency_batch, timer_tick_ns(),
+                    h.percentile(0.5), h.percentile(0.9), h.percentile(0.99), h.percentile(0.999), h.max());
     }
 }
 
@@ -471,11 +518,11 @@ bool write_json(const ReplayArgs& args, std::span<const std::byte> input, const 
                  static_cast<long long>(::sysconf(_SC_PHYS_PAGES)) * ::sysconf(_SC_PAGESIZE), os.sysname, os.release);
     std::fprintf(out, "  \"input\": {\"path\": \"%s\", \"bytes\": %zu, \"fingerprint\": \"%016" PRIx64 "\"},\n",
                  json_escape(args.store.empty() ? args.file : args.store).c_str(), input.size(), fingerprint(input));
-    std::fprintf(
-        out,
-        "  \"run\": {\"symbols\": \"%s\", \"capacity\": %zu, \"book\": \"%s\", \"check_invariants_every\": %" PRIu64
-        "},\n",
-        json_escape(symbols_mode(args)).c_str(), args.capacity, book_name(args.book), args.check_invariants_every);
+    std::fprintf(out,
+                 "  \"run\": {\"symbols\": \"%s\", \"capacity\": %zu, \"book\": \"%s\", \"threads\": %u, "
+                 "\"check_invariants_every\": %" PRIu64 "},\n",
+                 json_escape(symbols_mode(args)).c_str(), args.capacity, book_name(args.book), args.threads,
+                 args.check_invariants_every);
     std::fprintf(out,
                  "  \"result\": {\"events\": %" PRIu64 ", \"messages\": %" PRIu64 ", \"rejected\": %" PRIu64
                  ", \"digest\": \"%016" PRIx64 "\", \"books\": %zu, \"books_not_empty\": %zu, "
@@ -503,10 +550,11 @@ bool write_json(const ReplayArgs& args, std::span<const std::byte> input, const 
         const LatencyHistogram& h = *m.latency;
         std::fprintf(out,
                      "  \"latency\": {\"batch_events\": %" PRIu64 ", \"batches\": %" PRIu64
-                     ", \"timer_tick_ns\": %.2f, "
+                     ", \"timer_tick_ns\": %.2f, \"of\": \"%s\", "
                      "\"ns_per_event\": {\"p50\": %" PRIu64 ", \"p90\": %" PRIu64 ", \"p99\": %" PRIu64
                      ", \"p99_9\": %" PRIu64 ", \"max\": %" PRIu64 "}}\n}\n",
-                     m.latency_batch, h.count(), timer_tick_ns(), h.percentile(0.5), h.percentile(0.9),
+                     m.latency_batch, h.count(), timer_tick_ns(),
+                     m.threads == 2 ? "the book thread" : "decode and apply", h.percentile(0.5), h.percentile(0.9),
                      h.percentile(0.99), h.percentile(0.999), h.max());
     }
     return std::fclose(out) == 0;
@@ -591,8 +639,12 @@ int replay(const ReplayArgs& args)
 
     LatencyHistogram latency;
     const ReplayOptions options = replay_options(args, midnight, latency);
+    ReplayInput in{source, args.threads};
     RunRecord run;
-    const ReplayReport report = measured([&] { return MarketReplay::run(source, book, options); }, run.metrics);
+    run.metrics.reserved_bytes = book.storage().bytes() + in.bytes();
+    run.metrics.windows_reserved_bytes = run.metrics.windows_touched_bytes = book.storage().window_bytes(1);
+    const ReplayReport report =
+        measured([&] { return in.run([&] { return MarketReplay::run(in.source(), book, options); }); }, run.metrics);
 
     const ItchSourceStatistics& stats = source.statistics();
     std::printf("\nSource\n");
@@ -619,8 +671,7 @@ int replay(const ReplayArgs& args)
     const bool invariants = print_final_book(book, report, args.depth, source.instrument().price_scale, midnight);
 
     fill_record(run, report, book, stats.messages, invariants);
-    run.metrics.reserved_bytes = book.storage().bytes();
-    run.metrics.windows_reserved_bytes = run.metrics.windows_touched_bytes = book.storage().window_bytes(1);
+    run.metrics.threads = args.threads;
     run.metrics.latency = options.latency;
     run.metrics.latency_batch = options.latency_batch;
     print_metrics(run, input.size());
@@ -678,8 +729,13 @@ int replay_books(const ReplayArgs& args)
 
     LatencyHistogram latency;
     const ReplayOptions options = replay_options(args, midnight, latency);
+    ReplayInput in{source, args.threads};
     RunRecord run;
-    const BooksReplayReport report = measured([&] { return MarketReplay::run(source, books, options); }, run.metrics);
+    run.metrics.reserved_bytes =
+        storage.bytes() + books.bytes() + registry.capacity() * sizeof(Instrument) + in.bytes();
+    run.metrics.windows_reserved_bytes = storage.window_bytes(registry.capacity());
+    const BooksReplayReport report =
+        measured([&] { return in.run([&] { return MarketReplay::run(in.source(), books, options); }); }, run.metrics);
     const ReplayReport& total = report.total;
 
     const ItchSourceStatistics& stats = source.statistics();
@@ -811,9 +867,8 @@ int replay_books(const ReplayArgs& args)
     run.books_not_empty = non_empty;
     run.peak_live_orders = report.peak_live_orders;
     run.succeeded = total.succeeded() && invariants;
-    run.metrics.reserved_bytes = storage.bytes() + books.bytes() + registry.capacity() * sizeof(Instrument);
-    run.metrics.windows_reserved_bytes = storage.window_bytes(registry.capacity());
     run.metrics.windows_touched_bytes = storage.window_bytes(books.size());
+    run.metrics.threads = args.threads;
     run.metrics.latency = options.latency;
     run.metrics.latency_batch = options.latency_batch;
     print_metrics(run, file.bytes().size());
@@ -963,12 +1018,15 @@ int backtest(const ReplayArgs& args)
     ExecutionSimulator execution{midnight};
     Portfolio portfolio{instrument, limits, fees};
     const ReplayOptions options{.check_invariants_every = args.check_invariants_every, .session_midnight = midnight};
+    ReplayInput in{source, args.threads};
 
     auto run = [&]<Strategy S>(S& strategy) {
-        EventLoop<S> loop{source, book, execution, portfolio, strategy, latency, options};
+        EventLoop<S> loop{in.source(), book, execution, portfolio, strategy, latency, options};
 
         RunRecord record;
-        const LoopReport report = measured([&] { return loop.run(); }, record.metrics);
+        record.metrics.reserved_bytes = book.storage().bytes() + in.bytes();
+        record.metrics.windows_reserved_bytes = record.metrics.windows_touched_bytes = book.storage().window_bytes(1);
+        const LoopReport report = measured([&] { return in.run([&] { return loop.run(); }); }, record.metrics);
         const ReplayReport& replay = report.replay;
 
         std::printf("\nReplay\n");
@@ -1003,8 +1061,6 @@ int backtest(const ReplayArgs& args)
 
         const bool invariants = print_final_book(book, replay, args.depth, price_scale, midnight);
         fill_record(record, replay, book, source.statistics().messages, invariants);
-        record.metrics.reserved_bytes = book.storage().bytes();
-        record.metrics.windows_reserved_bytes = record.metrics.windows_touched_bytes = book.storage().window_bytes(1);
         print_metrics(record, input.size());
 
         if (!args.json.empty() &&

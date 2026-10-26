@@ -49,17 +49,18 @@ TEST(SpscRingTest, TwoThreadsPassValuesInOrderThroughASmallRing)
     }};
 
     std::uint64_t expected = 1;
+    std::uint64_t wrong = 0;  // checked after the join: a failed ASSERT here would leave the producer joinable
     Item item;
     while (expected <= count) {
         if (!ring.try_pop(item)) {
             std::this_thread::yield();
             continue;
         }
-        ASSERT_EQ(item.seq, expected);
-        ASSERT_EQ(item.check, ~expected);
+        wrong += item.seq != expected || item.check != ~expected;
         ++expected;
     }
     producer.join();
+    EXPECT_EQ(wrong, 0u);
     EXPECT_FALSE(ring.try_pop(item));
 }
 

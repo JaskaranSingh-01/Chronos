@@ -61,6 +61,7 @@ add_library(simulator_lib
     src/csv/csv_source.cpp
     src/itch/itch_source.cpp
     src/market/market_replay.cpp
+    src/market/pipeline_source.cpp
     src/cli/replay_args.cpp
     src/portfolio/portfolio.cpp
     src/sim/execution_simulator.cpp
@@ -404,10 +405,14 @@ chronos_cli_test(MissingFileExitsTwo 2 replay /nonexistent/chronos-missing.itch 
 chronos_cli_test(FailedRunExitsOne 1 replay /dev/null --symbol AAPL --date 2019-12-30)
 
 # The allocation count is read immediately around MarketReplay::run (spec §3.3): opening the file and building the
-# source, the book and the report all allocate, and a run() that allocates nothing still counts 0.
+# source, the book and the report all allocate, and a run() that allocates nothing still counts 0. With --threads 2 the
+# decoder's thread and ring are made before it.
 add_test(NAME SimulatorCliTest.TheAllocationCountCoversOnlyTheReplay
-         COMMAND sh -c "\"$0\" replay /dev/null --symbol AAPL --date 2019-12-30 --json \"$1\" > /dev/null;
-                        grep -q '\"allocations\": 0,' \"$1\""
+         COMMAND sh -c "for threads in 1 2; do
+                            rm -f \"$1\"
+                            \"$0\" replay /dev/null --symbol AAPL --date 2019-12-30 --threads $threads --json \"$1\" > /dev/null
+                            grep -q '\"allocations\": 0,' \"$1\" || exit 1
+                        done"
                  $<TARGET_FILE:simulator> ${PROJECT_BINARY_DIR}/allocation-interval.json)
 
 # A full book stops the replay and says what is full (spec §3.2): ACME's day adds two orders, and --capacity holds one.
@@ -420,16 +425,17 @@ add_test(NAME SimulatorCliTest.AFullOrderPoolStopsTheReplayAndSaysSo
 
 # A replay allocates nothing once it starts (spec §3.3): no allocation counted, and the heap unchanged, in a replay of
 # every symbol of the Lab's Monday (ACME, ZETA and IDLE) and of one of them, with either backend (the ladder's windows
-# reserved). ASan builds count nothing (its allocator owns the heap), so the Release, UBSan and macOS jobs enforce this.
+# reserved), on one thread or two. ASan builds count nothing (its allocator owns the heap), so the Release, UBSan and
+# macOS jobs enforce this.
 add_test(NAME SimulatorCliTest.AReplayAllocatesNothing
          COMMAND sh -c "dir=$(mktemp -d) && \"$1\" \"$dir\" --lab || exit 1
-                        for symbols in --all '--symbol ACME'; do for book in list ladder; do
-                            \"$0\" replay \"$dir/12302019.NASDAQ_ITCH50.bin\" $symbols --date 2019-12-30 --book $book --json \"$dir/run.json\" > /dev/null &&
+                        for symbols in --all '--symbol ACME'; do for book in list ladder; do for threads in 1 2; do
+                            \"$0\" replay \"$dir/12302019.NASDAQ_ITCH50.bin\" $symbols --date 2019-12-30 --book $book --threads $threads --json \"$dir/run.json\" > /dev/null &&
                                 grep -q '\"allocations\": 0,' \"$dir/run.json\" &&
                                 grep -q '\"heap_blocks_change\": 0, \"heap_bytes_change\": 0,' \"$dir/run.json\" &&
                                 { test $book = list || ! grep -q '\"windows_reserved_bytes\": 0,' \"$dir/run.json\"; } ||
                                 { rm -rf \"$dir\"; exit 1; }
-                        done; done; rm -rf \"$dir\""
+                        done; done; done; rm -rf \"$dir\""
                  $<TARGET_FILE:simulator> $<TARGET_FILE:chronos-e2e-fixture>)
 
 # --store: a symbol the store lacks on the day, or an index that is invalid, exits 2 and says which.

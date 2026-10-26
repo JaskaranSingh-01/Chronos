@@ -191,6 +191,9 @@ bool parse_replay_args(std::span<const std::string_view> args, ReplayArgs& out, 
         } else if (arg == "--capacity") {
             ok = has_capacity =
                 parse_number(value, parsed.capacity) && parsed.capacity > 0 && parsed.capacity <= max_capacity;
+        } else if (arg == "--threads") {
+            ok = value == "1" || value == "2";
+            parsed.threads = value == "2" ? 2 : 1;
         } else if (arg == "--book") {
             ok = value == "list" || value == "ladder";
             parsed.book = value == "ladder" ? BookBackend::Ladder : BookBackend::List;

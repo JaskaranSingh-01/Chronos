@@ -643,6 +643,7 @@ options, both commands:
                           with --symbols or --all, shared by every book (default 4194304)
   --book B                the price levels: list (default), each side a list found through an index;
                           or ladder, which adds a window of 256 ticks around each side's best
+  --threads N             1 (default): one thread decodes and applies; 2: one decodes, one applies
   --json PATH             also write the results, metrics, build and input as JSON;
                           backtest adds its config, fills, fees and PnL
 

@@ -120,7 +120,10 @@ BooksReplayReport MarketReplay::run(MarketEventSource& source, MarketBooks& book
             report.peak_live_orders = std::max(report.peak_live_orders, books.pool().in_use());
         });
 
-    books.sync();
+    // Once the source has ended, its registry is final on either thread: a book for every instrument.
+    if (report.total.failure == ReplayFailure::None || report.total.failure == ReplayFailure::SourceError) {
+        books.sync();
+    }
     if (report.total.failure == ReplayFailure::InvariantViolation ||
         report.total.failure == ReplayFailure::CapacityExhausted) {
         report.failed_symbol = event.symbol;

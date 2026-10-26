@@ -9,7 +9,9 @@ InstrumentRegistry::InstrumentRegistry(std::size_t capacity)
 
 RegisterResult InstrumentRegistry::add(const Instrument& instrument, SymbolId& id) noexcept
 {
-    for (std::size_t i = 0; i < size_; ++i) {
+    // Every access is atomic while size() may read on another thread; relaxed, as this thread is the one writer.
+    const std::size_t size = std::atomic_ref<std::size_t>{size_}.load(std::memory_order_relaxed);
+    for (std::size_t i = 0; i < size; ++i) {
         const Instrument& known = instruments_[i];
 
         if (known.venue != instrument.venue || known.native_symbol != instrument.native_symbol) {
@@ -24,12 +26,13 @@ RegisterResult InstrumentRegistry::add(const Instrument& instrument, SymbolId& i
         return RegisterResult::Existing;
     }
 
-    if (size_ == capacity_) {
+    if (size == capacity_) {
         return RegisterResult::Full;
     }
 
-    id = static_cast<SymbolId>(size_);
-    instruments_[size_++] = instrument;
+    id = static_cast<SymbolId>(size);
+    instruments_[size] = instrument;
+    std::atomic_ref<std::size_t>{size_}.store(size + 1, std::memory_order_release);
     return RegisterResult::Added;
 }
 

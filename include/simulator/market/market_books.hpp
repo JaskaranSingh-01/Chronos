@@ -1,5 +1,6 @@
 #pragma once
 
+#include <algorithm>
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -55,19 +56,19 @@ public:
         : registry_(registry), storage_(storage), slots_(registry.capacity())
     {}
 
-    // Makes the books of instruments registered since the last call.
-    void sync() noexcept
+    // Makes the books of instruments registered since the last call, up to `count` books in all.
+    void sync(std::size_t count = SIZE_MAX) noexcept
     {
-        for (; size_ < registry_.size(); ++size_) {
+        for (const std::size_t end = std::min(count, registry_.size()); size_ < end; ++size_) {
             slots_[size_].book.emplace(static_cast<SymbolId>(size_), storage_);
         }
     }
 
-    // nullptr if `id` is not registered.
+    // nullptr if `id` is not registered. Makes the books up to `id` only: a decoder may have registered more.
     MarketBook* find(SymbolId id) noexcept
     {
         if (id >= size_) {
-            sync();
+            sync(std::size_t{id} + 1);
         }
         return id < size_ ? &*slots_[id].book : nullptr;
     }

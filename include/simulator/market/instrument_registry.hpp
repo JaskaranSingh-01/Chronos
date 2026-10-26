@@ -1,6 +1,7 @@
 #pragma once
 
 #include <array>
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <memory>
@@ -37,7 +38,10 @@ class InstrumentRegistry
 private:
     std::unique_ptr<Instrument[]> instruments_;  // index = SymbolId
     std::size_t capacity_{0};
-    std::size_t size_{0};
+    // add() writes an instrument, then store-releases size_; size() and find() load-acquire it, so a replay's thread
+    // reads an instrument the source's thread registered (spec §4.1). atomic_ref keeps the registry movable, and before
+    // C++26 it takes no const object.
+    mutable std::size_t size_{0};
 
 public:
     // Reserves `capacity` instruments; the only allocation.
@@ -50,12 +54,12 @@ public:
     // nullptr if unknown.
     const Instrument* find(SymbolId id) const noexcept
     {
-        return id < size_ ? &instruments_[id] : nullptr;
+        return id < size() ? &instruments_[id] : nullptr;
     }
 
     std::size_t size() const noexcept
     {
-        return size_;
+        return std::atomic_ref<std::size_t>{size_}.load(std::memory_order_acquire);
     }
 
     std::size_t capacity() const noexcept
@@ -64,4 +68,4 @@ public:
     }
 };
 
-} // namespace simulator
+}  // namespace simulator

@@ -34,6 +34,7 @@ inline constexpr std::string_view usage =
     "                          with --symbols or --all, shared by every book (default 4194304)\n"
     "  --book B                the price levels: list (default), each side a list found through an index;\n"
     "                          or ladder, which adds a window of 256 ticks around each side's best\n"
+    "  --threads N             1 (default): one thread decodes and applies; 2: one decodes, one applies\n"
     "  --json PATH             also write the results, metrics, build and input as JSON;\n"
     "                          backtest adds its config, fills, fees and PnL\n"
     "\n"
@@ -134,6 +135,7 @@ struct ReplayArgs
     std::uint64_t check_invariants_every{0};
     std::size_t capacity{1'048'576};
     BookBackend book{BookBackend::List};
+    unsigned threads{1};  // --threads: 2 decodes on a thread of its own
     std::uint64_t latency_batch{0};  // replay --latency: events per timed batch; 0 = off
     std::string_view json;           // --json: where to write the run as JSON
     BacktestArgs backtest{};

@@ -1,5 +1,10 @@
 #include <gtest/gtest.h>
 
+#include <cstddef>
+#include <cstdint>
+#include <cstdio>
+#include <thread>
+
 #include "simulator/market/instrument_registry.hpp"
 
 namespace simulator {
@@ -106,6 +111,29 @@ TEST(InstrumentRegistryTest, FindOfUnknownIdIsNull)
     ASSERT_EQ(registry.add(aapl, id), RegisterResult::Added);
     EXPECT_NE(registry.find(0), nullptr);
     EXPECT_EQ(registry.find(1), nullptr);
+}
+
+// The decoder's thread adds instruments that the replay's thread reads (spec §4.1); TSan checks the order.
+TEST(InstrumentRegistryTest, AnInstrumentAddedOnOneThreadIsReadWholeOnAnother)
+{
+    constexpr std::size_t count = 1'000;
+    InstrumentRegistry registry{count};
+    std::thread adding{[&registry] {
+        for (std::size_t i = 0; i < count; ++i) {
+            Instrument instrument = aapl;
+            std::snprintf(instrument.native_symbol.data(), instrument.native_symbol.size(), "S%zu", i);
+            instrument.tick_size = static_cast<std::int64_t>(i);
+            SymbolId id{0};
+            registry.add(instrument, id);
+        }
+    }};
+
+    for (std::size_t seen = 0; seen < count;) {
+        for (const std::size_t size = registry.size(); seen < size; ++seen) {
+            EXPECT_EQ(registry.find(static_cast<SymbolId>(seen))->tick_size, static_cast<std::int64_t>(seen));
+        }
+    }
+    adding.join();
 }
 
 } // namespace

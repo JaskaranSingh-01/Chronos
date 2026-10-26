@@ -7,9 +7,11 @@ set -euo pipefail
 
 cd "$(git -C "$(dirname "$0")" rev-parse --show-toplevel)"
 
-# The replay path: the ITCH source, MarketReplay, the books, the order and level structures.
+# The replay path: the ITCH source, MarketReplay, the books, the order and level structures, and the ring and the
+# pipeline of --threads 2.
 files=(src/itch/*.cpp src/market/instrument_registry.cpp src/market/market_book.cpp src/market/market_replay.cpp
-       src/orders/*.cpp include/simulator/itch/*.hpp include/simulator/market/*.hpp include/simulator/orders/*.hpp)
+       src/market/pipeline_source.cpp src/orders/*.cpp include/simulator/itch/*.hpp include/simulator/market/*.hpp
+       include/simulator/orders/*.hpp)
 
 # FILE:FUNCTION, then why it is setup.
 setup=(

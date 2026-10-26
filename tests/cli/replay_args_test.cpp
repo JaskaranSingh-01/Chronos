@@ -31,7 +31,7 @@ TEST(ReplayArgsTest, ParsesEveryOption)
 {
     const Parsed p = parse({"replay", "day.bin", "--symbol", "MSFT", "--date", "2019-12-30", "--utc-offset", "+05:30",
                             "--allow-truncated-tail", "--depth", "10", "--check-invariants", "10000", "--capacity",
-                            "4096", "--book", "ladder"});
+                            "4096", "--book", "ladder", "--threads", "2"});
 
     ASSERT_TRUE(p.ok) << p.error;
     EXPECT_EQ(p.args.file, "day.bin");
@@ -43,6 +43,7 @@ TEST(ReplayArgsTest, ParsesEveryOption)
     EXPECT_EQ(p.args.check_invariants_every, 10'000u);
     EXPECT_EQ(p.args.capacity, 4'096u);
     EXPECT_EQ(p.args.book, BookBackend::Ladder);
+    EXPECT_EQ(p.args.threads, 2u);
 }
 
 TEST(ReplayArgsTest, DefaultsAndUsEasternOffsetFromDate)
@@ -57,6 +58,7 @@ TEST(ReplayArgsTest, DefaultsAndUsEasternOffsetFromDate)
     EXPECT_EQ(winter.args.check_invariants_every, 0u);
     EXPECT_EQ(winter.args.capacity, 1'048'576u);
     EXPECT_EQ(winter.args.book, BookBackend::List);
+    EXPECT_EQ(winter.args.threads, 1u);
 
     const Parsed summer = parse({"replay", "day.bin", "--symbol", "AAPL", "--date", "2012-06-21"});
     ASSERT_TRUE(summer.ok) << summer.error;
@@ -107,6 +109,9 @@ TEST(ReplayArgsTest, RejectsBadValues)
     EXPECT_FALSE(with("--frobnicate", "1"));
     EXPECT_FALSE(with("--book", "tree"));
     EXPECT_TRUE(with("--book", "list"));
+    EXPECT_FALSE(with("--threads", "3"));
+    EXPECT_FALSE(with("--threads", "0"));
+    EXPECT_TRUE(with("--threads", "1"));
     EXPECT_FALSE(parse({"replay", "a.bin", "b.bin", "--symbol", "AAPL", "--date", "2019-12-30"}).ok);
 }
 
@@ -467,6 +472,8 @@ TEST(ReplayArgsTest, UsageDocumentsEveryOption)
         replay({"--capacity", "4096"}),
         replay({"--book", "ladder"}),
         backtest({"--book", "list"}),
+        replay({"--threads", "2"}),
+        backtest({"--threads", "2"}),
         replay({"--latency"}),
         replay({"--latency-batch", "64"}),
         replay({"--json", "out.json"}),

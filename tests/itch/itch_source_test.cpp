@@ -4,6 +4,7 @@
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <cstdio>
 #include <string_view>
 #include <tuple>
 #include <vector>
@@ -12,6 +13,7 @@
 #include "itch_test_builder.hpp"
 #include "simulator/itch/itch_source.hpp"
 #include "simulator/market/market_replay.hpp"
+#include "simulator/market/pipeline_source.hpp"
 
 namespace simulator {
 namespace {
@@ -786,6 +788,58 @@ TEST(ItchEndToEndTest, TwoSymbolsReplayIntoTheirOwnBooks)
     EXPECT_EQ(aapl_book.digest(), 0x0aea5cceb65717a0u);
     EXPECT_EQ(msft_book.digest(), 0x82cdf53e816cbd93u);
     EXPECT_EQ(books.digest(), 0xc9221e0c79b01f1au);
+}
+
+// --all on two threads: the decoder registers each symbol at its R, all through the stream, while the book thread
+// makes the books of those it has read (spec §4.1). The outcome is one thread's. CI runs it under TSan.
+TEST(ItchEndToEndTest, EverySymbolRegisteredMidStreamReplaysOnTwoThreadsAsOnOne)
+{
+    ItchBuilder itch;
+    std::uint64_t ts = 1;
+    for (std::uint16_t locate = 1; locate <= 200; ++locate) {
+        char name[8];
+        std::snprintf(name, sizeof name, "S%03u", unsigned{locate});
+        itch.stock_directory(locate, ts++, name);
+        for (std::uint64_t k = 0; k < 20; ++k) {
+            itch.add_order(locate, ts++, std::uint64_t{locate} * 100 + k, k % 2 != 0 ? 'S' : 'B', 100, name,
+                           static_cast<std::uint32_t>(1'000'000 + (k % 2 != 0 ? 100 : -100) * static_cast<int>(k)));
+        }
+    }
+    const ItchSourceConfig config{.all_tickers = true, .session_date = 2019y / 12 / 30, .utc_offset = -5h};
+
+    // `ahead`: the decoder registers every symbol before the replay starts, through a ring that holds the stream.
+    auto replay = [&](int threads, std::size_t capacity = 8'192, bool ahead = false) {
+        InstrumentRegistry registry{std::size_t{1} << 16};
+        ItchSource source{itch.bytes(), config, registry};
+        BookStorage storage{capacity};
+        MarketBooks books{registry, storage};
+        BooksReplayReport report;
+        if (threads == 1) {
+            report = MarketReplay::run(source, books, {});
+        } else {
+            PipelineSource pipeline{source, ahead ? 4'096u : 4u};
+            pipeline.start();
+            while (ahead && registry.size() < 200) {
+                std::this_thread::yield();
+            }
+            report = MarketReplay::run(pipeline, books, {});
+            pipeline.stop();
+        }
+        return std::tuple{report, books.size(), books.digest()};
+    };
+
+    const auto one = replay(1);
+    EXPECT_TRUE(std::get<0>(one).total.succeeded());
+    EXPECT_EQ(std::get<0>(one).total.events, 4'000u);
+    EXPECT_EQ(std::get<1>(one), 200u);
+    EXPECT_EQ(replay(2), one);
+
+    // A full pool at S005's 20th add stops the replay: the books are those of the symbols read, however far
+    // ahead the decoder has registered.
+    const auto full = replay(1, 99);
+    EXPECT_EQ(std::get<0>(full).total.failure, ReplayFailure::CapacityExhausted);
+    EXPECT_EQ(std::get<1>(full), 5u);
+    EXPECT_EQ(replay(2, 99, true), full);
 }
 
 } // namespace

@@ -1,13 +1,20 @@
 #include <gtest/gtest.h>
 
+#include <algorithm>
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <random>
 #include <span>
+#include <string>
+#include <thread>
 #include <vector>
 
+#include "simulator/engine/event_loop.hpp"
 #include "simulator/market/market_books.hpp"
 #include "simulator/market/market_replay.hpp"
+#include "simulator/market/pipeline_source.hpp"
 #include "simulator/market/vector_source.hpp"
 #include "simulator/metrics/latency_histogram.hpp"
 
@@ -80,7 +87,43 @@ public:
     }
 };
 
-TEST(MarketReplayTest, CountsEveryEventByTypeAndResult)
+// MarketReplay::run on one thread, or on two (spec §4.3): the source read through a PipelineSource with a ring of 4,
+// so its threads wait on each other often.
+template <class Books>
+auto run_on(int threads, MarketEventSource& source, Books& books, const ReplayOptions& options)
+{
+    if (threads == 1) {
+        return MarketReplay::run(source, books, options);
+    }
+    PipelineSource pipeline{source, 4};
+    pipeline.start();
+    auto report = MarketReplay::run(pipeline, books, options);
+    pipeline.stop();
+    return report;
+}
+
+// Every replay test runs with one thread and with two.
+class Replays : public testing::TestWithParam<int>
+{
+protected:
+    template <class Books>
+    auto run(MarketEventSource& source, Books& books, const ReplayOptions& options) const
+    {
+        return run_on(GetParam(), source, books, options);
+    }
+};
+
+std::string threads_name(const testing::TestParamInfo<int>& info)
+{
+    return info.param == 1 ? "OneThread" : "TwoThreads";
+}
+
+class MarketReplayTest : public Replays
+{};
+
+INSTANTIATE_TEST_SUITE_P(Threads, MarketReplayTest, testing::Values(1, 2), threads_name);
+
+TEST_P(MarketReplayTest, CountsEveryEventByTypeAndResult)
 {
     using T = MarketEventType;
     std::vector<MarketEvent> input{
@@ -93,7 +136,7 @@ TEST(MarketReplayTest, CountsEveryEventByTypeAndResult)
 
     VectorSource source{input};
     MarketBook book{kSymbol, 8};
-    const ReplayReport report = MarketReplay::run(source, book, {});
+    const ReplayReport report = run(source, book, {});
 
     EXPECT_TRUE(report.succeeded());
     EXPECT_EQ(report.failure, ReplayFailure::None);
@@ -118,17 +161,17 @@ TEST(MarketReplayTest, CountsEveryEventByTypeAndResult)
     EXPECT_EQ(book.quantity_at(Side::Sell, Price{102}), 200u);
 }
 
-TEST(MarketReplayTest, EmptySourceSucceedsWithNothingCounted)
+TEST_P(MarketReplayTest, EmptySourceSucceedsWithNothingCounted)
 {
     VectorSource source{std::span<const MarketEvent>{}};
     MarketBook book{kSymbol, 1};
-    const ReplayReport report = MarketReplay::run(source, book, {.check_invariants_every = 1});
+    const ReplayReport report = run(source, book, {.check_invariants_every = 1});
 
     EXPECT_TRUE(report.succeeded());
     EXPECT_EQ(report, ReplayReport{});
 }
 
-TEST(MarketReplayTest, CountsRejectionsByReasonAndKeepsGoing)
+TEST_P(MarketReplayTest, CountsRejectionsByReasonAndKeepsGoing)
 {
     using T = MarketEventType;
     MarketEvent wrong_symbol = add(7, 9, Side::Buy, 100, 10);
@@ -145,7 +188,7 @@ TEST(MarketReplayTest, CountsRejectionsByReasonAndKeepsGoing)
 
     VectorSource source{input};
     MarketBook book{kSymbol, 4};
-    const ReplayReport report = MarketReplay::run(source, book, {});
+    const ReplayReport report = run(source, book, {});
 
     EXPECT_TRUE(report.succeeded());
     EXPECT_EQ(report.events, 8u);
@@ -162,7 +205,7 @@ TEST(MarketReplayTest, CountsRejectionsByReasonAndKeepsGoing)
     EXPECT_EQ(book.order_count(), 0u);
 }
 
-TEST(MarketReplayTest, OutOfOrderTimestampIsFatalAndNotApplied)
+TEST_P(MarketReplayTest, OutOfOrderTimestampIsFatalAndNotApplied)
 {
     const std::vector<MarketEvent> input{add(10, 1, Side::Buy, 100, 10), add(20, 2, Side::Buy, 100, 10),
                                          add(19, 3, Side::Buy, 100, 10),  // earlier than the event before it
@@ -170,7 +213,7 @@ TEST(MarketReplayTest, OutOfOrderTimestampIsFatalAndNotApplied)
 
     VectorSource source{input};
     MarketBook book{kSymbol, 8};
-    const ReplayReport report = MarketReplay::run(source, book, {});
+    const ReplayReport report = run(source, book, {});
 
     EXPECT_FALSE(report.succeeded());
     EXPECT_EQ(report.failure, ReplayFailure::OutOfOrderTimestamp);
@@ -182,13 +225,13 @@ TEST(MarketReplayTest, OutOfOrderTimestampIsFatalAndNotApplied)
     EXPECT_EQ(book.order_count(), 2u);  // neither 3 nor 4 reached the book
 }
 
-TEST(MarketReplayTest, SourceErrorIsFatalAndPropagated)
+TEST_P(MarketReplayTest, SourceErrorIsFatalAndPropagated)
 {
     const std::vector<MarketEvent> input{add(10, 1, Side::Buy, 100, 10)};
 
     FailingSource source{input, SourceError::TruncatedMessage, 1234};
     MarketBook book{kSymbol, 4};
-    const ReplayReport report = MarketReplay::run(source, book, {});
+    const ReplayReport report = run(source, book, {});
 
     EXPECT_FALSE(report.succeeded());
     EXPECT_EQ(report.failure, ReplayFailure::SourceError);
@@ -200,7 +243,7 @@ TEST(MarketReplayTest, SourceErrorIsFatalAndPropagated)
 }
 
 // A full pool or index stops the replay at the event that needed it, naming the structure (spec §3.2).
-TEST(MarketReplayTest, AFullStructureStopsTheReplayAndNamesIt)
+TEST_P(MarketReplayTest, AFullStructureStopsTheReplayAndNamesIt)
 {
     const std::vector<MarketEvent> input{add(1, 1, Side::Buy, 100, 10), add(2, 2, Side::Buy, 101, 10),
                                          add(3, 3, Side::Buy, 102, 10),  // no free order slot
@@ -208,7 +251,7 @@ TEST(MarketReplayTest, AFullStructureStopsTheReplayAndNamesIt)
 
     VectorSource source{input};
     MarketBook book{kSymbol, 2};
-    const ReplayReport report = MarketReplay::run(source, book, {});
+    const ReplayReport report = run(source, book, {});
 
     EXPECT_EQ(report.failure, ReplayFailure::CapacityExhausted);
     EXPECT_EQ(report.exhausted, BookStructure::OrderPool);
@@ -220,7 +263,7 @@ TEST(MarketReplayTest, AFullStructureStopsTheReplayAndNamesIt)
     EXPECT_EQ(to_string(BookStructure::LevelIndex), "the level index");
 }
 
-TEST(MarketReplayTest, ChecksInvariantsEveryNAppliedEvents)
+TEST_P(MarketReplayTest, ChecksInvariantsEveryNAppliedEvents)
 {
     std::vector<MarketEvent> input;
     for (OrderId id = 1; id <= 7; ++id) {
@@ -230,14 +273,14 @@ TEST(MarketReplayTest, ChecksInvariantsEveryNAppliedEvents)
 
     VectorSource source{input};
     MarketBook book{kSymbol, 16};
-    const ReplayReport report = MarketReplay::run(source, book, {.check_invariants_every = 3});
+    const ReplayReport report = run(source, book, {.check_invariants_every = 3});
 
     EXPECT_TRUE(report.succeeded());
     EXPECT_EQ(report.applied(), 7u);
     EXPECT_EQ(report.invariant_checks, 2u);  // after applied events 3 and 6
 }
 
-TEST(MarketReplayTest, CrossedBookFailsTheInvariantCheckOnlyInRth)
+TEST_P(MarketReplayTest, CrossedBookFailsTheInvariantCheckOnlyInRth)
 {
     constexpr Timestamp midnight = 1'577'682'000'000'000'000;  // 2019-12-30, -05:00
     constexpr Timestamp pre_market = midnight + RTH_OPEN_NS - 1;
@@ -252,11 +295,11 @@ TEST(MarketReplayTest, CrossedBookFailsTheInvariantCheckOnlyInRth)
 
     VectorSource quiet{before_open};
     MarketBook quiet_book{kSymbol, 4};
-    EXPECT_TRUE(MarketReplay::run(quiet, quiet_book, options).succeeded());
+    EXPECT_TRUE(run(quiet, quiet_book, options).succeeded());
 
     VectorSource crossed{after_open};
     MarketBook book{kSymbol, 4};
-    const ReplayReport report = MarketReplay::run(crossed, book, options);
+    const ReplayReport report = run(crossed, book, options);
 
     EXPECT_EQ(report.failure, ReplayFailure::InvariantViolation);
     EXPECT_EQ(report.invariant_error, InvariantError::CrossedInRth);
@@ -268,7 +311,7 @@ TEST(MarketReplayTest, CrossedBookFailsTheInvariantCheckOnlyInRth)
 
 // Halted, the book crosses at the open and passes every check; the Trading
 // status makes the same crossed book a violation.
-TEST(MarketReplayTest, HaltedBookMayCrossInRthUntilTradingResumes)
+TEST_P(MarketReplayTest, HaltedBookMayCrossInRthUntilTradingResumes)
 {
     constexpr Timestamp midnight = 1'577'682'000'000'000'000;
     constexpr Timestamp open = midnight + RTH_OPEN_NS;
@@ -279,7 +322,7 @@ TEST(MarketReplayTest, HaltedBookMayCrossInRthUntilTradingResumes)
 
     VectorSource source{events};
     MarketBook book{kSymbol, 4};
-    const ReplayReport report = MarketReplay::run(source, book, options);
+    const ReplayReport report = run(source, book, options);
 
     EXPECT_EQ(report.failure, ReplayFailure::InvariantViolation);
     EXPECT_EQ(report.invariant_error, InvariantError::CrossedInRth);
@@ -292,7 +335,7 @@ TEST(MarketReplayTest, HaltedBookMayCrossInRthUntilTradingResumes)
     EXPECT_EQ(to_string(TradingState::QuotationOnly), "QuotationOnly");
 }
 
-TEST(MarketReplayTest, SameInputGivesSameReportAndDigest)
+TEST_P(MarketReplayTest, SameInputGivesSameReportAndDigest)
 {
     using T = MarketEventType;
     std::mt19937_64 rng{42};
@@ -323,8 +366,8 @@ TEST(MarketReplayTest, SameInputGivesSameReportAndDigest)
     MarketBook first_book{kSymbol, 8'192};
     MarketBook second_book{kSymbol, 8'192};
 
-    const ReplayReport first = MarketReplay::run(first_source, first_book, options);
-    const ReplayReport second = MarketReplay::run(second_source, second_book, options);
+    const ReplayReport first = run(first_source, first_book, options);
+    const ReplayReport second = run(second_source, second_book, options);
 
     EXPECT_TRUE(first.succeeded());
     EXPECT_GT(first_book.order_count(), 0u);
@@ -332,7 +375,7 @@ TEST(MarketReplayTest, SameInputGivesSameReportAndDigest)
     EXPECT_EQ(first_book.digest(), second_book.digest());
 }
 
-TEST(MarketReplayTest, LatencyRecordsOneSamplePerFullBatchAndChangesNothingElse)
+TEST_P(MarketReplayTest, LatencyRecordsOneSamplePerFullBatchAndChangesNothingElse)
 {
     std::vector<MarketEvent> input;
     for (OrderId id = 1; id <= 10; ++id) {
@@ -346,8 +389,8 @@ TEST(MarketReplayTest, LatencyRecordsOneSamplePerFullBatchAndChangesNothingElse)
     MarketBook timed_book{kSymbol, 16};
     LatencyHistogram latency;
 
-    const ReplayReport plain = MarketReplay::run(plain_source, plain_book, {});
-    const ReplayReport timed = MarketReplay::run(timed_source, timed_book, {.latency = &latency, .latency_batch = 4});
+    const ReplayReport plain = run(plain_source, plain_book, {});
+    const ReplayReport timed = run(timed_source, timed_book, {.latency = &latency, .latency_batch = 4});
 
     EXPECT_EQ(latency.count(), 2u);  // events 1-4 and 5-8; 9-11 are a partial batch
     EXPECT_EQ(timed, plain);
@@ -378,7 +421,12 @@ std::uint64_t by_result(const SymbolReport& report, ApplyResult result)
     return report.by_result[static_cast<std::size_t>(result)];
 }
 
-TEST(MarketReplayBooksTest, RoutesEachEventToTheBookOfItsSymbol)
+class MarketReplayBooksTest : public Replays
+{};
+
+INSTANTIATE_TEST_SUITE_P(Threads, MarketReplayBooksTest, testing::Values(1, 2), threads_name);
+
+TEST_P(MarketReplayBooksTest, RoutesEachEventToTheBookOfItsSymbol)
 {
     using T = MarketEventType;
     const InstrumentRegistry registry = registry_of(3);
@@ -391,7 +439,7 @@ TEST(MarketReplayBooksTest, RoutesEachEventToTheBookOfItsSymbol)
     BookStorage storage{8};
     MarketBooks books{registry, storage};
     VectorSource source{input};
-    const BooksReplayReport report = MarketReplay::run(source, books, {});
+    const BooksReplayReport report = run(source, books, {});
 
     EXPECT_TRUE(report.total.succeeded());
     EXPECT_EQ(report.total.events, 7u);
@@ -429,7 +477,7 @@ TEST(MarketReplayBooksTest, RoutesEachEventToTheBookOfItsSymbol)
     EXPECT_TRUE(books.check_invariants(error, failed)) << to_string(error);
 }
 
-TEST(MarketReplayBooksTest, AFullSharedPoolStopsTheReplayInTheBookThatNeededIt)
+TEST_P(MarketReplayBooksTest, AFullSharedPoolStopsTheReplayInTheBookThatNeededIt)
 {
     const InstrumentRegistry registry = registry_of(2);
     const std::vector<MarketEvent> input{on(0, add(1, 1, Side::Buy, 100, 10)), on(1, add(2, 1, Side::Buy, 100, 10)),
@@ -439,7 +487,7 @@ TEST(MarketReplayBooksTest, AFullSharedPoolStopsTheReplayInTheBookThatNeededIt)
     BookStorage storage{2};
     MarketBooks books{registry, storage};
     VectorSource source{input};
-    const BooksReplayReport report = MarketReplay::run(source, books, {});
+    const BooksReplayReport report = run(source, books, {});
 
     EXPECT_EQ(report.total.failure, ReplayFailure::CapacityExhausted);
     EXPECT_EQ(report.total.exhausted, BookStructure::OrderPool);
@@ -451,7 +499,7 @@ TEST(MarketReplayBooksTest, AFullSharedPoolStopsTheReplayInTheBookThatNeededIt)
     EXPECT_EQ(report.peak_live_orders, 2u);
 }
 
-TEST(MarketReplayBooksTest, ChecksTheTouchedBookEveryNAppliedEventsAndNamesTheFailingSymbol)
+TEST_P(MarketReplayBooksTest, ChecksTheTouchedBookEveryNAppliedEventsAndNamesTheFailingSymbol)
 {
     constexpr Timestamp midnight = 1'577'682'000'000'000'000;  // 2019-12-30, -05:00
     constexpr Timestamp open = midnight + RTH_OPEN_NS;
@@ -464,8 +512,7 @@ TEST(MarketReplayBooksTest, ChecksTheTouchedBookEveryNAppliedEventsAndNamesTheFa
     BookStorage storage{8};
     MarketBooks books{registry, storage};
     VectorSource source{input};
-    const BooksReplayReport report =
-        MarketReplay::run(source, books, {.check_invariants_every = 1, .session_midnight = midnight});
+    const BooksReplayReport report = run(source, books, {.check_invariants_every = 1, .session_midnight = midnight});
 
     EXPECT_EQ(report.total.failure, ReplayFailure::InvariantViolation);
     EXPECT_EQ(report.total.invariant_error, InvariantError::CrossedInRth);
@@ -474,7 +521,7 @@ TEST(MarketReplayBooksTest, ChecksTheTouchedBookEveryNAppliedEventsAndNamesTheFa
     EXPECT_EQ(report.total.events, 4u);
 }
 
-TEST(MarketReplayBooksTest, InvariantsCompareTheSharedPoolWithAllBooks)
+TEST_P(MarketReplayBooksTest, InvariantsCompareTheSharedPoolWithAllBooks)
 {
     const InstrumentRegistry registry = registry_of(2);
     BookStorage storage{4};
@@ -493,11 +540,12 @@ TEST(MarketReplayBooksTest, InvariantsCompareTheSharedPoolWithAllBooks)
     EXPECT_EQ(error, InvariantError::PoolCountMismatch);
 }
 
-TEST(MarketReplayBooksTest, InvariantsCompareTheSharedLevelsWithAllBooks)
+TEST_P(MarketReplayBooksTest, InvariantsCompareTheSharedLevelsWithAllBooks)
 {
     const InstrumentRegistry registry = registry_of(2);
     BookStorage storage{4};
     MarketBooks books{registry, storage};
+    books.sync();  // both books
     ASSERT_EQ(books.find(0)->apply(on(0, add(1, 1, Side::Buy, 100, 10))), ApplyResult::Applied);
     InvariantError error{InvariantError::None};
     SymbolId failed{0};
@@ -516,7 +564,7 @@ TEST(MarketReplayBooksTest, InvariantsCompareTheSharedLevelsWithAllBooks)
     EXPECT_EQ(failed, 0u);
 }
 
-TEST(MarketReplayBooksTest, LatencyRecordsOneSamplePerFullBatch)
+TEST_P(MarketReplayBooksTest, LatencyRecordsOneSamplePerFullBatch)
 {
     const InstrumentRegistry registry = registry_of(2);
     std::vector<MarketEvent> input;
@@ -528,13 +576,13 @@ TEST(MarketReplayBooksTest, LatencyRecordsOneSamplePerFullBatch)
     MarketBooks books{registry, storage};
     VectorSource source{input};
     LatencyHistogram latency;
-    const BooksReplayReport report = MarketReplay::run(source, books, {.latency = &latency, .latency_batch = 3});
+    const BooksReplayReport report = run(source, books, {.latency = &latency, .latency_batch = 3});
 
     EXPECT_EQ(report.total.applied(), 9u);
     EXPECT_EQ(latency.count(), 3u);
 }
 
-TEST(MarketReplayBooksTest, CombinedDigestIsStableAndChangesWithAnyBook)
+TEST_P(MarketReplayBooksTest, CombinedDigestIsStableAndChangesWithAnyBook)
 {
     using T = MarketEventType;
     const InstrumentRegistry registry = registry_of(3);
@@ -559,7 +607,7 @@ TEST(MarketReplayBooksTest, CombinedDigestIsStableAndChangesWithAnyBook)
         BookStorage storage{4'096};
         MarketBooks books{registry, storage};
         VectorSource source{events};
-        report = MarketReplay::run(source, books, options);
+        report = run(source, books, options);
         return books.digest();
     };
 
@@ -582,6 +630,220 @@ TEST(MarketReplayBooksTest, CombinedDigestIsStableAndChangesWithAnyBook)
     EXPECT_NE(in_book_1, digest);
     EXPECT_NE(in_book_2, digest);
     EXPECT_NE(in_book_1, in_book_2);
+}
+
+// Counts its reads of the source behind it, so a test can wait for the decoder thread to reach a point.
+class Counted final : public MarketEventSource
+{
+    MarketEventSource& source_;
+    std::atomic<std::uint64_t> reads_{0};
+
+public:
+    explicit Counted(MarketEventSource& source)
+        : source_(source)
+    {}
+
+    SourceResult next(MarketEvent& event) noexcept override
+    {
+        const SourceResult result = source_.next(event);
+        reads_.fetch_add(1, std::memory_order_release);
+        return result;
+    }
+    std::uint64_t position() const noexcept override
+    {
+        return source_.position();
+    }
+    SourceError error() const noexcept override
+    {
+        return source_.error();
+    }
+
+    void wait_for(std::uint64_t reads) const
+    {
+        while (reads_.load(std::memory_order_acquire) < reads) {
+            std::this_thread::yield();
+        }
+    }
+};
+
+// What a books replay leaves: its report, each book's share and the books' digest.
+struct Outcome
+{
+    BooksReplayReport report;
+    std::vector<SymbolReport> symbols;
+    std::uint64_t digest{0};
+
+    bool operator==(const Outcome&) const = default;
+};
+
+// A replay of `events`, then an InvalidLength at 99 if `failing`, into two books with room for `capacity` orders: on
+// one thread, or on two through a ring of `ring` slots, the replay starting once the decoder has read `reads` times,
+// and stop() once it has read `reads` past the replay's last event (or to the end): as far ahead as it started.
+Outcome replay(std::span<const MarketEvent> events, int threads, const ReplayOptions& options = {},
+               std::size_t capacity = 1'024, std::size_t ring = 4, std::uint64_t reads = 0, bool failing = false)
+{
+    static const InstrumentRegistry registry = registry_of(2);
+    BookStorage storage{capacity};
+    MarketBooks books{registry, storage};
+    VectorSource vector{events};
+    FailingSource fails{events, SourceError::InvalidLength, 99};
+    MarketEventSource& source = failing ? static_cast<MarketEventSource&>(fails) : vector;
+    Outcome out;
+    if (threads == 1) {
+        out.report = MarketReplay::run(source, books, options);
+    } else {
+        Counted counted{source};
+        PipelineSource pipeline{counted, ring};
+        pipeline.start();
+        counted.wait_for(reads);
+        out.report = MarketReplay::run(pipeline, books, options);
+        if (reads != 0) {
+            counted.wait_for(std::min(pipeline.position() + reads, std::uint64_t{events.size()} + 1));
+        }
+        pipeline.stop();
+    }
+    for (SymbolId id = 0; id < books.size(); ++id) {
+        out.symbols.push_back(books.report(id));
+    }
+    out.digest = books.digest();
+    return out;
+}
+
+// 1,000 events over two books: Adds near 100, and Executes and Deletes of earlier ids, some unknown.
+std::vector<MarketEvent> two_books(std::size_t count)
+{
+    std::mt19937_64 rng{9};
+    std::vector<MarketEvent> events;
+    for (OrderId id = 1; events.size() < count; ++id) {
+        const auto symbol = static_cast<SymbolId>(rng() % 2);
+        const auto ts = static_cast<Timestamp>(events.size());
+        if (rng() % 2 == 0) {
+            events.push_back(on(symbol,
+                                add(ts, id, rng() % 2 == 0 ? Side::Buy : Side::Sell,
+                                    95 + static_cast<std::int64_t>(rng() % 10), 1 + rng() % 100)));
+        } else {
+            events.push_back(on(symbol,
+                                event(ts, rng() % 2 == 0 ? MarketEventType::Execute : MarketEventType::Delete,
+                                      1 + rng() % id, 1 + rng() % 50)));
+        }
+    }
+    return events;
+}
+
+TEST(PipelineSourceTest, AStreamToItsEndGivesOneThreadsWholeReport)
+{
+    const std::vector<MarketEvent> events = two_books(1'000);
+    const Outcome one = replay(events, 1);
+    EXPECT_TRUE(one.report.total.succeeded());
+    EXPECT_EQ(one.report.total.events, 1'000u);
+    EXPECT_GT(one.report.total.rejected(), 0u);
+    EXPECT_EQ(replay(events, 2), one);
+}
+
+TEST(PipelineSourceTest, ASourceErrorBeforeAnyEventOrAfterSomeEndsAsOneThreadEnds)
+{
+    const std::vector<MarketEvent> events = two_books(10);
+    for (const std::span<const MarketEvent> before : {std::span<const MarketEvent>{}, std::span{events}}) {
+        const Outcome one = replay(before, 1, {}, 1'024, 4, 0, true);
+        EXPECT_EQ(one.report.total.failure, ReplayFailure::SourceError);
+        EXPECT_EQ(one.report.total.source_error, SourceError::InvalidLength);
+        EXPECT_EQ(one.report.total.failed_position, 99u);
+        EXPECT_EQ(one.report.total.events, before.size());
+        EXPECT_EQ(replay(before, 2, {}, 1'024, 4, 0, true), one);
+    }
+}
+
+// The decoder thread fills the ring and reaches the end before the replay reads an event: every event is still read.
+TEST(PipelineSourceTest, AStreamThatEndsWithTheRingFullIsReadToItsLastEvent)
+{
+    const std::vector<MarketEvent> events = two_books(8);
+    const Outcome one = replay(events, 1);
+    EXPECT_EQ(replay(events, 2, {}, 1'024, 8, 9), one);  // 8 events in a ring of 8, then the end
+    EXPECT_EQ(one.report.total.events, 8u);
+}
+
+// An out-of-order timestamp at the 3rd event stops the replay while the decoder thread waits on a full ring: stop()
+// releases it.
+TEST(PipelineSourceTest, AFailureOnTheReplaysThreadReleasesTheDecoderWaitingOnAFullRing)
+{
+    std::vector<MarketEvent> events = two_books(1'000);
+    events[2].timestamp = -1;
+    const Outcome one = replay(events, 1);
+    ASSERT_EQ(one.report.total.failure, ReplayFailure::OutOfOrderTimestamp);
+    EXPECT_EQ(one.report.total.failed_position, 3u);
+    EXPECT_EQ(replay(events, 2, {}, 1'024, 4, 5), one);  // 4 in the ring and one in hand: the decoder waits
+}
+
+TEST(PipelineSourceTest, AFailureOnTheReplaysThreadAfterPartOfTheStreamEndsAsOneThreadEnds)
+{
+    std::vector<MarketEvent> events = two_books(1'000);
+    events[500].timestamp = 0;  // out of order
+    const Outcome out_of_order = replay(events, 1);
+    ASSERT_EQ(out_of_order.report.total.failure, ReplayFailure::OutOfOrderTimestamp);
+    EXPECT_EQ(replay(events, 2), out_of_order);
+
+    std::vector<MarketEvent> adds;
+    for (OrderId id = 1; id <= 100; ++id) {
+        adds.push_back(on(0, add(static_cast<Timestamp>(id), id, Side::Buy, static_cast<std::int64_t>(id), 1)));
+    }
+    const Outcome full = replay(adds, 1, {}, 50);  // 50 orders fit
+    ASSERT_EQ(full.report.total.failure, ReplayFailure::CapacityExhausted);
+    EXPECT_EQ(replay(adds, 2, {}, 50), full);
+
+    constexpr Timestamp midnight = 1'577'682'000'000'000'000;
+    std::vector<MarketEvent> crossing = two_books(600);
+    crossing.push_back(on(1, add(midnight + RTH_OPEN_NS, 10'001, Side::Buy, 200, 1)));  // above every ask
+    crossing.push_back(on(1, add(midnight + RTH_OPEN_NS, 10'002, Side::Sell, 199, 1)));
+    for (MarketEvent& e : crossing) {
+        e.timestamp += e.timestamp < midnight ? midnight + RTH_OPEN_NS : 0;
+    }
+    const ReplayOptions every{.check_invariants_every = 1, .session_midnight = midnight};
+    const Outcome crossed = replay(crossing, 1, every, 1'024);
+    ASSERT_EQ(crossed.report.total.failure, ReplayFailure::InvariantViolation);
+    EXPECT_EQ(replay(crossing, 2, every, 1'024), crossed);
+}
+
+// The backtest reads the pipeline as it reads any source.
+TEST(PipelineSourceTest, ABacktestThroughThePipelineMatchesOneOnItsSource)
+{
+    std::vector<MarketEvent> events = two_books(1'000);
+    for (MarketEvent& e : events) {
+        e.symbol = kSymbol;
+    }
+    const Instrument equity{.price_scale = 4, .quantity_scale = 0};
+    const RiskLimits limits{.max_position = 100, .max_order_quantity = Quantity{100}, .max_open_orders = 4};
+    auto backtest = [&](int threads, std::uint64_t& digest) {
+        VectorSource source{events};
+        std::optional<PipelineSource> pipeline;
+        if (threads == 2) {
+            pipeline.emplace(source, 4);
+        }
+        MarketBook book{kSymbol, 1'024};
+        ExecutionSimulator execution;
+        Portfolio portfolio{equity, limits, FeeSchedule{}};
+        NullStrategy strategy;
+        EventLoop<NullStrategy> loop{pipeline ? static_cast<MarketEventSource&>(*pipeline) : source,
+                                     book,
+                                     execution,
+                                     portfolio,
+                                     strategy,
+                                     LatencyConfig{}};
+        if (pipeline) {
+            pipeline->start();
+        }
+        const LoopReport report = loop.run();
+        if (pipeline) {
+            pipeline->stop();
+        }
+        digest = book.digest();
+        return report;
+    };
+    std::uint64_t one_digest{0};
+    std::uint64_t two_digest{0};
+    const LoopReport one = backtest(1, one_digest);
+    EXPECT_EQ(one.replay.events, 1'000u);
+    EXPECT_EQ(backtest(2, two_digest), one);
+    EXPECT_EQ(two_digest, one_digest);
 }
 
 } // namespace
