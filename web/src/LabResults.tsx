@@ -4,6 +4,7 @@ import { px, ruleLabel, shares, signed, stamp, tone } from './format';
 import {
   align,
   cards,
+  orbCards,
   compareStats,
   drawdown,
   likeForLike,
@@ -222,6 +223,16 @@ export function RunResults() {
           </div>
         ))}
       </div>
+      {r.orb && (
+        <div className="cards">
+          {orbCards(r.orb, run.provenance.engine.price_scale).map(([name, value]) => (
+            <div key={name} className="card">
+              <span className="muted">ORB · {name}</span>
+              <b>{value}</b>
+            </div>
+          ))}
+        </div>
+      )}
       <Equity runs={shown} />
       <ResultTabs key={run.id} run={run} r={r} />
     </>

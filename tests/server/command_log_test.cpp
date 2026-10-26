@@ -249,6 +249,47 @@ TEST(CommandLogTest, ReplayingTheLogReproducesTheBookExecutionAndPortfolio)
     EXPECT_EQ(outcome(again.book, again.execution, again.portfolio, again.loop.report()), second);
 }
 
+// An ORB attached mid-session is logged with its params and reproduced from the log.
+TEST(CommandLogTest, AnOrbAttachIsLoggedWithItsParamsAndReproduced)
+{
+    const std::vector<MarketEvent> events = random_stream(3'000);
+    const SessionConfig cfg = config({.order_latency = 1'500'000, .report_latency = 500'000});
+    const Scratch scratch{"reproduce-orb"};
+    const OrbParams params{.range_minutes = 2, .clip = 20};
+    Outcome played;
+    {
+        LogQueue queue;
+        const LogWriter writer{queue, scratch.path, cfg, nullptr, false};
+        ReplaySession session{cfg, over(events), &queue};
+        session.control(kPlay);
+        for (int t = 0; session.state() != SessionState::Ended; ++t) {
+            if (t == 40) {
+                session.submit(Command{.generation = 1,
+                                       .type = CommandType::Attach,
+                                       .strategy = {.kind = SessionStrategyKind::Orb, .orb = params}},
+                               t);
+            } else if (t == 170) {
+                session.control(kFullSpeed);
+            }
+            session.tick(kWall + t * 7 * kMs);
+            wait_until_written(queue);
+        }
+        EXPECT_FALSE(queue.failed());
+        played = outcome(session.book(), session.execution(), session.portfolio(), session.loop_report());
+        session.close();
+    }
+
+    LoggedGeneration logged;
+    std::string error;
+    ASSERT_TRUE(read_log(scratch.path, 1, logged, error)) << error;
+    ASSERT_EQ(logged.applied.size(), 1u);
+    EXPECT_EQ(logged.applied[0].command.strategy.kind, SessionStrategyKind::Orb);
+    EXPECT_EQ(logged.applied[0].command.strategy.orb, params);
+    Generation fresh{cfg, logged.spec, over(events)(logged.spec.ticker, logged.spec.days)};
+    ASSERT_TRUE(reproduce(fresh, logged));
+    EXPECT_EQ(outcome(fresh.book, fresh.execution, fresh.portfolio, fresh.loop.report()), played);
+}
+
 // A two-day generation's header records each day as it was, with its segment, and the build's source digest. read_log
 // and reproduce() over the same days give the session's digests; a day rebuilt with another segment is refused, even
 // one that replays the same.

@@ -9,6 +9,7 @@ import {
   drawdown,
   fromSpec,
   likeForLike,
+  orbCards,
   outcomes,
   page,
   refusalText,
@@ -97,6 +98,14 @@ const strategies: Strategies = {
         { name: 'clip', default: 100, min: 1, max: 1_000_000_000 },
         { name: 'max_position', default: 500, min: 0, max: 1_000_000_000 },
         { name: 'cooldown_ns', default: 1_000_000_000, min: 0, max: 1e15 },
+      ],
+      limits: { max_position: 500, max_order_quantity: 100, max_open_orders: 1 },
+    },
+    {
+      kind: 'orb',
+      params: [
+        { name: 'range_minutes', default: 15, min: 1, max: 390 },
+        { name: 'clip', default: 100, min: 1, max: 1_000_000_000 },
       ],
       limits: { max_position: 500, max_order_quantity: 100, max_open_orders: 1 },
     },
@@ -229,6 +238,46 @@ describe('watch and verify', () => {
   it('numbers a run as the list does, or names it by its id when the list does not have it', () => {
     const runs = [listed('a'), listed('b')];
     expect([runLabel(runs, 'b'), runLabel(runs, 'gone')]).toEqual(['#2', 'gone']);
+  });
+});
+
+describe('the ORB', () => {
+  it('takes its form from the served params, and refuses a range past the session', () => {
+    const form = defaults(strategies, 'orb', 4, ['2019-12-30']);
+    expect(form.params).toEqual({ range_minutes: '15', clip: '100' });
+    const body = toBody({ ...form, symbol: 'AAPL' }, strategies, 4) as RunSpecBody;
+    expect(body.strategy).toBe('orb');
+    expect(body.params).toEqual({ range_minutes: 15, clip: 100 });
+    expect(toBody({ ...form, symbol: 'AAPL', params: { ...form.params, range_minutes: '391' } }, strategies, 4)).toBe(
+      'params.range_minutes',
+    );
+  });
+
+  it('shows its decisions, shares and the last range in prices, or none', () => {
+    const orb = {
+      long_entries: 1,
+      short_entries: 1,
+      stops: 1,
+      flattens: 1,
+      closing_orders: 3,
+      risk_rejects: 0,
+      no_range_days: 0,
+      requested: 500,
+      bought: 200,
+      sold: 200,
+      expired: 100,
+      range_high: 2_905_100,
+      range_low: 2_899_800,
+    };
+    expect(orbCards(orb, 4)).toEqual([
+      ['Entries', '1 long, 1 short'],
+      ['Closing', '1 stops, 1 flattens'],
+      ['No-range days', '0'],
+      ['Risk rejects', '0'],
+      ['Shares', '200 bought, 200 sold of 500'],
+      ['Range', '289.98 to 290.51'],
+    ]);
+    expect(orbCards({ ...orb, range_high: null, range_low: null }, 4)[5]).toEqual(['Range', 'none']);
   });
 });
 

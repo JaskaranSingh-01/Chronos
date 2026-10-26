@@ -48,10 +48,22 @@ std::string failure(const ReplayReport& replay, std::span<const DayHandle> days,
 
 RiskLimits default_limits(const StrategySpec& strategy)
 {
-    const bool mm = strategy.kind == SessionStrategyKind::MarketMaker;
-    return {.max_position = mm ? strategy.market_maker.max_position : strategy.imbalance.max_position,
-            .max_order_quantity = Quantity{mm ? strategy.market_maker.quote_size : strategy.imbalance.clip},
-            .max_open_orders = default_max_open_orders(mm ? StrategyKind::MarketMaker : StrategyKind::Imbalance)};
+    switch (strategy.kind) {
+    case SessionStrategyKind::MarketMaker:
+        return {.max_position = strategy.market_maker.max_position,
+                .max_order_quantity = Quantity{strategy.market_maker.quote_size},
+                .max_open_orders = default_max_open_orders(StrategyKind::MarketMaker)};
+    case SessionStrategyKind::Orb:
+        return {.max_position = BacktestArgs{}.max_position,
+                .max_order_quantity = Quantity{strategy.orb.clip},
+                .max_open_orders = default_max_open_orders(StrategyKind::Orb)};
+    case SessionStrategyKind::None:
+    case SessionStrategyKind::ImbalanceTaker:
+        break;
+    }
+    return {.max_position = strategy.imbalance.max_position,
+            .max_order_quantity = Quantity{strategy.imbalance.clip},
+            .max_open_orders = default_max_open_orders(StrategyKind::Imbalance)};
 }
 
 RunSpec default_spec(SessionStrategyKind kind)
@@ -65,7 +77,8 @@ RunSpec default_spec(SessionStrategyKind kind)
         .imbalance = {.threshold = cli.threshold,
                       .clip = cli.clip,
                       .max_position = cli.max_position,
-                      .cooldown_ns = static_cast<Timestamp>(cli.cooldown_ms) * 1'000'000}};
+                      .cooldown_ns = static_cast<Timestamp>(cli.cooldown_ms) * 1'000'000},
+        .orb = {.range_minutes = cli.range_minutes, .clip = cli.clip}};
     return RunSpec{.latency = {.order_latency = static_cast<Timestamp>(cli.order_latency_ns),
                                .report_latency = static_cast<Timestamp>(cli.report_latency_ns)},
                    .fees = {.maker_fee_per_share = cli.maker_fee_ticks,
@@ -191,6 +204,9 @@ RunResult backtest(const SessionConfig& config, const RunSpec& spec, std::span<c
     r.digests = r.partial ? Digests{} : digests(g);
     r.fills_by = e.fills_by;
     r.anomalies_by = e.anomalies_by;
+    if (const OrbStats* orb = g.strategy.orb_stats(); orb != nullptr) {
+        r.orb = *orb;
+    }
     bytes_read.store(source.position(), std::memory_order_relaxed);
     if (hash_as_read && !r.cancelled) {
         r.hashes = source.hashes();

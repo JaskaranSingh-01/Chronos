@@ -87,6 +87,11 @@ TEST(ProtocolTest, DecodesEveryClientMessage)
               ImbalanceTakerParams{});
     EXPECT_EQ(decoded(client_message("attach", R"(,"strategy":"market_maker")")).command.strategy.market_maker,
               MarketMakerParams{});
+    const Command orb =
+        decoded(client_message("attach", R"(,"strategy":"orb","params":{"range_minutes":30,"clip":50})")).command;
+    EXPECT_EQ(orb.strategy.kind, SessionStrategyKind::Orb);
+    EXPECT_EQ(orb.strategy.orb, (OrbParams{.range_minutes = 30, .clip = 50}));
+    EXPECT_EQ(decoded(client_message("attach", R"(,"strategy":"orb")")).command.strategy.orb, OrbParams{});
     EXPECT_EQ(decoded(client_message("detach")).command.type, CommandType::Detach);
 
     const ClientMessage resync = decoded(client_message("resync", R"(,"from_report_seq":42)"));
@@ -242,7 +247,9 @@ TEST(ProtocolTest, RefusesAnythingOutsideItsSchema)
                         {"market_maker", "improve_ticks", 1'000'000'000},
                         {"imbalance", "clip", 1'000'000'000},
                         {"imbalance", "max_position", 1'000'000'000},
-                        {"imbalance", "cooldown_ns", 1'000'000'000'000'000}};
+                        {"imbalance", "cooldown_ns", 1'000'000'000'000'000},
+                        {"orb", "range_minutes", 390},
+                        {"orb", "clip", 1'000'000'000}};
     for (const Cap& c : caps) {
         const auto attach = [&](std::uint64_t value) {
             return client_message("attach",
@@ -261,6 +268,9 @@ TEST(ProtocolTest, RefusesAnythingOutsideItsSchema)
     EXPECT_TRUE(refused(client_message("attach", R"(,"strategy":"imbalance","params":{"clip":0})")));
     EXPECT_TRUE(refused(client_message("attach", R"(,"strategy":"market_maker","params":{"max_position":-1})")));
     EXPECT_TRUE(refused(client_message("attach", R"(,"strategy":"market_maker","params":null)")));
+    EXPECT_TRUE(refused(client_message("attach", R"(,"strategy":"orb","params":{"range_minutes":0})")));
+    EXPECT_TRUE(refused(client_message("attach", R"(,"strategy":"orb","params":{"clip":0})")));
+    EXPECT_TRUE(refused(client_message("attach", R"(,"strategy":"orb","params":{"threshold":2})")));
 
     // At most 64 KiB.
     const std::string prefix = R"({"type":"auth","token":")";
@@ -578,6 +588,21 @@ std::string bad_field(const std::string& text)
     return field;
 }
 
+// An ORB whose clip is above the position or order limit could never enter: refused, naming its clip, as the CLI
+// refuses it.
+TEST(ProtocolTest, RefusesAnOrbRunWhoseClipIsAboveThePositionLimit)
+{
+    EXPECT_EQ(bad_field(R"({"symbol":"SPY","days":["2019-12-30"],"strategy":"orb","params":{"clip":600}})"),
+              "params.clip");
+    const RunSpec spec = run_spec(
+        R"({"symbol":"SPY","days":["2019-12-30"],"strategy":"orb","params":{"clip":600},"limits":{"max_position":600,)"
+        R"("max_order_quantity":600}})");
+    EXPECT_EQ(spec.strategy.orb.clip, 600u);
+    const std::string order_limit =
+        R"({"symbol":"SPY","days":["2019-12-30"],"strategy":"orb","limits":{"max_order_quantity":50}})";
+    EXPECT_EQ(bad_field(order_limit), "params.clip");  // the default clip of 100, above the order limit
+}
+
 // A run's symbol, days and strategy are required; every other key takes `simulator backtest`'s default, and an omitted
 // limit follows the params as the CLI's does.
 TEST(ProtocolTest, DecodesARunSpecWithTheClisDefaults)
@@ -678,7 +703,7 @@ TEST(ProtocolTest, RefusesABadRunSpecNamingItsField)
 TEST(ProtocolTest, EncodesTheStrategiesWithTheirDefaultsAndCaps)
 {
     const json j = json::parse(encode_strategies());
-    ASSERT_EQ(j["strategies"].size(), 2u);
+    ASSERT_EQ(j["strategies"].size(), 3u);
     const json& mm = j["strategies"][0];
     EXPECT_EQ(mm["kind"], "market_maker");
     EXPECT_EQ(mm["params"][0], json::parse(R"({"name":"quote_size","default":100,"min":1,"max":1000000000})"));
@@ -688,6 +713,11 @@ TEST(ProtocolTest, EncodesTheStrategiesWithTheirDefaultsAndCaps)
     EXPECT_EQ(imbalance["kind"], "imbalance");
     EXPECT_EQ(imbalance["params"][0], json::parse(R"({"name":"threshold","default":3.0,"min":1,"max":null})"));
     EXPECT_EQ(imbalance["limits"]["max_open_orders"], 1);
+    const json& orb = j["strategies"][2];
+    EXPECT_EQ(orb["kind"], "orb");
+    EXPECT_EQ(orb["params"][0], json::parse(R"({"name":"range_minutes","default":15,"min":1,"max":390})"));
+    EXPECT_EQ(orb["params"][1], json::parse(R"({"name":"clip","default":100,"min":1,"max":1000000000})"));
+    EXPECT_EQ(orb["limits"], json::parse(R"({"max_position":500,"max_order_quantity":100,"max_open_orders":1})"));
     EXPECT_EQ(j["latency"], json::parse(R"({"order_ns":50000,"report_ns":50000,"max":1000000000000})"));
     EXPECT_EQ(j["fees"], json::parse(R"({"maker":0,"taker":0,"min":-1000000,"max":1000000,"taker_min":0})"));
     EXPECT_EQ(j["limit_max"], 1'000'000'000);
@@ -742,6 +772,15 @@ TEST(ProtocolTest, ARunDocumentReadsBackAsItWasWritten)
                       .truncated = true};
     results.fills_by[0][2] = 1;
     results.anomalies_by[3][1] = 2;
+    results.orb = OrbStats{.long_entries = 1,
+                           .stops = 1,
+                           .closing_orders = 2,
+                           .requested = 200,
+                           .bought = 100,
+                           .sold = 100,
+                           .has_range = true,
+                           .range_high = Price{100'500},
+                           .range_low = Price{99'800}};
     RunSpec spec = default_spec(SessionStrategyKind::MarketMaker);
     spec.ticker = ticker("ACME");
     spec.days = {.day = {2019y / 12 / 30}, .count = 1};
@@ -783,6 +822,7 @@ TEST(ProtocolTest, ARunDocumentReadsBackAsItWasWritten)
     EXPECT_EQ(written["state"], "completed");
     EXPECT_EQ(written["results"]["digests"]["book"], "cbf29ce484222325");
     EXPECT_EQ(written["results"]["fills"], 2);
+    EXPECT_EQ(written["results"]["orb"]["range_high"], 100'500);
     EXPECT_EQ(written["results"]["equity"]["t"], json::parse("[1577716201,1577716202]"));
     EXPECT_EQ(written["results"]["by_hour"], json::parse(R"({"hour":[9],"pnl":[-200]})"));
     EXPECT_EQ(written["results"]["attribution"]["fills"][0], json::parse("[0,0,1,0,0]"));

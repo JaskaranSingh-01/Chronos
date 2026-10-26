@@ -777,7 +777,7 @@ A bad argument prints a two-line error on stderr and exits 2. `--json PATH` writ
 - The full-day replay of every symbol with 0 rejections.
 - The benchmark harness, a profile, and two profile-driven optimisations (see [`bench/RESULTS.md`](bench/RESULTS.md)).
 - The strategy layer: event loop, latency, fill model, portfolio with risk limits and fees, two toy strategies, and an
-  opening range breakout (`--strategy orb`) that sees every execution's price.
+  opening range breakout (`--strategy orb`, and in the Lab) that sees every execution's price.
 - The CLI with `--help`, `--version`, documented exit codes and `--json`.
 - The Trading Terminal: `chronos-serve` (HTTP and WebSocket, a command log, reconnect and resync) and a React UI with
   a TradingView-style chart, L3 queue positions and Playwright end-to-end tests.

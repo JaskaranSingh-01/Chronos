@@ -60,7 +60,8 @@ NLOHMANN_JSON_SERIALIZE_ENUM(
 NLOHMANN_JSON_SERIALIZE_ENUM(SessionStrategyKind,
                              {{SessionStrategyKind::None, "none"},
                               {SessionStrategyKind::MarketMaker, "market_maker"},
-                              {SessionStrategyKind::ImbalanceTaker, "imbalance"}})
+                              {SessionStrategyKind::ImbalanceTaker, "imbalance"},
+                              {SessionStrategyKind::Orb, "orb"}})
 NLOHMANN_JSON_SERIALIZE_ENUM(Lifecycle,
                              {{Lifecycle::Received, "received"},
                               {Lifecycle::Admitted, "admitted"},

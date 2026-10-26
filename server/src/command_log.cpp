@@ -36,7 +36,19 @@ json strategy_json(const StrategySpec& spec)
              {{"threshold", it.threshold},
               {"clip", it.clip},
               {"max_position", it.max_position},
-              {"cooldown_ns", it.cooldown_ns}}}};
+              {"cooldown_ns", it.cooldown_ns}}},
+            {"orb", {{"range_minutes", spec.orb.range_minutes}, {"clip", spec.orb.clip}}}};
+}
+
+// A log written before the ORB has no "orb": its defaults.
+OrbParams orb_from(const json& j)
+{
+    const auto found = j.find("orb");
+    if (found == j.end()) {
+        return {};
+    }
+    return {.range_minutes = found->at("range_minutes").get<std::uint32_t>(),
+            .clip = found->at("clip").get<std::uint64_t>()};
 }
 
 StrategySpec strategy_from(const json& j)
@@ -51,7 +63,8 @@ StrategySpec strategy_from(const json& j)
                         .imbalance = {.threshold = it.at("threshold").get<double>(),
                                       .clip = it.at("clip").get<std::uint64_t>(),
                                       .max_position = it.at("max_position").get<std::int64_t>(),
-                                      .cooldown_ns = it.at("cooldown_ns").get<Timestamp>()}};
+                                      .cooldown_ns = it.at("cooldown_ns").get<Timestamp>()},
+                        .orb = orb_from(j)};
 }
 
 json command_json(const Command& c)

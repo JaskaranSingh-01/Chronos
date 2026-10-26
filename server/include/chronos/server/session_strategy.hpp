@@ -11,13 +11,15 @@
 #include "simulator/sim/execution_simulator.hpp"
 #include "simulator/strategies/imbalance_taker.hpp"
 #include "simulator/strategies/market_maker.hpp"
+#include "simulator/strategies/orb.hpp"
 
 namespace simulator::server {
 
 enum class SessionStrategyKind : std::uint8_t {
     None,  // manual trading
     MarketMaker,
-    ImbalanceTaker
+    ImbalanceTaker,
+    Orb
 };
 
 struct StrategySpec
@@ -25,6 +27,7 @@ struct StrategySpec
     SessionStrategyKind kind{SessionStrategyKind::None};
     MarketMakerParams market_maker{};
     ImbalanceTakerParams imbalance{};
+    OrbParams orb{};
 
     bool operator==(const StrategySpec&) const = default;
 };
@@ -62,11 +65,12 @@ inline void cancel_resting(const ExecutionSimulator& execution, OrderGateway& ga
 class SessionStrategy
 {
 private:
-    std::variant<NullStrategy, MarketMaker, ImbalanceTaker> active_;
+    std::variant<NullStrategy, MarketMaker, ImbalanceTaker, Orb> active_;
     StrategySpec spec_{};
     const ExecutionSimulator& execution_;  // the resting orders a close cancels
     TradingWindow window_;
     std::vector<FeedSession> sessions_;  // each day's, oldest first
+    std::vector<OrbSession> orb_sessions_;  // the same, as an Orb reads them
     std::size_t day_{0};  // each Clear starts the next
     bool open_{false};  // from the first market event inside the day's session to its close timer
     Timestamp close_{0};  // the close of the window opened last
@@ -87,6 +91,9 @@ public:
         : execution_(execution), window_(window), sessions_(std::move(sessions))
     {
         delivered.reserve(4'096);
+        for (const FeedSession& day : sessions_) {
+            orb_sessions_.push_back(OrbSession{.open = day.open, .close = day.close});
+        }
         attach(spec);
     }
 
@@ -103,12 +110,22 @@ public:
         case SessionStrategyKind::ImbalanceTaker:
             active_.emplace<ImbalanceTaker>(spec.imbalance);
             return;
+        case SessionStrategyKind::Orb:
+            active_.emplace<Orb>(spec.orb, orb_sessions_);
+            return;
         }
     }
 
     const StrategySpec& spec() const noexcept
     {
         return spec_;
+    }
+
+    // The attached ORB's stats, or null.
+    const OrbStats* orb_stats() const noexcept
+    {
+        const Orb* orb = std::get_if<Orb>(&active_);
+        return orb != nullptr ? &orb->stats() : nullptr;
     }
 
     bool attached() const noexcept

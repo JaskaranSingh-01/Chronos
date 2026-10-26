@@ -5,6 +5,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <map>
+#include <optional>
 #include <span>
 #include <string>
 #include <vector>
@@ -89,6 +90,7 @@ struct RunResult
     std::vector<FillRow> fills{};  // the first max_fill_rows
     bool truncated{false};
     std::vector<std::string> hashes{};  // with hash as read: each day's segment hash as read, "" if not intact
+    std::optional<OrbStats> orb{};      // an ORB run's own stats
     std::int64_t wall_ms{0};
     std::int64_t cpu_ms{0};
 

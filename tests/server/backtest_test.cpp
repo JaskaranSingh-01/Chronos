@@ -126,6 +126,7 @@ TEST(BacktestTest, AOneDayFullDayRunEqualsTheHeadlessBacktestForBothStrategies)
         }
 
         EXPECT_GT(mm ? r.maker_fills : r.taker_fills, 0u);
+        EXPECT_FALSE(r.orb.has_value());
         EXPECT_EQ(r.pnl, portfolio.pnl());
         EXPECT_EQ(r.fees, portfolio.fees());
         EXPECT_EQ(r.position, portfolio.position());
@@ -139,6 +140,82 @@ TEST(BacktestTest, AOneDayFullDayRunEqualsTheHeadlessBacktestForBothStrategies)
         EXPECT_EQ(r.events, report.replay.events);
         EXPECT_EQ(r.sim_events, report.sim_events);
     }
+}
+
+// An ORB run is `simulator backtest --strategy orb` too, on a day built for it: a range from executions in [09:30,
+// 09:31), a long on a trade above it and its stop on a trade below, a short on a later trade, flattened at 15:55 by the
+// timer the end of the stream still fires.
+TEST(BacktestTest, AnOrbRunEqualsTheHeadlessBacktest)
+{
+    constexpr std::uint64_t hour = 3'600 * kSecond;
+    constexpr std::uint64_t minute = 60 * kSecond;
+    itch_test::ItchBuilder day;
+    day.system_event(0, 3 * hour, 'O')
+        .stock_directory(1, 3 * hour, "ACME")
+        .trading_action(1, 3 * hour, "ACME", 'T')
+        .system_event(0, 4 * hour, 'S')
+        .add_order(1, 9 * hour, 1, 'B', 5'000, "ACME", 100'000)  // 10.00 and 10.01, deep enough for every IOC
+        .add_order(1, 9 * hour, 2, 'S', 5'000, "ACME", 100'100)
+        .system_event(0, kNineThirty, 'Q')
+        .executed(1, kNineThirty + 10 * kSecond, 1, 100, 1)  // the range: 10.00 to 10.01
+        .executed(1, kNineThirty + 20 * kSecond, 2, 100, 2)
+        .add_order(1, kNineThirty + 2 * minute, 3, 'S', 100, "ACME", 100'300)
+        .executed(1, kNineThirty + 2 * minute + kSecond, 3, 100, 3)  // 10.03: the long
+        .add_order(1, kNineThirty + 3 * minute, 4, 'B', 100, "ACME", 99'800)
+        .executed(1, kNineThirty + 3 * minute + kSecond, 4, 100, 4)  // 9.98: its stop
+        .add_order(1, kNineThirty + 4 * minute, 5, 'B', 100, "ACME", 99'700)
+        .executed(1, kNineThirty + 4 * minute + kSecond, 5, 100, 5)  // 9.97, a later trade: the short
+        .system_event(0, 16 * hour, 'M');
+    Lab lab{"backtest-orb"};
+    lab.write("12302019.NASDAQ_ITCH50.bin", day.bytes());
+    const std::vector<DayHandle> days = lab.days();
+    RunSpec spec = acme(SessionStrategyKind::Orb, kMonday, TradingWindow::FullDay);
+    spec.strategy.orb.range_minutes = 1;
+    const RunResult r = run(spec, days);
+
+    const BacktestArgs b{};
+    const Timestamp midnight = session_midnight_ns(2019y / 12 / 30, -5h);
+    InstrumentRegistry registry{1};
+    ItchSource source{day.bytes(),
+                      ItchSourceConfig{.ticker = "ACME", .session_date = 2019y / 12 / 30, .utc_offset = -5h}, registry};
+    MarketBook book{0, std::size_t{1} << 20};
+    ExecutionSimulator execution{midnight};
+    Portfolio portfolio{source.instrument(),
+                        {.max_position = b.max_position,
+                         .max_order_quantity = Quantity{b.clip},
+                         .max_open_orders = default_max_open_orders(StrategyKind::Orb)},
+                        {}};
+    const OrbSession session{.open = midnight + RTH_OPEN_NS, .close = midnight + RTH_CLOSE_NS};
+    Orb strategy{{.range_minutes = 1, .clip = b.clip}, {&session, 1}};
+    EventLoop<Orb>{source,
+                   book,
+                   execution,
+                   portfolio,
+                   strategy,
+                   {.order_latency = static_cast<Timestamp>(b.order_latency_ns),
+                    .report_latency = static_cast<Timestamp>(b.report_latency_ns)},
+                   {.session_midnight = midnight}}
+        .run();
+
+    ASSERT_TRUE(r.orb.has_value());
+    EXPECT_EQ(*r.orb, strategy.stats());
+    EXPECT_EQ(strategy.stats().long_entries, 1u);
+    EXPECT_EQ(strategy.stats().stops, 1u);
+    EXPECT_EQ(strategy.stats().short_entries, 1u);
+    EXPECT_EQ(strategy.stats().flattens, 1u);
+    EXPECT_EQ(r.position, 0);
+    EXPECT_EQ(r.position, portfolio.position());
+    EXPECT_EQ(r.pnl, portfolio.pnl());
+    EXPECT_EQ(r.taker_fills, execution.statistics().taker_fills);
+    EXPECT_EQ(r.taker_fills, 4u);
+    EXPECT_EQ(r.pnl, -20'000);  // two round trips of 100 shares, each across the cent spread: -$2.00
+
+    // The Lab's default window, Regular: its timer forwarded and its gateway open at 15:55, the same run.
+    RunSpec regular = spec;
+    regular.window = TradingWindow::Regular;
+    const RunResult again = run(regular, days);
+    EXPECT_EQ(again.orb, r.orb);
+    EXPECT_EQ(again.pnl, r.pnl);
 }
 
 // The fixture runs' digests, fixed: every compiler and build type of the CI matrix must reproduce them (spec §8).
@@ -333,7 +410,7 @@ TEST(BacktestTest, TheLastDaysCloseCancelsTheQuotesWhenItsInputEndsFirst)
         .add_order(1, kNineThirty, 1, 'B', 1'000, "ACME", 100'000)
         .add_order(1, kNineThirty, 2, 'S', 1'000, "ACME", 100'100)
         .add_order(1, kNineThirty + kSecond, 3, 'B', 100, "ACME", 100'000)  // behind the market maker's bid
-        .executed(1, kNineThirty + 2 * kSecond, 3, 50, 1)                    // rule (a): fills the bid 50
+        .executed(1, kNineThirty + 2 * kSecond, 3, 50, 1)  // rule (a): fills the bid 50
         .system_event(0, 16 * kHour, 'M');
     Lab lab{"backtest-close"};
     lab.write("12302019.NASDAQ_ITCH50.bin", itch.bytes());
