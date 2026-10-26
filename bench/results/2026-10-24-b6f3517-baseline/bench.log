@@ -1,0 +1,176 @@
+Unable to determine clock rate from sysctl: hw.cpufrequency: No such file or directory
+This does not affect benchmark measurements, only the metadata output.
+***WARNING*** Failed to set thread affinity. Estimated CPU frequency may be incorrect.
+2026-10-24T14:47:44+05:30
+Running build/bench/simulator_bench
+Run on (10 X 24 MHz CPU s)
+CPU Caches:
+  L1 Data 64 KiB
+  L1 Instruction 128 KiB
+  L2 Unified 4096 KiB (x10)
+Load Average: 2.95, 3.61, 3.88
+--------------------------------------------------------------------------------------------------------------------
+Benchmark                                                                          Time             CPU   Iterations
+--------------------------------------------------------------------------------------------------------------------
+BM_Add/depth:1000/iterations:4096/manual_time                                   62.0 ns        48426 ns         4096
+BM_Add/depth:1000/iterations:4096/manual_time                                   63.4 ns        48933 ns         4096
+BM_Add/depth:1000/iterations:4096/manual_time                                   62.8 ns        48650 ns         4096
+BM_Add/depth:1000/iterations:4096/manual_time                                   62.6 ns        48617 ns         4096
+BM_Add/depth:1000/iterations:4096/manual_time                                   66.0 ns        49717 ns         4096
+BM_Add/depth:1000/iterations:4096/manual_time_mean                              63.3 ns        48868 ns            5
+BM_Add/depth:1000/iterations:4096/manual_time_median                            62.8 ns        48650 ns            5
+BM_Add/depth:1000/iterations:4096/manual_time_stddev                            1.57 ns          508 ns            5
+BM_Add/depth:1000/iterations:4096/manual_time_cv                                2.48 %          1.04 %             5
+BM_Add/depth:1000000/iterations:4096/manual_time                                 150 ns        76846 ns         4096
+BM_Add/depth:1000000/iterations:4096/manual_time                                 165 ns        80485 ns         4096
+BM_Add/depth:1000000/iterations:4096/manual_time                                 150 ns        76629 ns         4096
+BM_Add/depth:1000000/iterations:4096/manual_time                                 150 ns        76812 ns         4096
+BM_Add/depth:1000000/iterations:4096/manual_time                                 151 ns        77007 ns         4096
+BM_Add/depth:1000000/iterations:4096/manual_time_mean                            153 ns        77556 ns            5
+BM_Add/depth:1000000/iterations:4096/manual_time_median                          150 ns        76846 ns            5
+BM_Add/depth:1000000/iterations:4096/manual_time_stddev                         6.48 ns         1643 ns            5
+BM_Add/depth:1000000/iterations:4096/manual_time_cv                             4.24 %          2.12 %             5
+BM_Delete/depth:1000/iterations:4096/manual_time                                29.7 ns        48015 ns         4096
+BM_Delete/depth:1000/iterations:4096/manual_time                                29.6 ns        47827 ns         4096
+BM_Delete/depth:1000/iterations:4096/manual_time                                29.6 ns        47875 ns         4096
+BM_Delete/depth:1000/iterations:4096/manual_time                                29.7 ns        47727 ns         4096
+BM_Delete/depth:1000/iterations:4096/manual_time                                29.5 ns        47720 ns         4096
+BM_Delete/depth:1000/iterations:4096/manual_time_mean                           29.6 ns        47833 ns            5
+BM_Delete/depth:1000/iterations:4096/manual_time_median                         29.6 ns        47827 ns            5
+BM_Delete/depth:1000/iterations:4096/manual_time_stddev                        0.094 ns          121 ns            5
+BM_Delete/depth:1000/iterations:4096/manual_time_cv                             0.32 %          0.25 %             5
+BM_Delete/depth:1000000/iterations:4096/manual_time                             50.3 ns        81586 ns         4096
+BM_Delete/depth:1000000/iterations:4096/manual_time                             52.7 ns        88898 ns         4096
+BM_Delete/depth:1000000/iterations:4096/manual_time                             50.3 ns        82445 ns         4096
+BM_Delete/depth:1000000/iterations:4096/manual_time                             50.5 ns        84548 ns         4096
+BM_Delete/depth:1000000/iterations:4096/manual_time                             50.3 ns        81759 ns         4096
+BM_Delete/depth:1000000/iterations:4096/manual_time_mean                        50.8 ns        83847 ns            5
+BM_Delete/depth:1000000/iterations:4096/manual_time_median                      50.3 ns        82445 ns            5
+BM_Delete/depth:1000000/iterations:4096/manual_time_stddev                      1.03 ns         3060 ns            5
+BM_Delete/depth:1000000/iterations:4096/manual_time_cv                          2.03 %          3.65 %             5
+BM_ExecuteFull/depth:1000/iterations:4096/manual_time                           33.6 ns        48751 ns         4096
+BM_ExecuteFull/depth:1000/iterations:4096/manual_time                           33.6 ns        48572 ns         4096
+BM_ExecuteFull/depth:1000/iterations:4096/manual_time                           33.8 ns        48654 ns         4096
+BM_ExecuteFull/depth:1000/iterations:4096/manual_time                           34.1 ns        48969 ns         4096
+BM_ExecuteFull/depth:1000/iterations:4096/manual_time                           34.4 ns        49266 ns         4096
+BM_ExecuteFull/depth:1000/iterations:4096/manual_time_mean                      33.9 ns        48842 ns            5
+BM_ExecuteFull/depth:1000/iterations:4096/manual_time_median                    33.8 ns        48751 ns            5
+BM_ExecuteFull/depth:1000/iterations:4096/manual_time_stddev                   0.345 ns          279 ns            5
+BM_ExecuteFull/depth:1000/iterations:4096/manual_time_cv                        1.02 %          0.57 %             5
+BM_ExecuteFull/depth:1000000/iterations:4096/manual_time                        56.4 ns        85362 ns         4096
+BM_ExecuteFull/depth:1000000/iterations:4096/manual_time                        56.3 ns        84267 ns         4096
+BM_ExecuteFull/depth:1000000/iterations:4096/manual_time                        55.9 ns        83363 ns         4096
+BM_ExecuteFull/depth:1000000/iterations:4096/manual_time                        61.4 ns        92429 ns         4096
+BM_ExecuteFull/depth:1000000/iterations:4096/manual_time                        56.5 ns        86247 ns         4096
+BM_ExecuteFull/depth:1000000/iterations:4096/manual_time_mean                   57.3 ns        86334 ns            5
+BM_ExecuteFull/depth:1000000/iterations:4096/manual_time_median                 56.4 ns        85362 ns            5
+BM_ExecuteFull/depth:1000000/iterations:4096/manual_time_stddev                 2.32 ns         3578 ns            5
+BM_ExecuteFull/depth:1000000/iterations:4096/manual_time_cv                     4.04 %          4.14 %             5
+BM_ExecutePartial/depth:1000/iterations:4096/manual_time                        14.4 ns         5065 ns         4096
+BM_ExecutePartial/depth:1000/iterations:4096/manual_time                        14.3 ns         5058 ns         4096
+BM_ExecutePartial/depth:1000/iterations:4096/manual_time                        14.4 ns         5074 ns         4096
+BM_ExecutePartial/depth:1000/iterations:4096/manual_time                        14.5 ns         5097 ns         4096
+BM_ExecutePartial/depth:1000/iterations:4096/manual_time                        14.4 ns         5086 ns         4096
+BM_ExecutePartial/depth:1000/iterations:4096/manual_time_mean                   14.4 ns         5076 ns            5
+BM_ExecutePartial/depth:1000/iterations:4096/manual_time_median                 14.4 ns         5074 ns            5
+BM_ExecutePartial/depth:1000/iterations:4096/manual_time_stddev                0.055 ns         15.7 ns            5
+BM_ExecutePartial/depth:1000/iterations:4096/manual_time_cv                     0.38 %          0.31 %             5
+BM_ExecutePartial/depth:1000000/iterations:4096/manual_time                      122 ns        36712 ns         4096
+BM_ExecutePartial/depth:1000000/iterations:4096/manual_time                      116 ns        34733 ns         4096
+BM_ExecutePartial/depth:1000000/iterations:4096/manual_time                      122 ns        36362 ns         4096
+BM_ExecutePartial/depth:1000000/iterations:4096/manual_time                      119 ns        35510 ns         4096
+BM_ExecutePartial/depth:1000000/iterations:4096/manual_time                      120 ns        35626 ns         4096
+BM_ExecutePartial/depth:1000000/iterations:4096/manual_time_mean                 120 ns        35788 ns            5
+BM_ExecutePartial/depth:1000000/iterations:4096/manual_time_median               120 ns        35626 ns            5
+BM_ExecutePartial/depth:1000000/iterations:4096/manual_time_stddev              2.44 ns          775 ns            5
+BM_ExecutePartial/depth:1000000/iterations:4096/manual_time_cv                  2.04 %          2.16 %             5
+BM_Cancel/depth:1000/iterations:4096/manual_time                                14.7 ns         5158 ns         4096
+BM_Cancel/depth:1000/iterations:4096/manual_time                                15.1 ns         5266 ns         4096
+BM_Cancel/depth:1000/iterations:4096/manual_time                                14.8 ns         5190 ns         4096
+BM_Cancel/depth:1000/iterations:4096/manual_time                                15.2 ns         5297 ns         4096
+BM_Cancel/depth:1000/iterations:4096/manual_time                                15.2 ns         5283 ns         4096
+BM_Cancel/depth:1000/iterations:4096/manual_time_mean                           15.0 ns         5239 ns            5
+BM_Cancel/depth:1000/iterations:4096/manual_time_median                         15.1 ns         5266 ns            5
+BM_Cancel/depth:1000/iterations:4096/manual_time_stddev                        0.246 ns         61.3 ns            5
+BM_Cancel/depth:1000/iterations:4096/manual_time_cv                             1.64 %          1.17 %             5
+BM_Cancel/depth:1000000/iterations:4096/manual_time                              118 ns        34964 ns         4096
+BM_Cancel/depth:1000000/iterations:4096/manual_time                              118 ns        35230 ns         4096
+BM_Cancel/depth:1000000/iterations:4096/manual_time                              117 ns        34899 ns         4096
+BM_Cancel/depth:1000000/iterations:4096/manual_time                              117 ns        34788 ns         4096
+BM_Cancel/depth:1000000/iterations:4096/manual_time                              117 ns        34959 ns         4096
+BM_Cancel/depth:1000000/iterations:4096/manual_time_mean                         117 ns        34968 ns            5
+BM_Cancel/depth:1000000/iterations:4096/manual_time_median                       117 ns        34959 ns            5
+BM_Cancel/depth:1000000/iterations:4096/manual_time_stddev                     0.488 ns          163 ns            5
+BM_Cancel/depth:1000000/iterations:4096/manual_time_cv                          0.42 %          0.47 %             5
+BM_Replace/depth:1000/iterations:4096/manual_time                               95.1 ns        71933 ns         4096
+BM_Replace/depth:1000/iterations:4096/manual_time                               94.0 ns        71706 ns         4096
+BM_Replace/depth:1000/iterations:4096/manual_time                               93.4 ns        71555 ns         4096
+BM_Replace/depth:1000/iterations:4096/manual_time                               92.9 ns        71607 ns         4096
+BM_Replace/depth:1000/iterations:4096/manual_time                               92.7 ns        71557 ns         4096
+BM_Replace/depth:1000/iterations:4096/manual_time_mean                          93.6 ns        71672 ns            5
+BM_Replace/depth:1000/iterations:4096/manual_time_median                        93.4 ns        71607 ns            5
+BM_Replace/depth:1000/iterations:4096/manual_time_stddev                       0.985 ns          158 ns            5
+BM_Replace/depth:1000/iterations:4096/manual_time_cv                            1.05 %          0.22 %             5
+BM_Replace/depth:1000000/iterations:4096/manual_time                             517 ns       206673 ns         4096
+BM_Replace/depth:1000000/iterations:4096/manual_time                             519 ns       206439 ns         4096
+BM_Replace/depth:1000000/iterations:4096/manual_time                             498 ns       200228 ns         4096
+BM_Replace/depth:1000000/iterations:4096/manual_time                             506 ns       201493 ns         4096
+BM_Replace/depth:1000000/iterations:4096/manual_time                             501 ns       199177 ns         4096
+BM_Replace/depth:1000000/iterations:4096/manual_time_mean                        508 ns       202802 ns            5
+BM_Replace/depth:1000000/iterations:4096/manual_time_median                      506 ns       201493 ns            5
+BM_Replace/depth:1000000/iterations:4096/manual_time_stddev                     9.51 ns         3525 ns            5
+BM_Replace/depth:1000000/iterations:4096/manual_time_cv                         1.87 %          1.74 %             5
+BM_ItchSourceNext/all:1/iterations:8/manual_time                                53.4 ns     67194500 ns            8
+BM_ItchSourceNext/all:1/iterations:8/manual_time                                53.5 ns     67380750 ns            8
+BM_ItchSourceNext/all:1/iterations:8/manual_time                                53.4 ns     67280875 ns            8
+BM_ItchSourceNext/all:1/iterations:8/manual_time                                53.3 ns     67100875 ns            8
+BM_ItchSourceNext/all:1/iterations:8/manual_time                                53.4 ns     67355500 ns            8
+BM_ItchSourceNext/all:1/iterations:8/manual_time_mean                           53.4 ns     67262500 ns            5
+BM_ItchSourceNext/all:1/iterations:8/manual_time_median                         53.4 ns     67280875 ns            5
+BM_ItchSourceNext/all:1/iterations:8/manual_time_stddev                        0.078 ns       115884 ns            5
+BM_ItchSourceNext/all:1/iterations:8/manual_time_cv                             0.15 %          0.17 %             5
+BM_ItchSourceNext/all:0/iterations:8/manual_time                                15.0 ns     18853375 ns            8
+BM_ItchSourceNext/all:0/iterations:8/manual_time                                15.0 ns     18890375 ns            8
+BM_ItchSourceNext/all:0/iterations:8/manual_time                                15.1 ns     18899625 ns            8
+BM_ItchSourceNext/all:0/iterations:8/manual_time                                15.1 ns     18881625 ns            8
+BM_ItchSourceNext/all:0/iterations:8/manual_time                                15.0 ns     18862625 ns            8
+BM_ItchSourceNext/all:0/iterations:8/manual_time_mean                           15.0 ns     18877525 ns            5
+BM_ItchSourceNext/all:0/iterations:8/manual_time_median                         15.0 ns     18881625 ns            5
+BM_ItchSourceNext/all:0/iterations:8/manual_time_stddev                        0.047 ns        19207 ns            5
+BM_ItchSourceNext/all:0/iterations:8/manual_time_cv                             0.32 %          0.10 %             5
+BM_PoolReleaseAcquire/capacity:1024/iterations:4096/manual_time                 6.86 ns         2596 ns         4096
+BM_PoolReleaseAcquire/capacity:1024/iterations:4096/manual_time                 6.35 ns         2460 ns         4096
+BM_PoolReleaseAcquire/capacity:1024/iterations:4096/manual_time                 5.73 ns         2302 ns         4096
+BM_PoolReleaseAcquire/capacity:1024/iterations:4096/manual_time                 5.66 ns         2283 ns         4096
+BM_PoolReleaseAcquire/capacity:1024/iterations:4096/manual_time                 6.18 ns         2424 ns         4096
+BM_PoolReleaseAcquire/capacity:1024/iterations:4096/manual_time_mean            6.16 ns         2413 ns            5
+BM_PoolReleaseAcquire/capacity:1024/iterations:4096/manual_time_median          6.18 ns         2424 ns            5
+BM_PoolReleaseAcquire/capacity:1024/iterations:4096/manual_time_stddev         0.491 ns          128 ns            5
+BM_PoolReleaseAcquire/capacity:1024/iterations:4096/manual_time_cv              7.97 %          5.29 %             5
+BM_PoolReleaseAcquire/capacity:4194304/iterations:4096/manual_time              66.1 ns        17749 ns         4096
+BM_PoolReleaseAcquire/capacity:4194304/iterations:4096/manual_time              51.1 ns        13918 ns         4096
+BM_PoolReleaseAcquire/capacity:4194304/iterations:4096/manual_time              62.1 ns        16756 ns         4096
+BM_PoolReleaseAcquire/capacity:4194304/iterations:4096/manual_time              65.6 ns        17639 ns         4096
+BM_PoolReleaseAcquire/capacity:4194304/iterations:4096/manual_time              64.8 ns        17432 ns         4096
+BM_PoolReleaseAcquire/capacity:4194304/iterations:4096/manual_time_mean         61.9 ns        16699 ns            5
+BM_PoolReleaseAcquire/capacity:4194304/iterations:4096/manual_time_median       64.8 ns        17432 ns            5
+BM_PoolReleaseAcquire/capacity:4194304/iterations:4096/manual_time_stddev       6.26 ns         1602 ns            5
+BM_PoolReleaseAcquire/capacity:4194304/iterations:4096/manual_time_cv          10.10 %          9.59 %             5
+BM_EventLoop/mm:0/iterations:5/manual_time                                       153 ms          201 ms            5 items_per_second=6.53012M/s sim_events=0
+BM_EventLoop/mm:0/iterations:5/manual_time                                       137 ms          185 ms            5 items_per_second=7.32487M/s sim_events=0
+BM_EventLoop/mm:0/iterations:5/manual_time                                       144 ms          187 ms            5 items_per_second=6.94441M/s sim_events=0
+BM_EventLoop/mm:0/iterations:5/manual_time                                       139 ms          182 ms            5 items_per_second=7.20135M/s sim_events=0
+BM_EventLoop/mm:0/iterations:5/manual_time                                       148 ms          193 ms            5 items_per_second=6.77909M/s sim_events=0
+BM_EventLoop/mm:0/iterations:5/manual_time_mean                                  144 ms          189 ms            5 items_per_second=6.95597M/s sim_events=0
+BM_EventLoop/mm:0/iterations:5/manual_time_median                                144 ms          187 ms            5 items_per_second=6.94441M/s sim_events=0
+BM_EventLoop/mm:0/iterations:5/manual_time_stddev                               6.67 ms         7.63 ms            5 items_per_second=319.791k/s sim_events=0
+BM_EventLoop/mm:0/iterations:5/manual_time_cv                                   4.63 %          4.03 %             5 items_per_second=4.60% sim_events=0.00%
+BM_EventLoop/mm:1/iterations:5/manual_time                                       246 ms          288 ms            5 items_per_second=4.06052M/s sim_events=55.311k
+BM_EventLoop/mm:1/iterations:5/manual_time                                       244 ms          288 ms            5 items_per_second=4.09677M/s sim_events=55.311k
+BM_EventLoop/mm:1/iterations:5/manual_time                                       247 ms          287 ms            5 items_per_second=4.044M/s sim_events=55.311k
+BM_EventLoop/mm:1/iterations:5/manual_time                                       240 ms          282 ms            5 items_per_second=4.16559M/s sim_events=55.311k
+BM_EventLoop/mm:1/iterations:5/manual_time                                       243 ms          287 ms            5 items_per_second=4.12104M/s sim_events=55.311k
+BM_EventLoop/mm:1/iterations:5/manual_time_mean                                  244 ms          287 ms            5 items_per_second=4.09758M/s sim_events=55.311k
+BM_EventLoop/mm:1/iterations:5/manual_time_median                                244 ms          287 ms            5 items_per_second=4.09677M/s sim_events=55.311k
+BM_EventLoop/mm:1/iterations:5/manual_time_stddev                               2.88 ms         2.49 ms            5 items_per_second=48.5305k/s sim_events=0
+BM_EventLoop/mm:1/iterations:5/manual_time_cv                                   1.18 %          0.87 %             5 items_per_second=1.18% sim_events=0.00%

@@ -70,13 +70,19 @@ echo "== simulator_bench, $bench_reps repetitions"
 python3 -c 'import json, sys; d = json.load(open(sys.argv[1])); d["context"].pop("host_name", None); json.dump(d, open(sys.argv[1], "w"), indent=1)' \
     "$out/bench.json"
 
-if [ "${PROFILE:-1}" != 0 ] && command -v sample > /dev/null; then
+sampler=/usr/bin/sample  # macOS's own: a `sample` earlier on PATH can be another program
+if [ "${PROFILE:-1}" != 0 ] && [ -x "$sampler" ]; then
     echo "== profile: sample, 1 ms, over a full-day --all replay"
+    rm -f "$build/profile-sample.txt"  # never summarize an earlier run's samples
     "$build/simulator" replay "$full" --all --date "$session" > "$build/profile-run.log" &
     pid=$!
-    sample "$pid" 3600 1 -mayDie -file "$build/profile-sample.txt" > /dev/null 2>&1 || true
+    "$sampler" "$pid" 3600 1 -mayDie -file "$build/profile-sample.txt" > /dev/null 2>&1 || true
     wait "$pid" || true
-    python3 bench/summary.py --profile "$build/profile-sample.txt" > "$out/profile-top.txt"
+    if [ -s "$build/profile-sample.txt" ]; then
+        python3 bench/summary.py --profile "$build/profile-sample.txt" > "$out/profile-top.txt"
+    else
+        echo "profile: $sampler wrote no samples, so there is no profile-top.txt" >&2
+    fi
 fi
 
 python3 bench/summary.py "$out" | tee "$out/summary.md"

@@ -1,0 +1,36 @@
+114,709 samples (1 ms apart) inside MarketReplay::run, from profile-sample.txt
+
+Self (top of stack), share of replay time:
+   21.8%    24,998  simulator::OrderBook::unlink(simulator::Order&)
+   18.9%    21,714  simulator::OrderBook::add(simulator::Order&)
+   14.4%    16,575  simulator::OrderBook::find(unsigned long long)
+   10.3%    11,830  simulator::ItchSource::next(simulator::MarketEvent&)
+    3.8%     4,380  simulator::OrderIndex::erase(unsigned long long)
+    3.7%     4,262  simulator::ItchDecoder::read_add_order(simulator::ByteReader&, simulator::ItchAddOrder&)
+    3.0%     3,482  simulator::MarketReplay::run(simulator::MarketEventSource&, simulator::MarketBooks&, simulator::ReplayOptions const&)
+    2.9%     3,274  simulator::ByteReader::read_u32_be(unsigned int&)
+    2.7%     3,150  simulator::ByteReader::read_u64_be(unsigned long long&)
+    2.7%     3,067  simulator::ByteReader::read_u16_be(unsigned short&)
+    2.2%     2,518  simulator::ByteReader::read_u48_be(unsigned long long&)
+    2.1%     2,436  [libsystem_malloc.dylib]
+    1.7%     1,938  simulator::MarketBook::apply(simulator::MarketEvent const&)
+    1.7%     1,925  simulator::ItchMessageReader::next(simulator::ItchMessage&)
+    1.0%     1,164  std::__tree_remove[abi:ne190102]<std::__tree_node_base<void*>*>(std::__tree_node_base<void*>*, std::__tree_node_base<void*>*)
+
+Total (self + callees), share of replay time:
+  100.0%   114,709  simulator::MarketReplay::run(simulator::MarketEventSource&, simulator::MarketBooks&, simulator::ReplayOptions const&)
+   55.0%    63,064  simulator::MarketBook::apply(simulator::MarketEvent const&)
+   27.7%    31,759  simulator::ItchSource::next(simulator::MarketEvent&)
+   27.1%    31,100  simulator::OrderBook::erase(unsigned long long)
+   24.4%    27,936  simulator::OrderBook::unlink(simulator::Order&)
+   22.6%    25,970  simulator::OrderBook::add(simulator::Order&)
+   14.4%    16,575  simulator::OrderBook::find(unsigned long long)
+   11.8%    13,566  simulator::MarketBook::replace(simulator::MarketEvent const&)
+    9.8%    11,188  simulator::ItchDecoder::read_add_order(simulator::ByteReader&, simulator::ItchAddOrder&)
+    9.7%    11,081  simulator::ItchDecoder::decode_add_order(simulator::ItchMessage const&, simulator::ItchAddOrder&)
+    3.8%     4,380  simulator::OrderIndex::erase(unsigned long long)
+    3.3%     3,841  simulator::ItchMessageReader::next(simulator::ItchMessage&)
+    2.9%     3,284  simulator::ItchDecoder::decode_order_delete(simulator::ItchMessage const&, simulator::ItchOrderDelete&)
+    2.9%     3,274  simulator::ByteReader::read_u32_be(unsigned int&)
+    2.7%     3,150  simulator::ByteReader::read_u64_be(unsigned long long&)
+

@@ -397,6 +397,13 @@ chronos_cli_test(BadOptionExitsTwo 2 replay day.bin --symbol AAPL --date 2019-12
 chronos_cli_test(MissingFileExitsTwo 2 replay /nonexistent/chronos-missing.itch --symbol AAPL --date 2019-12-30)
 chronos_cli_test(FailedRunExitsOne 1 replay /dev/null --symbol AAPL --date 2019-12-30)
 
+# The allocation count is read immediately around MarketReplay::run (spec §3.3): opening the file and building the
+# source, the book and the report all allocate, and a run() that allocates nothing still counts 0.
+add_test(NAME SimulatorCliTest.TheAllocationCountCoversOnlyTheReplay
+         COMMAND sh -c "\"$0\" replay /dev/null --symbol AAPL --date 2019-12-30 --json \"$1\" > /dev/null;
+                        grep -q '\"allocations\": 0,' \"$1\""
+                 $<TARGET_FILE:simulator> ${PROJECT_BINARY_DIR}/allocation-interval.json)
+
 # --store: a symbol the store lacks on the day, or an index that is invalid, exits 2 and says which.
 set(empty_store ${PROJECT_BINARY_DIR}/empty-store)
 set(bad_store ${PROJECT_BINARY_DIR}/bad-store)
