@@ -8,7 +8,8 @@
 # - The real-data tests skip: CHRONOS_ITCH_FILE is not set.
 # - format: every C++ file must match .clang-format (clang-format 20.1.8).
 # - isolation: the engine (include/, src/, app/) never includes server or web code, and
-#   simulator_lib links only the standard library.
+#   simulator_lib links only the standard library; and nothing on the replay path calls an
+#   allocator or grows a container outside its setup (scripts/check-hot-path.sh).
 # - server-tsan: chronos_server_tests under ThreadSanitizer (Linux clang; TSan does not start on macOS 27).
 # - web: the Trading Terminal and the Strategy Lab (web/): typecheck, build and Vitest, then the Playwright end-to-end
 #   tests against a Release chronos-serve on the fixture days chronos-e2e-fixture writes (with --lab, the Lab's).
@@ -67,6 +68,8 @@ jobs:
       - uses: actions/checkout@v5
       - name: Engine isolation
         run: bash scripts/check-isolation.sh
+      - name: Replay hot path
+        run: bash scripts/check-hot-path.sh
 
   server-tsan:
     runs-on: ubuntu-latest

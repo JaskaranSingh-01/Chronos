@@ -3,7 +3,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
-#include <vector>
+#include <memory>
 
 #include "simulator/types/symbol_id.hpp"
 
@@ -35,8 +35,9 @@ enum class RegisterResult : std::uint8_t {
 class InstrumentRegistry
 {
 private:
-    std::vector<Instrument> instruments_;  // index = SymbolId
+    std::unique_ptr<Instrument[]> instruments_;  // index = SymbolId
     std::size_t capacity_{0};
+    std::size_t size_{0};
 
 public:
     // Reserves `capacity` instruments; the only allocation.
@@ -49,12 +50,17 @@ public:
     // nullptr if unknown.
     const Instrument* find(SymbolId id) const noexcept
     {
-        return id < instruments_.size() ? &instruments_[id] : nullptr;
+        return id < size_ ? &instruments_[id] : nullptr;
     }
 
     std::size_t size() const noexcept
     {
-        return instruments_.size();
+        return size_;
+    }
+
+    std::size_t capacity() const noexcept
+    {
+        return capacity_;
     }
 };
 

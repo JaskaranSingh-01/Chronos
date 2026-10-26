@@ -77,6 +77,11 @@ public:
     {
         return table_.full();
     }
+
+    std::size_t bytes() const noexcept
+    {
+        return table_.bytes();
+    }
 };
 
 } // namespace simulator

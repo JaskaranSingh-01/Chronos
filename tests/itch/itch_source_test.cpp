@@ -743,15 +743,14 @@ TEST(ItchEndToEndTest, TwoSymbolsReplayIntoTheirOwnBooks)
     EXPECT_EQ(*registry.find(0), xnas("AAPL"));
     EXPECT_EQ(*registry.find(1), xnas("MSFT"));
     ASSERT_EQ(books.size(), 2u);
-    ASSERT_EQ(report.symbols.size(), 2u);
 
-    const SymbolReport& aapl_report = report.symbols[0];
+    const SymbolReport aapl_report = books.report(0);
     EXPECT_EQ(aapl_report.events, 7u);
     EXPECT_EQ(aapl_report.applied(), 7u);
     EXPECT_EQ(aapl_report.peak_orders, 2u);
     EXPECT_EQ(aapl_report.orders_left, 2u);
 
-    const SymbolReport& msft_report = report.symbols[1];
+    const SymbolReport msft_report = books.report(1);
     EXPECT_EQ(msft_report.events, 6u);
     EXPECT_EQ(msft_report.applied(), 6u);
     EXPECT_EQ(msft_report.peak_orders, 2u);

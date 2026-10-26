@@ -402,17 +402,16 @@ TEST(MarketReplayBooksTest, RoutesEachEventToTheBookOfItsSymbol)
     EXPECT_EQ(report.total.last_timestamp, 7);
 
     ASSERT_EQ(books.size(), 3u);  // one per registered instrument, with events or not
-    ASSERT_EQ(report.symbols.size(), 3u);
 
-    const SymbolReport& a = report.symbols[0];
+    const SymbolReport a = books.report(0);
     EXPECT_EQ(a.events, 2u);
     EXPECT_EQ(a.applied(), 2u);
     EXPECT_EQ(a.peak_orders, 1u);
     EXPECT_EQ(a.orders_left, 1u);
 
-    EXPECT_EQ(report.symbols[1], SymbolReport{});
+    EXPECT_EQ(books.report(1), SymbolReport{});
 
-    const SymbolReport& c = report.symbols[2];
+    const SymbolReport c = books.report(2);
     EXPECT_EQ(c.events, 4u);
     EXPECT_EQ(c.applied(), 3u);
     EXPECT_EQ(c.rejected(), 1u);
@@ -447,8 +446,8 @@ TEST(MarketReplayBooksTest, AFullSharedPoolStopsTheReplayInTheBookThatNeededIt)
     EXPECT_EQ(report.failed_symbol, 1u);
     EXPECT_EQ(report.total.events, 3u);
     EXPECT_EQ(by_result(report.total, ApplyResult::CapacityExhausted), 1u);
-    EXPECT_EQ(by_result(report.symbols[1], ApplyResult::CapacityExhausted), 1u);
-    EXPECT_EQ(report.symbols[1].orders_left, 1u);
+    EXPECT_EQ(by_result(books.report(1), ApplyResult::CapacityExhausted), 1u);
+    EXPECT_EQ(books.report(1).orders_left, 1u);
     EXPECT_EQ(report.peak_live_orders, 2u);
 }
 

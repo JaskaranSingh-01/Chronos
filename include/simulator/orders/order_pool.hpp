@@ -56,6 +56,11 @@ public:
     {
         return capacity_ - available_;
     }
+
+    constexpr std::size_t bytes() const noexcept
+    {
+        return capacity_ * sizeof(Slot);
+    }
 };
 
 } // namespace simulator

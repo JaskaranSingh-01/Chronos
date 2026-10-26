@@ -1,8 +1,10 @@
 #pragma once
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
-#include <deque>
+#include <optional>
+#include <vector>
 
 #include "simulator/market/instrument_registry.hpp"
 #include "simulator/market/market_book.hpp"
@@ -10,48 +12,100 @@
 
 namespace simulator {
 
-// One MarketBook per registered instrument, indexed by SymbolId, sharing one BookStorage.
-// Books are created lazily by find(); the caller keeps `registry` and `storage` alive.
+// One symbol's share of a multi-book run.
+struct SymbolReport
+{
+    std::uint64_t events{0};
+    std::array<std::uint64_t, apply_result_count> by_result{};  // index = ApplyResult
+    std::size_t peak_orders{0};  // MarketBook::peak_order_count()
+    std::size_t orders_left{0};  // MarketBook::order_count()
+
+    std::uint64_t applied() const noexcept
+    {
+        return by_result[static_cast<std::size_t>(ApplyResult::Applied)];
+    }
+
+    std::uint64_t rejected() const noexcept
+    {
+        return events - applied();
+    }
+
+    bool operator==(const SymbolReport&) const = default;
+};
+
+// One MarketBook per registered instrument, indexed by SymbolId, sharing one BookStorage, each with its SymbolReport.
+// A slot for every instrument the registry can hold is reserved up front, so a book made during a replay allocates
+// nothing. Books are made lazily by find(); the caller keeps `registry` and `storage` alive.
 class MarketBooks
 {
 private:
+    struct Slot
+    {
+        std::optional<MarketBook> book;
+        SymbolReport report;  // events and results; the order counts come from the book
+    };
+
     const InstrumentRegistry& registry_;
     BookStorage& storage_;
-    std::deque<MarketBook> books_;  // index = SymbolId; a deque never moves its books
+    std::vector<Slot> slots_;  // index = SymbolId, one per instrument the registry can hold
+    std::size_t size_{0};      // books made
 
 public:
-    MarketBooks(const InstrumentRegistry& registry, BookStorage& storage) noexcept
-        : registry_(registry), storage_(storage)
+    MarketBooks(const InstrumentRegistry& registry, BookStorage& storage)
+        : registry_(registry), storage_(storage), slots_(registry.capacity())
     {}
 
-    // Adds the books of instruments registered since the last call.
-    void sync()
+    // Makes the books of instruments registered since the last call.
+    void sync() noexcept
     {
-        while (books_.size() < registry_.size()) {
-            books_.emplace_back(static_cast<SymbolId>(books_.size()), storage_);
+        for (; size_ < registry_.size(); ++size_) {
+            slots_[size_].book.emplace(static_cast<SymbolId>(size_), storage_);
         }
     }
 
     // nullptr if `id` is not registered.
-    MarketBook* find(SymbolId id)
+    MarketBook* find(SymbolId id) noexcept
     {
-        if (id >= books_.size()) {
+        if (id >= size_) {
             sync();
         }
-        return id < books_.size() ? &books_[id] : nullptr;
+        return id < size_ ? &*slots_[id].book : nullptr;
+    }
+
+    // Counts an event routed to book `id` and its result; an event of no book counts nowhere.
+    void count(SymbolId id, ApplyResult result) noexcept
+    {
+        if (id < size_) {
+            ++slots_[id].report.events;
+            ++slots_[id].report.by_result[static_cast<std::size_t>(result)];
+        }
+    }
+
+    SymbolReport report(SymbolId id) const noexcept
+    {
+        SymbolReport report = slots_[id].report;
+        report.peak_orders = slots_[id].book->peak_order_count();
+        report.orders_left = slots_[id].book->order_count();
+        return report;
     }
 
     std::size_t size() const noexcept
     {
-        return books_.size();
+        return size_;
     }
     const MarketBook& operator[](SymbolId id) const noexcept
     {
-        return books_[id];
+        return *slots_[id].book;
     }
     const OrderPool& pool() const noexcept
     {
         return storage_.orders;
+    }
+
+    // What the slots reserve.
+    std::size_t bytes() const noexcept
+    {
+        return slots_.capacity() * sizeof(Slot);
     }
 
     // Checks every book, then the shared storage against all of them. On failure `symbol`
@@ -61,13 +115,14 @@ public:
         std::size_t orders = 0;
         std::size_t levels = 0;
 
-        for (SymbolId id = 0; id < books_.size(); ++id) {
-            if (!books_[id].check_invariants(error, rth)) {
+        for (SymbolId id = 0; id < size_; ++id) {
+            const MarketBook& book = *slots_[id].book;
+            if (!book.check_invariants(error, rth)) {
                 symbol = id;
                 return false;
             }
-            orders += books_[id].order_count();
-            levels += books_[id].level_count();
+            orders += book.order_count();
+            levels += book.level_count();
         }
 
         error = InvariantError::None;
@@ -76,7 +131,9 @@ public:
         } else if (storage_.levels.in_use() != levels || storage_.level_index.size() != levels) {
             error = InvariantError::LevelCountMismatch;
         }
-        symbol = static_cast<SymbolId>(books_.size());
+        if (error != InvariantError::None) {
+            symbol = static_cast<SymbolId>(size_);
+        }
         return error == InvariantError::None;
     }
 
@@ -86,10 +143,10 @@ public:
     {
         std::uint64_t hash = fnv1a_offset_basis;
 
-        for (SymbolId id = 0; id < books_.size(); ++id) {
+        for (SymbolId id = 0; id < size_; ++id) {
             fnv1a_mix(hash, id);
-            fnv1a_mix(hash, books_[id].last_sequence());
-            fnv1a_mix(hash, books_[id].digest());
+            fnv1a_mix(hash, slots_[id].book->last_sequence());
+            fnv1a_mix(hash, slots_[id].book->digest());
         }
         return hash;
     }

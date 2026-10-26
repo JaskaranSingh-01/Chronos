@@ -4,7 +4,6 @@
 #include <cstddef>
 #include <cstdint>
 #include <string_view>
-#include <vector>
 
 #include "simulator/market/market_book.hpp"
 #include "simulator/market/market_books.hpp"
@@ -71,34 +70,13 @@ struct ReplayReport
     bool operator==(const ReplayReport&) const = default;
 };
 
-// One symbol's share of a multi-book run.
-struct SymbolReport
-{
-    std::uint64_t events{0};
-    std::array<std::uint64_t, apply_result_count> by_result{};  // index = ApplyResult
-    std::size_t peak_orders{0};  // MarketBook::peak_order_count() at the end
-    std::size_t orders_left{0};  // MarketBook::order_count() at the end
-
-    std::uint64_t applied() const noexcept
-    {
-        return by_result[static_cast<std::size_t>(ApplyResult::Applied)];
-    }
-
-    std::uint64_t rejected() const noexcept
-    {
-        return events - applied();
-    }
-
-    bool operator==(const SymbolReport&) const = default;
-};
-
+// Each symbol's share is MarketBooks::report().
 struct BooksReplayReport
 {
     // An event of an unregistered symbol counts as WrongSymbol here and in no SymbolReport.
     ReplayReport total;
-    std::vector<SymbolReport> symbols;  // index = SymbolId, one per book
-    std::size_t peak_live_orders{0};    // max OrderPool::in_use(), all books together
-    SymbolId failed_symbol{0};          // the book of an InvariantViolation or CapacityExhausted
+    std::size_t peak_live_orders{0};  // max OrderPool::in_use(), all books together
+    SymbolId failed_symbol{0};        // the book of an InvariantViolation or CapacityExhausted
 
     bool operator==(const BooksReplayReport&) const = default;
 };
@@ -109,7 +87,7 @@ struct MarketReplay
 {
     static ReplayReport run(MarketEventSource& source, MarketBook& book, const ReplayOptions& options) noexcept;
 
-    // Routes each event to its symbol's book; allocates only when a new symbol gets a book.
+    // Routes each event to its symbol's book, and counts it in that book's SymbolReport.
     static BooksReplayReport run(MarketEventSource& source, MarketBooks& books, const ReplayOptions& options) noexcept;
 };
 

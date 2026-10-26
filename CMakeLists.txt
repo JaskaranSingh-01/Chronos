@@ -416,6 +416,18 @@ add_test(NAME SimulatorCliTest.AFullOrderPoolStopsTheReplayAndSaysSo
                         test $code -eq 1 && echo \"$out\" | grep -qF 'hint: the order pool (1) is full; raise --capacity'"
                  $<TARGET_FILE:simulator> $<TARGET_FILE:chronos-e2e-fixture>)
 
+# A replay allocates nothing once it starts (spec §3.3): no allocation counted, and the heap unchanged, in a replay of
+# every symbol of the Lab's Monday (ACME, ZETA and IDLE) and of one of them. ASan builds count nothing (its allocator
+# owns the heap), so the Release, UBSan and macOS jobs enforce this.
+add_test(NAME SimulatorCliTest.AReplayAllocatesNothing
+         COMMAND sh -c "dir=$(mktemp -d) && \"$1\" \"$dir\" --lab || exit 1
+                        for symbols in --all '--symbol ACME'; do
+                            \"$0\" replay \"$dir/12302019.NASDAQ_ITCH50.bin\" $symbols --date 2019-12-30 --json \"$dir/run.json\" > /dev/null &&
+                                grep -q '\"allocations\": 0,' \"$dir/run.json\" &&
+                                grep -q '\"heap_blocks_change\": 0, \"heap_bytes_change\": 0,' \"$dir/run.json\" || { rm -rf \"$dir\"; exit 1; }
+                        done; rm -rf \"$dir\""
+                 $<TARGET_FILE:simulator> $<TARGET_FILE:chronos-e2e-fixture>)
+
 # --store: a symbol the store lacks on the day, or an index that is invalid, exits 2 and says which.
 set(empty_store ${PROJECT_BINARY_DIR}/empty-store)
 set(bad_store ${PROJECT_BINARY_DIR}/bad-store)

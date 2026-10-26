@@ -3,15 +3,13 @@
 namespace simulator {
 
 InstrumentRegistry::InstrumentRegistry(std::size_t capacity)
-    : capacity_(capacity)
-{
-    instruments_.reserve(capacity);
-}
+    : instruments_(std::make_unique<Instrument[]>(capacity)), capacity_(capacity)
+{}
 
 
 RegisterResult InstrumentRegistry::add(const Instrument& instrument, SymbolId& id) noexcept
 {
-    for (std::size_t i = 0; i < instruments_.size(); ++i) {
+    for (std::size_t i = 0; i < size_; ++i) {
         const Instrument& known = instruments_[i];
 
         if (known.venue != instrument.venue || known.native_symbol != instrument.native_symbol) {
@@ -26,13 +24,12 @@ RegisterResult InstrumentRegistry::add(const Instrument& instrument, SymbolId& i
         return RegisterResult::Existing;
     }
 
-    if (instruments_.size() == capacity_) {
+    if (size_ == capacity_) {
         return RegisterResult::Full;
     }
 
-    // Cannot allocate: the constructor reserved capacity_.
-    id = static_cast<SymbolId>(instruments_.size());
-    instruments_.push_back(instrument);
+    id = static_cast<SymbolId>(size_);
+    instruments_[size_++] = instrument;
     return RegisterResult::Added;
 }
 

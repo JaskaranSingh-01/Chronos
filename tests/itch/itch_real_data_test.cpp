@@ -6,6 +6,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <string_view>
+#include <vector>
 
 #include "simulator/cli/replay_args.hpp"
 #include "simulator/io/mapped_file.hpp"
@@ -129,11 +130,13 @@ TEST(ItchRealDataTest, ReplaysEverySymbolWithoutRejections)
     struct AllOutcome
     {
         BooksReplayReport report;
+        std::size_t books{0};
         std::uint64_t digest{0};
         bool final_invariants{false};
         InvariantError final_error{InvariantError::None};
         SymbolId final_symbol{0};
         std::size_t crossed{0};
+        std::vector<SymbolReport> symbols;  // each book's report, which BooksReplayReport no longer holds
     };
 
     auto replay = [&] {
@@ -144,6 +147,7 @@ TEST(ItchRealDataTest, ReplaysEverySymbolWithoutRejections)
 
         AllOutcome run;
         run.report = MarketReplay::run(source, books, options);
+        run.books = books.size();
         run.digest = books.digest();
         // A book that is not Trading (halted, paused or quotation only) may
         // cross in RTH: NASDAQ queues its orders without matching them, and
@@ -153,6 +157,7 @@ TEST(ItchRealDataTest, ReplaysEverySymbolWithoutRejections)
                                                       in_rth(run.report.total.last_timestamp, midnight));
         for (SymbolId id = 0; id < books.size(); ++id) {
             run.crossed += books[id].is_crossed();
+            run.symbols.push_back(books.report(id));
         }
         return run;
     };
@@ -162,13 +167,13 @@ TEST(ItchRealDataTest, ReplaysEverySymbolWithoutRejections)
 
     std::printf("[ RealData ] all: %zu books (%zu crossed at the end), %llu events, %llu rejected, peak %zu live "
                 "orders, digest %016llx\n",
-                run.report.symbols.size(), run.crossed, static_cast<unsigned long long>(total.events),
+                run.books, run.crossed, static_cast<unsigned long long>(total.events),
                 static_cast<unsigned long long>(total.rejected()), run.report.peak_live_orders,
                 static_cast<unsigned long long>(run.digest));
 
     ASSERT_TRUE(total.succeeded()) << total.message << " at position " << total.failed_position << ", symbol "
                                    << run.report.failed_symbol;
-    EXPECT_GT(run.report.symbols.size(), 1u);
+    EXPECT_GT(run.books, 1u);
     EXPECT_GT(total.events, 0u);
     for (std::size_t result = 1; result < apply_result_count; ++result) {
         EXPECT_EQ(total.by_result[result], 0u) << to_string(static_cast<ApplyResult>(result));
@@ -179,6 +184,7 @@ TEST(ItchRealDataTest, ReplaysEverySymbolWithoutRejections)
     const AllOutcome again = replay();
     EXPECT_EQ(again.digest, run.digest);
     EXPECT_EQ(again.report, run.report);
+    EXPECT_EQ(again.symbols, run.symbols);
 }
 
 } // namespace

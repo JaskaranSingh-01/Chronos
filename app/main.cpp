@@ -243,6 +243,7 @@ struct Usage
     double sys_s{0};
     std::uint64_t allocations{0};
     std::uint64_t major_faults{0};
+    HeapUsage heap;
 };
 
 Usage usage_now() noexcept
@@ -252,8 +253,12 @@ Usage usage_now() noexcept
     auto seconds = [](const timeval& t) {
         return static_cast<double>(t.tv_sec) + static_cast<double>(t.tv_usec) * 1e-6;
     };
-    return {std::chrono::steady_clock::now(), seconds(usage.ru_utime), seconds(usage.ru_stime), allocation_count(),
-            static_cast<std::uint64_t>(usage.ru_majflt)};
+    return {std::chrono::steady_clock::now(),
+            seconds(usage.ru_utime),
+            seconds(usage.ru_stime),
+            allocation_count(),
+            static_cast<std::uint64_t>(usage.ru_majflt),
+            heap_usage()};
 }
 
 // What one run() cost.
@@ -263,6 +268,9 @@ struct RunMetrics
     double user_s{0};
     double sys_s{0};
     std::uint64_t allocations{0};      // operator new calls during run()
+    std::int64_t heap_blocks_change{0};  // the heap's blocks in use after run() minus before (spec §3.3)
+    std::int64_t heap_bytes_change{0};
+    std::uint64_t reserved_bytes{0};   // set up before run(): the book storage, and the books of --symbols or --all
     std::uint64_t major_faults{0};     // page faults that waited for I/O
     std::uint64_t peak_rss{0};         // bytes, whole process, including resident pages of the mapped file
     std::uint64_t peak_footprint{0};   // bytes, macOS only; excludes clean file pages such as the mapped file
@@ -282,6 +290,8 @@ auto measured(Run&& run, RunMetrics& metrics)
     metrics.user_s = after.user_s - before.user_s;
     metrics.sys_s = after.sys_s - before.sys_s;
     metrics.allocations = after.allocations - before.allocations;
+    metrics.heap_blocks_change = static_cast<std::int64_t>(after.heap.blocks - before.heap.blocks);
+    metrics.heap_bytes_change = static_cast<std::int64_t>(after.heap.bytes - before.heap.bytes);
     metrics.major_faults = after.major_faults - before.major_faults;
 
     rusage usage{};
@@ -343,9 +353,10 @@ void print_metrics(const RunRecord& run, std::uint64_t file_bytes)
                 m.wall_s, m.user_s + m.sys_s, m.user_s, m.sys_s, ratio(events, m.wall_s), ratio(m.wall_s * 1e9, events),
                 ratio(static_cast<double>(run.messages), m.wall_s),
                 ratio(static_cast<double>(file_bytes) / 1e6, m.wall_s));
-    std::printf("Memory            %" PRIu64 " allocations (%.4f per event), peak RSS %.1f MB, peak footprint "
-                "%.1f MB, %" PRIu64 " major faults\n",
-                m.allocations, ratio(static_cast<double>(m.allocations), events), static_cast<double>(m.peak_rss) / 1e6,
+    std::printf("Memory            %" PRIu64 " allocations (%.4f per event), heap change %+" PRId64 " blocks %+" PRId64
+                " bytes, %.1f MB reserved; peak RSS %.1f MB, peak footprint %.1f MB, %" PRIu64 " major faults\n",
+                m.allocations, ratio(static_cast<double>(m.allocations), events), m.heap_blocks_change,
+                m.heap_bytes_change, static_cast<double>(m.reserved_bytes) / 1e6, static_cast<double>(m.peak_rss) / 1e6,
                 static_cast<double>(m.peak_footprint) / 1e6, m.major_faults);
     if (m.latency != nullptr) {
         const LatencyHistogram& h = *m.latency;
@@ -460,11 +471,13 @@ bool write_json(const ReplayArgs& args, std::span<const std::byte> input, const 
                  "\"events_per_s\": %.0f, \"ns_per_event\": %.2f},\n",
                  m.wall_s, m.user_s, m.sys_s, m.user_s + m.sys_s, ratio(events, m.wall_s),
                  ratio(m.wall_s * 1e9, events));
-    std::fprintf(
-        out,
-        "  \"memory\": {\"allocations\": %" PRIu64 ", \"allocations_per_event\": %.4f, "
-        "\"peak_rss_bytes\": %" PRIu64 ", \"peak_footprint_bytes\": %" PRIu64 ", \"major_faults\": %" PRIu64 "},\n",
-        m.allocations, ratio(static_cast<double>(m.allocations), events), m.peak_rss, m.peak_footprint, m.major_faults);
+    std::fprintf(out,
+                 "  \"memory\": {\"allocations\": %" PRIu64
+                 ", \"allocations_per_event\": %.4f, \"heap_blocks_change\": %" PRId64
+                 ", \"heap_bytes_change\": %" PRId64 ", \"reserved_bytes\": %" PRIu64 ", \"peak_rss_bytes\": %" PRIu64
+                 ", \"peak_footprint_bytes\": %" PRIu64 ", \"major_faults\": %" PRIu64 "},\n",
+                 m.allocations, ratio(static_cast<double>(m.allocations), events), m.heap_blocks_change,
+                 m.heap_bytes_change, m.reserved_bytes, m.peak_rss, m.peak_footprint, m.major_faults);
     std::fprintf(out, "%.*s", static_cast<int>(extra.size()), extra.data());
     if (m.latency == nullptr) {
         std::fprintf(out, "  \"latency\": null\n}\n");
@@ -588,6 +601,7 @@ int replay(const ReplayArgs& args)
     const bool invariants = print_final_book(book, report, args.depth, source.instrument().price_scale, midnight);
 
     fill_record(run, report, book, stats.messages, invariants);
+    run.metrics.reserved_bytes = book.storage().bytes();
     run.metrics.latency = options.latency;
     run.metrics.latency_batch = options.latency_batch;
     print_metrics(run, input.size());
@@ -686,8 +700,8 @@ int replay_books(const ReplayArgs& args)
     }
 
     std::size_t non_empty = 0;
-    for (const SymbolReport& symbol : report.symbols) {
-        non_empty += symbol.orders_left != 0;
+    for (SymbolId id = 0; id < books.size(); ++id) {
+        non_empty += books[id].order_count() != 0;
     }
     std::printf("\nBooks %zu: %zu empty at the end, %zu not empty\n", books.size(), books.size() - non_empty,
                 non_empty);
@@ -699,13 +713,13 @@ int replay_books(const ReplayArgs& args)
     std::size_t hidden = 0;
     if (args.all_symbols) {
         std::stable_sort(rows.begin(), rows.end(),
-                         [&](SymbolId a, SymbolId b) { return report.symbols[a].events > report.symbols[b].events; });
+                         [&](SymbolId a, SymbolId b) { return books.report(a).events > books.report(b).events; });
         const std::size_t top = std::min<std::size_t>(10, rows.size());
         std::vector<SymbolId> others(rows.begin() + static_cast<std::ptrdiff_t>(top), rows.end());
         std::sort(others.begin(), others.end());
         rows.resize(top);
         for (const SymbolId id : others) {
-            if (report.symbols[id].rejected() != 0 || report.symbols[id].orders_left != 0) {
+            if (books.report(id).rejected() != 0 || books[id].order_count() != 0) {
                 rows.size() < top + max_others ? rows.push_back(id) : void(++hidden);
             }
         }
@@ -716,7 +730,7 @@ int replay_books(const ReplayArgs& args)
     std::printf("  %-8s %12s %12s %10s %12s %12s\n", "symbol", "events", "applied", "rejected", "peak orders",
                 "orders left");
     for (const SymbolId id : rows) {
-        print_symbol_row(name(*registry.find(id)), report.symbols[id]);
+        print_symbol_row(name(*registry.find(id)), books.report(id));
     }
     if (hidden != 0) {
         std::printf("  ... and %zu more with rejections or orders left\n", hidden);
@@ -778,6 +792,7 @@ int replay_books(const ReplayArgs& args)
     run.books_not_empty = non_empty;
     run.peak_live_orders = report.peak_live_orders;
     run.succeeded = total.succeeded() && invariants;
+    run.metrics.reserved_bytes = storage.bytes() + books.bytes() + registry.capacity() * sizeof(Instrument);
     run.metrics.latency = options.latency;
     run.metrics.latency_batch = options.latency_batch;
     print_metrics(run, file.bytes().size());
@@ -967,6 +982,7 @@ int backtest(const ReplayArgs& args)
 
         const bool invariants = print_final_book(book, replay, args.depth, price_scale, midnight);
         fill_record(record, replay, book, source.statistics().messages, invariants);
+        record.metrics.reserved_bytes = book.storage().bytes();
         print_metrics(record, input.size());
 
         if (!args.json.empty() &&

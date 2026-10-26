@@ -112,31 +112,15 @@ BooksReplayReport MarketReplay::run(MarketEventSource& source, MarketBooks& book
 {
     BooksReplayReport report;
     MarketEvent event;
-    std::vector<SymbolReport>& symbols = report.symbols;
 
     replay(
-        source, options, report.total, event,
-        [&](const MarketEvent& e) {
-            MarketBook* book = books.find(e.symbol);
-            if (symbols.size() < books.size()) {
-                symbols.resize(books.size());
-            }
-            return book;
-        },
+        source, options, report.total, event, [&](const MarketEvent& e) { return books.find(e.symbol); },
         [&](const MarketEvent& e, ApplyResult result) {
-            if (e.symbol < symbols.size()) {
-                ++symbols[e.symbol].events;
-                ++symbols[e.symbol].by_result[static_cast<std::size_t>(result)];
-            }
+            books.count(e.symbol, result);
             report.peak_live_orders = std::max(report.peak_live_orders, books.pool().in_use());
         });
 
     books.sync();
-    symbols.resize(books.size());
-    for (SymbolId id = 0; id < books.size(); ++id) {
-        symbols[id].peak_orders = books[id].peak_order_count();
-        symbols[id].orders_left = books[id].order_count();
-    }
     if (report.total.failure == ReplayFailure::InvariantViolation ||
         report.total.failure == ReplayFailure::CapacityExhausted) {
         report.failed_symbol = event.symbol;

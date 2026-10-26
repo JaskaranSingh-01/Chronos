@@ -53,6 +53,12 @@ struct BookStorage
     BookStorage(const BookStorage&) = delete;
     BookStorage& operator=(const BookStorage&) = delete;
 
+    // Every byte reserved for them.
+    std::size_t bytes() const noexcept
+    {
+        return orders.bytes() + order_index.bytes() + levels.bytes() + level_index.bytes();
+    }
+
     // The entries `structure` holds; 0 for None.
     std::size_t capacity(BookStructure structure) const noexcept
     {

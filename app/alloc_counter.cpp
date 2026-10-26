@@ -6,6 +6,12 @@
 #include <cstdlib>
 #include <new>
 
+#ifdef __APPLE__
+#include <malloc/malloc.h>
+#elif defined(__GLIBC__)
+#include <malloc.h>
+#endif
+
 namespace {
 
 std::atomic<std::uint64_t> allocations{0};
@@ -36,6 +42,20 @@ void* allocate(std::size_t size, std::align_val_t align)
 std::uint64_t simulator::allocation_count() noexcept
 {
     return allocations.load(std::memory_order_relaxed);
+}
+
+simulator::HeapUsage simulator::heap_usage() noexcept
+{
+#ifdef __APPLE__
+    malloc_statistics_t stats{};
+    malloc_zone_statistics(nullptr, &stats);  // every zone
+    return {.blocks = stats.blocks_in_use, .bytes = stats.size_in_use};
+#elif defined(__GLIBC__)
+    const struct mallinfo2 info = mallinfo2();
+    return {.blocks = 0, .bytes = info.uordblks + info.hblkhd};
+#else
+    return {};
+#endif
 }
 
 #ifndef CHRONOS_NO_ALLOC_COUNTER
