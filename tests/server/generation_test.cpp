@@ -59,6 +59,26 @@ Command order(OrderType type, Side side, std::int64_t price, std::uint64_t quant
     return Command{.order_type = type, .side = side, .price = Price{price}, .quantity = Quantity{quantity}};
 }
 
+// --book reaches every generation's book; the backends give the same book.
+TEST(GenerationTest, ItsBookTakesTheSessionsBackend)
+{
+    SessionConfig ladder_config = config();
+    ladder_config.book = BookBackend::Ladder;
+    const std::vector<MarketEvent> events = ladder();
+    Generation list{config(), config().defaults, std::make_unique<VectorSource>(events)};
+    Generation with_ladder{ladder_config, ladder_config.defaults, std::make_unique<VectorSource>(events)};
+    for (Generation* g : {&list, &with_ladder}) {
+        Timestamp ts{0};
+        while (g->loop.peek(ts) == PeekStatus::Event) {
+            ASSERT_TRUE(g->loop.step().ok);
+        }
+    }
+    EXPECT_EQ(list.book.storage().backend, BookBackend::List);
+    EXPECT_EQ(with_ladder.book.storage().backend, BookBackend::Ladder);
+    EXPECT_EQ(with_ladder.book.digest(), list.book.digest());
+    EXPECT_EQ(with_ladder.book.order_count(), 4u);
+}
+
 TEST(GenerationTest, MarketOrdersSweepOnlyTheLevelsInsideTheirOnePercentBand)
 {
     Fixture buy{ladder()};

@@ -81,6 +81,7 @@ struct SessionConfig
     Instrument instrument{};
     SymbolId symbol{0};
     std::size_t book_capacity{std::size_t{1} << 20};
+    BookBackend book{BookBackend::List};  // --book
     std::uint64_t check_invariants_every{0};
     bool allow_truncated_tail{false};  // a day cut mid-message ends there instead of failing
     RunSpec defaults{};                // the first generation's: the terminal's latencies, fees and limits

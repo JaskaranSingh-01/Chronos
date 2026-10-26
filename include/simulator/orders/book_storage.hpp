@@ -1,8 +1,9 @@
 #pragma once
 
-#include <cassert>
 #include <cstddef>
 #include <cstdint>
+#include <cstdio>
+#include <cstdlib>
 #include <memory>
 
 #include "simulator/orders/level_index.hpp"
@@ -79,10 +80,15 @@ public:
     BookStorage(const BookStorage&) = delete;
     BookStorage& operator=(const BookStorage&) = delete;
 
-    // Ladder only: the ladder_window slots of `book`'s window on `side`.
+    // Ladder only: the ladder_window slots of `book`'s window on `side`. A book asks once, when it is made, so this is
+    // checked in every build type.
     LevelRef* window(SymbolId book, Side side) noexcept
     {
-        assert(windows_ && book < books_);
+        if (!windows_ || book >= books_) {
+            std::fprintf(stderr, "book %zu has no ladder window: the storage holds %zu\n", std::size_t{book},
+                         windows_ ? books_ : 0);
+            std::abort();
+        }
         return &windows_[(2 * std::size_t{book} + static_cast<std::size_t>(side)) * ladder_window];
     }
 

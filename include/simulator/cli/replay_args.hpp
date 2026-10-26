@@ -8,6 +8,8 @@
 #include <string_view>
 #include <vector>
 
+#include "simulator/orders/book_storage.hpp"
+
 namespace simulator {
 
 // Help text for every command; a test requires each flag to appear here as " --flag ".
@@ -30,6 +32,8 @@ inline constexpr std::string_view usage =
     "  --check-invariants N    check the book every N applied events (default 0 = only at the end)\n"
     "  --capacity N            order slots reserved for the book, at most 1073741824 (default 1048576);\n"
     "                          with --symbols or --all, shared by every book (default 4194304)\n"
+    "  --book B                the price levels: list (default), each side a list found through an index;\n"
+    "                          or ladder, which adds a window of 256 ticks around each side's best\n"
     "  --json PATH             also write the results, metrics, build and input as JSON;\n"
     "                          backtest adds its config, fills, fees and PnL\n"
     "\n"
@@ -129,6 +133,7 @@ struct ReplayArgs
     std::size_t depth{5};
     std::uint64_t check_invariants_every{0};
     std::size_t capacity{1'048'576};
+    BookBackend book{BookBackend::List};
     std::uint64_t latency_batch{0};  // replay --latency: events per timed batch; 0 = off
     std::string_view json;           // --json: where to write the run as JSON
     BacktestArgs backtest{};

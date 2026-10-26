@@ -143,6 +143,11 @@ bool open_input(const ReplayArgs& args, MappedFile& file, std::vector<std::byte>
     return true;
 }
 
+const char* book_name(BookBackend book) noexcept
+{
+    return book == BookBackend::Ladder ? "ladder" : "list";
+}
+
 // The run header both commands print.
 void print_config(const char* command, const ReplayArgs& args, std::span<const std::byte> input)
 {
@@ -180,6 +185,7 @@ void print_config(const char* command, const ReplayArgs& args, std::span<const s
     }
     std::printf("  capacity         %zu orders%s\n", args.capacity,
                 args.symbol.empty() ? ", shared by every book" : "");
+    std::printf("  book             %s\n", book_name(args.book));
 }
 
 // "Applied N, rejected M" (after `indent`) and the rejections by reason.
@@ -271,6 +277,8 @@ struct RunMetrics
     std::int64_t heap_blocks_change{0};  // the heap's blocks in use after run() minus before (spec §3.3)
     std::int64_t heap_bytes_change{0};
     std::uint64_t reserved_bytes{0};   // set up before run(): the book storage, and the books of --symbols or --all
+    std::uint64_t windows_reserved_bytes{0};  // --book ladder: the windows' part of reserved_bytes
+    std::uint64_t windows_touched_bytes{0};   // and of those, the windows of the books made
     std::uint64_t major_faults{0};     // page faults that waited for I/O
     std::uint64_t peak_rss{0};         // bytes, whole process, including resident pages of the mapped file
     std::uint64_t peak_footprint{0};   // bytes, macOS only; excludes clean file pages such as the mapped file
@@ -358,6 +366,11 @@ void print_metrics(const RunRecord& run, std::uint64_t file_bytes)
                 m.allocations, ratio(static_cast<double>(m.allocations), events), m.heap_blocks_change,
                 m.heap_bytes_change, static_cast<double>(m.reserved_bytes) / 1e6, static_cast<double>(m.peak_rss) / 1e6,
                 static_cast<double>(m.peak_footprint) / 1e6, m.major_faults);
+    if (m.windows_reserved_bytes != 0) {
+        std::printf("Ladder windows    %.1f MB reserved, %.1f MB touched by the books made\n",
+                    static_cast<double>(m.windows_reserved_bytes) / 1e6,
+                    static_cast<double>(m.windows_touched_bytes) / 1e6);
+    }
     if (m.latency != nullptr) {
         const LatencyHistogram& h = *m.latency;
         std::printf("Latency           ns/event over %" PRIu64 " batches of %" PRIu64 " events (timer tick %.1f ns): "
@@ -458,8 +471,11 @@ bool write_json(const ReplayArgs& args, std::span<const std::byte> input, const 
                  static_cast<long long>(::sysconf(_SC_PHYS_PAGES)) * ::sysconf(_SC_PAGESIZE), os.sysname, os.release);
     std::fprintf(out, "  \"input\": {\"path\": \"%s\", \"bytes\": %zu, \"fingerprint\": \"%016" PRIx64 "\"},\n",
                  json_escape(args.store.empty() ? args.file : args.store).c_str(), input.size(), fingerprint(input));
-    std::fprintf(out, "  \"run\": {\"symbols\": \"%s\", \"capacity\": %zu, \"check_invariants_every\": %" PRIu64 "},\n",
-                 json_escape(symbols_mode(args)).c_str(), args.capacity, args.check_invariants_every);
+    std::fprintf(
+        out,
+        "  \"run\": {\"symbols\": \"%s\", \"capacity\": %zu, \"book\": \"%s\", \"check_invariants_every\": %" PRIu64
+        "},\n",
+        json_escape(symbols_mode(args)).c_str(), args.capacity, book_name(args.book), args.check_invariants_every);
     std::fprintf(out,
                  "  \"result\": {\"events\": %" PRIu64 ", \"messages\": %" PRIu64 ", \"rejected\": %" PRIu64
                  ", \"digest\": \"%016" PRIx64 "\", \"books\": %zu, \"books_not_empty\": %zu, "
@@ -471,13 +487,15 @@ bool write_json(const ReplayArgs& args, std::span<const std::byte> input, const 
                  "\"events_per_s\": %.0f, \"ns_per_event\": %.2f},\n",
                  m.wall_s, m.user_s, m.sys_s, m.user_s + m.sys_s, ratio(events, m.wall_s),
                  ratio(m.wall_s * 1e9, events));
-    std::fprintf(out,
-                 "  \"memory\": {\"allocations\": %" PRIu64
-                 ", \"allocations_per_event\": %.4f, \"heap_blocks_change\": %" PRId64
-                 ", \"heap_bytes_change\": %" PRId64 ", \"reserved_bytes\": %" PRIu64 ", \"peak_rss_bytes\": %" PRIu64
-                 ", \"peak_footprint_bytes\": %" PRIu64 ", \"major_faults\": %" PRIu64 "},\n",
-                 m.allocations, ratio(static_cast<double>(m.allocations), events), m.heap_blocks_change,
-                 m.heap_bytes_change, m.reserved_bytes, m.peak_rss, m.peak_footprint, m.major_faults);
+    std::fprintf(
+        out,
+        "  \"memory\": {\"allocations\": %" PRIu64 ", \"allocations_per_event\": %.4f, \"heap_blocks_change\": %" PRId64
+        ", \"heap_bytes_change\": %" PRId64 ", \"reserved_bytes\": %" PRIu64 ", \"windows_reserved_bytes\": %" PRIu64
+        ", \"windows_touched_bytes\": %" PRIu64 ", \"peak_rss_bytes\": %" PRIu64 ", \"peak_footprint_bytes\": %" PRIu64
+        ", \"major_faults\": %" PRIu64 "},\n",
+        m.allocations, ratio(static_cast<double>(m.allocations), events), m.heap_blocks_change, m.heap_bytes_change,
+        m.reserved_bytes, m.windows_reserved_bytes, m.windows_touched_bytes, m.peak_rss, m.peak_footprint,
+        m.major_faults);
     std::fprintf(out, "%.*s", static_cast<int>(extra.size()), extra.data());
     if (m.latency == nullptr) {
         std::fprintf(out, "  \"latency\": null\n}\n");
@@ -569,7 +587,7 @@ int replay(const ReplayArgs& args)
 
     InstrumentRegistry registry{1};
     ItchSource source{input, config, registry};
-    MarketBook book{0, args.capacity};  // the registry's first id: ItchSource registers the only instrument
+    MarketBook book{0, args.capacity, args.book};  // the registry's first id: ItchSource registers the only instrument
 
     LatencyHistogram latency;
     const ReplayOptions options = replay_options(args, midnight, latency);
@@ -602,6 +620,7 @@ int replay(const ReplayArgs& args)
 
     fill_record(run, report, book, stats.messages, invariants);
     run.metrics.reserved_bytes = book.storage().bytes();
+    run.metrics.windows_reserved_bytes = run.metrics.windows_touched_bytes = book.storage().window_bytes(1);
     run.metrics.latency = options.latency;
     run.metrics.latency_batch = options.latency_batch;
     print_metrics(run, input.size());
@@ -654,7 +673,7 @@ int replay_books(const ReplayArgs& args)
     // ITCH locates are 16-bit, so a day has at most 65,536 instruments.
     InstrumentRegistry registry{args.all_symbols ? std::size_t{1} << 16 : args.symbols.size()};
     ItchSource source{file.bytes(), config, registry};
-    BookStorage storage{args.capacity};
+    BookStorage storage{args.capacity, args.book, registry.capacity()};
     MarketBooks books{registry, storage};
 
     LatencyHistogram latency;
@@ -793,6 +812,8 @@ int replay_books(const ReplayArgs& args)
     run.peak_live_orders = report.peak_live_orders;
     run.succeeded = total.succeeded() && invariants;
     run.metrics.reserved_bytes = storage.bytes() + books.bytes() + registry.capacity() * sizeof(Instrument);
+    run.metrics.windows_reserved_bytes = storage.window_bytes(registry.capacity());
+    run.metrics.windows_touched_bytes = storage.window_bytes(books.size());
     run.metrics.latency = options.latency;
     run.metrics.latency_batch = options.latency_batch;
     print_metrics(run, file.bytes().size());
@@ -917,7 +938,7 @@ int backtest(const ReplayArgs& args)
 
     InstrumentRegistry registry{1};
     ItchSource source{input, config, registry};
-    MarketBook book{0, args.capacity};  // the registry's first id: ItchSource registers the only instrument
+    MarketBook book{0, args.capacity, args.book};  // the registry's first id: ItchSource registers the only instrument
     const Instrument& instrument = source.instrument();
     const unsigned price_scale = instrument.price_scale;
     const unsigned money_scale = instrument.price_scale + instrument.quantity_scale;
@@ -983,6 +1004,7 @@ int backtest(const ReplayArgs& args)
         const bool invariants = print_final_book(book, replay, args.depth, price_scale, midnight);
         fill_record(record, replay, book, source.statistics().messages, invariants);
         record.metrics.reserved_bytes = book.storage().bytes();
+        record.metrics.windows_reserved_bytes = record.metrics.windows_touched_bytes = book.storage().window_bytes(1);
         print_metrics(record, input.size());
 
         if (!args.json.empty() &&
@@ -1001,7 +1023,7 @@ int backtest(const ReplayArgs& args)
     return run(strategy);
 }
 
-} // namespace
+}  // namespace
 
 int main(int argc, char** argv)
 {

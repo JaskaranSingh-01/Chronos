@@ -418,15 +418,17 @@ add_test(NAME SimulatorCliTest.AFullOrderPoolStopsTheReplayAndSaysSo
                  $<TARGET_FILE:simulator> $<TARGET_FILE:chronos-e2e-fixture>)
 
 # A replay allocates nothing once it starts (spec §3.3): no allocation counted, and the heap unchanged, in a replay of
-# every symbol of the Lab's Monday (ACME, ZETA and IDLE) and of one of them. ASan builds count nothing (its allocator
-# owns the heap), so the Release, UBSan and macOS jobs enforce this.
+# every symbol of the Lab's Monday (ACME, ZETA and IDLE) and of one of them, with either backend (the ladder's windows
+# reserved). ASan builds count nothing (its allocator owns the heap), so the Release, UBSan and macOS jobs enforce this.
 add_test(NAME SimulatorCliTest.AReplayAllocatesNothing
          COMMAND sh -c "dir=$(mktemp -d) && \"$1\" \"$dir\" --lab || exit 1
-                        for symbols in --all '--symbol ACME'; do
-                            \"$0\" replay \"$dir/12302019.NASDAQ_ITCH50.bin\" $symbols --date 2019-12-30 --json \"$dir/run.json\" > /dev/null &&
+                        for symbols in --all '--symbol ACME'; do for book in list ladder; do
+                            \"$0\" replay \"$dir/12302019.NASDAQ_ITCH50.bin\" $symbols --date 2019-12-30 --book $book --json \"$dir/run.json\" > /dev/null &&
                                 grep -q '\"allocations\": 0,' \"$dir/run.json\" &&
-                                grep -q '\"heap_blocks_change\": 0, \"heap_bytes_change\": 0,' \"$dir/run.json\" || { rm -rf \"$dir\"; exit 1; }
-                        done; rm -rf \"$dir\""
+                                grep -q '\"heap_blocks_change\": 0, \"heap_bytes_change\": 0,' \"$dir/run.json\" &&
+                                { test $book = list || ! grep -q '\"windows_reserved_bytes\": 0,' \"$dir/run.json\"; } ||
+                                { rm -rf \"$dir\"; exit 1; }
+                        done; done; rm -rf \"$dir\""
                  $<TARGET_FILE:simulator> $<TARGET_FILE:chronos-e2e-fixture>)
 
 # --store: a symbol the store lacks on the day, or an index that is invalid, exits 2 and says which.
@@ -455,6 +457,7 @@ chronos_serve_test(HelpExitsZero 0 --help)
 chronos_serve_test(BadOptionExitsTwo 2 --data . --date 2019-12-30 --frobnicate)
 chronos_serve_test(NoDayFileExitsTwo 2 --data .)
 chronos_serve_test(BadPortExitsTwo 2 --data . --date 2019-12-30 --port 70000)
+chronos_serve_test(BadBookExitsTwo 2 --data . --date 2019-12-30 --book tree)
 chronos_serve_test(MissingFileExitsTwo 2 --data /nonexistent/chronos-data --date 2019-12-30)
 
 # Other failures exit 2 too, so these check the message. Without --date the latest day starts, here the only one; its

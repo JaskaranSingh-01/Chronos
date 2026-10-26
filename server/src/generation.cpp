@@ -53,7 +53,7 @@ std::vector<FeedSession> sessions(const DayList& days, const MarketEventSource& 
 Generation::Generation(const SessionConfig& config, const RunSpec& run, std::unique_ptr<MarketEventSource> market)
     : spec(run),
       source(std::move(market)),
-      book(config.symbol, config.book_capacity),
+      book(config.symbol, config.book_capacity, config.book),
       execution(first_midnight(run.days)),
       portfolio(config.instrument, run.limits, run.fees),
       strategy(run.strategy, execution, run.window, sessions(run.days, *source)),

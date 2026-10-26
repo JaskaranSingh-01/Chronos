@@ -26,7 +26,7 @@ using namespace simulator::server;
 
 constexpr std::string_view serve_usage =
     "usage: chronos-serve --data DIR [--date YYYY-MM-DD] [--host 127.0.0.1] [--port 8080] [--web web/dist]\n"
-    "                     [--token T] [--fsync] [--allow-truncated-tail] [--store DIR]\n"
+    "                     [--token T] [--fsync] [--allow-truncated-tail] [--store DIR] [--book list|ladder]\n"
     "\n"
     "Serves an interactive replay of the days in DIR, the files named MMDDYYYY.NASDAQ_ITCH50.bin; the UI picks the\n"
     "symbol and its days. A new file is read once, about a minute a day, into the per-symbol store, which every\n"
@@ -43,6 +43,7 @@ constexpr std::string_view serve_usage =
     "  --token T               /api needs 'Authorization: Bearer T'; a WebSocket's first message is auth{T}\n"
     "  --fsync                 sync each command line of the log (sessions/<id>.jsonl) to the device\n"
     "  --allow-truncated-tail  a file cut mid-message ends there instead of failing\n"
+    "  --book B                every book's price levels: list (default) or ladder, as simulator's --book\n"
     "\n"
     "exit status: 0 after SIGINT or SIGTERM; 2 bad usage, a store in use or that cannot be locked, no day ready in\n"
     "DIR or none for --date, a starting day with no symbol's market events, a log that cannot be written, or an\n"
@@ -59,6 +60,7 @@ struct ServeArgs
     std::string token;
     bool fsync{false};
     bool allow_truncated_tail{false};
+    BookBackend book{BookBackend::List};
     bool help{false};
 };
 
@@ -77,7 +79,7 @@ bool parse(std::span<const std::string_view> args, ServeArgs& out, std::string& 
             continue;
         }
         const bool takes_value = flag == "--data" || flag == "--date" || flag == "--host" || flag == "--port" ||
-            flag == "--web" || flag == "--token" || flag == "--store";
+            flag == "--web" || flag == "--token" || flag == "--store" || flag == "--book";
         if (!takes_value) {
             error = "unknown option " + std::string{flag};
             return false;
@@ -109,6 +111,12 @@ bool parse(std::span<const std::string_view> args, ServeArgs& out, std::string& 
             out.web = value;
         } else if (flag == "--store") {
             out.store = value;
+        } else if (flag == "--book") {
+            if (value != "list" && value != "ladder") {
+                error = "--book: list or ladder";
+                return false;
+            }
+            out.book = value == "ladder" ? BookBackend::Ladder : BookBackend::List;
         } else {
             out.token = value;
         }
@@ -184,6 +192,7 @@ int main(int argc, char** argv)
     const SessionConfig config{
         .session_id = session_id,
         .instrument = {.price_scale = 4, .quantity_scale = 0},
+        .book = parsed.book,
         .allow_truncated_tail = parsed.allow_truncated_tail,
         .defaults = {.days = {.day = {start->date}, .count = 1},
                      .latency = {.order_latency = 50'000, .report_latency = 50'000},

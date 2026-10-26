@@ -641,6 +641,8 @@ options, both commands:
   --check-invariants N    check the book every N applied events (default 0 = only at the end)
   --capacity N            order slots reserved for the book, at most 1073741824 (default 1048576);
                           with --symbols or --all, shared by every book (default 4194304)
+  --book B                the price levels: list (default), each side a list found through an index;
+                          or ladder, which adds a window of 256 ticks around each side's best
   --json PATH             also write the results, metrics, build and input as JSON;
                           backtest adds its config, fills, fees and PnL
 

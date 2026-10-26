@@ -1,8 +1,10 @@
 // Micro-benchmarks of the replay hot paths (cmake -DCHRONOS_BENCH=ON): MarketBook::apply
-// per event type at depth 1,000 (in cache) and 1,000,000 (not), ItchSource::next, and
-// OrderPool release + acquire, as the mean ns per operation of a manually timed batch;
-// the CPU column also counts untimed setup, so it is not comparable. BM_EventLoop is the
-// exception: ms per EventLoop run over 1,000,000 events.
+// per event type at depth 1,000 (in cache) and 1,000,000 (not) for each level backend
+// (book:0 list, book:1 ladder), a churn of levels around a moving touch, the backend chosen
+// at run time against one fixed at compile time, ItchSource::next, and OrderPool release +
+// acquire, as the mean ns per operation of a manually timed batch; the CPU column also counts
+// untimed setup, so it is not comparable. BM_EventLoop is the exception: ms per EventLoop run
+// over 1,000,000 events.
 
 #include <benchmark/benchmark.h>
 
@@ -23,6 +25,7 @@
 #include "simulator/market/instrument_registry.hpp"
 #include "simulator/market/market_book.hpp"
 #include "simulator/market/vector_source.hpp"
+#include "simulator/orders/order_book.hpp"
 #include "simulator/orders/order_pool.hpp"
 #include "simulator/portfolio/portfolio.hpp"
 #include "simulator/strategies/market_maker.hpp"
@@ -74,15 +77,24 @@ public:
     }
 };
 
-// One book pre-filled to `depth` orders, whose ids `live` keeps.
+BookBackend backend(const benchmark::State& state)
+{
+    return state.range(0) == 0 ? BookBackend::List : BookBackend::Ladder;
+}
+
+// One book of `state`'s backend pre-filled to its depth of orders, whose ids `live` keeps.
 struct FilledBook
 {
     Flow flow;
     MarketBook book;
     std::vector<OrderId> live;
 
-    explicit FilledBook(std::size_t depth)
-        : book{0, depth + 2 * kBatch}
+    explicit FilledBook(const benchmark::State& state)
+        : FilledBook(static_cast<std::size_t>(state.range(1)), backend(state))
+    {}
+
+    FilledBook(std::size_t depth, BookBackend backend)
+        : book{0, depth + 2 * kBatch, backend}
     {
         live.reserve(depth);
         for (std::size_t i = 0; i < depth; ++i) {
@@ -126,7 +138,7 @@ MarketEvent remove(T type, const MarketEvent& add)
 
 void BM_Add(benchmark::State& state)
 {
-    FilledBook b{static_cast<std::size_t>(state.range(0))};
+    FilledBook b{state};
     std::vector<MarketEvent> adds(kBatch);
     std::vector<MarketEvent> undo(kBatch);
 
@@ -146,7 +158,7 @@ void BM_Add(benchmark::State& state)
 template <T Type>
 void BM_Remove(benchmark::State& state)
 {
-    FilledBook b{static_cast<std::size_t>(state.range(0))};
+    FilledBook b{state};
     std::vector<MarketEvent> adds(kBatch);
     std::vector<MarketEvent> removes(kBatch);
 
@@ -165,7 +177,7 @@ void BM_Remove(benchmark::State& state)
 template <T Type>
 void BM_Reduce(benchmark::State& state)
 {
-    FilledBook b{static_cast<std::size_t>(state.range(0))};
+    FilledBook b{state};
     std::vector<MarketEvent> reduces(kBatch);
 
     for (auto _ : state) {
@@ -179,7 +191,7 @@ void BM_Reduce(benchmark::State& state)
 // A random resting order replaced by a new id at a new price on its side.
 void BM_Replace(benchmark::State& state)
 {
-    FilledBook b{static_cast<std::size_t>(state.range(0))};
+    FilledBook b{state};
     std::vector<MarketEvent> replaces(kBatch);
     std::vector<Side> sides(b.live.size());
     for (std::size_t i = 0; i < b.live.size(); ++i) {
@@ -198,6 +210,116 @@ void BM_Replace(benchmark::State& state)
             b.live[i] = next.order_id;
         }
         b.timed_apply(state, replaces);
+    }
+}
+
+// 4,096 batches of 256: ~1 M operations per run, fixed so every run does the same work.
+constexpr benchmark::IterationCount kIterations = 4'096;
+
+// kIterations batches of a book of 1,000 orders that keeps its size: each event an Add, by turns near the touch and
+// far from it, or a Delete of a random resting order. The touch drifts a tick at a time and, every 50 batches, jumps
+// 500 ticks, so the ladder recentres (spec §5.1). One stream for both backends.
+const std::vector<MarketEvent>& churn_stream()
+{
+    static const std::vector<MarketEvent> events = [] {
+        std::mt19937_64 rng{5};
+        std::vector<MarketEvent> out;
+        std::vector<OrderId> live;
+        std::int64_t touch = kMid;
+        OrderId next_id = 1;
+        auto add = [&](std::int64_t offset) {
+            const Side side = rng() % 2 == 0 ? Side::Buy : Side::Sell;
+            out.push_back({.order_id = next_id,
+                           .price = Price{side == Side::Buy ? touch - offset : touch + kTick + offset},
+                           .quantity = Quantity{100},
+                           .type = T::Add,
+                           .side = side});
+            live.push_back(next_id++);
+        };
+        while (live.size() < 1'000) {
+            add(static_cast<std::int64_t>(rng() % 20) * kTick);
+        }
+        for (std::size_t i = 0; i < std::size_t{kIterations} * kBatch; ++i) {
+            if (i % kBatch == 0) {
+                touch += (i / kBatch) % 50 == 49 ? (rng() % 2 == 0 ? 500 : -500) * kTick
+                                                 : (static_cast<std::int64_t>(rng() % 3) - 1) * kTick;
+            }
+            if (i % 2 == 0) {
+                const std::uint64_t reach = rng() % 4;
+                add(static_cast<std::int64_t>(reach == 0 ? 200 + rng() % 2'000 : rng() % 20) * kTick);
+            } else {
+                const std::size_t k = rng() % live.size();
+                out.push_back({.order_id = live[k], .type = T::Delete});
+                live[k] = live.back();
+                live.pop_back();
+            }
+        }
+        return out;
+    }();
+    return events;
+}
+
+// The churn: kIterations timed batches after the 1,000 Adds that fill the book.
+void BM_Churn(benchmark::State& state)
+{
+    const std::vector<MarketEvent>& events = churn_stream();
+    const std::size_t fill = events.size() - std::size_t{kIterations} * kBatch;
+    MarketBook book{0, 4'096, backend(state)};
+    for (std::size_t i = 0; i < fill; ++i) {
+        book.apply(events[i]);
+    }
+    std::size_t next = fill;
+    for (auto _ : state) {
+        std::size_t rejected = 0;
+        const clock_type::time_point start = clock_type::now();
+        for (std::size_t i = 0; i < kBatch; ++i) {
+            rejected += book.apply(events[next + i]) != ApplyResult::Applied;
+        }
+        const clock_type::time_point stop = clock_type::now();
+        next += kBatch;
+        state.SetIterationTime(seconds(stop - start) / static_cast<double>(kBatch));
+        if (rejected != 0) {
+            state.SkipWithError("an event was rejected");
+        }
+    }
+}
+
+// The order book of the churn, its backend chosen at run time (Dispatch::Selected, as the engine runs) or fixed at
+// compile time (spec §2.4): the two should time alike.
+template <Dispatch D>
+void BM_Dispatch(benchmark::State& state)
+{
+    const std::vector<MarketEvent>& events = churn_stream();
+    const std::size_t fill = events.size() - std::size_t{kIterations} * kBatch;
+    BookStorage storage{4'096, backend(state)};
+    BasicOrderBook<D> book{0, storage};
+    std::vector<Order*> orders(events.size() + 1);  // by id; the stream's ids rise from 1
+    auto apply = [&](const MarketEvent& event) {
+        if (event.type == T::Delete) {
+            const bool erased = book.erase(event.order_id);
+            storage.orders.release(*orders[event.order_id]);
+            return erased;
+        }
+        Order* order = storage.orders.acquire(event.order_id, event.side, event.price, event.quantity, 0);
+        orders[event.order_id] = order;
+        return order->activate() && book.add(*order);
+    };
+    for (std::size_t i = 0; i < fill; ++i) {
+        apply(events[i]);
+    }
+    std::size_t next = fill;
+    for (auto _ : state) {
+        bool ok = true;
+        const clock_type::time_point start = clock_type::now();
+        for (std::size_t i = 0; i < kBatch; ++i) {
+            ok &= apply(events[next + i]);
+        }
+        const clock_type::time_point stop = clock_type::now();
+        next += kBatch;
+        state.SetIterationTime(seconds(stop - start) / static_cast<double>(kBatch));
+        if (!ok) {
+            state.SkipWithError("an event was refused");
+        }
     }
 }
 
@@ -389,11 +511,12 @@ void BM_EventLoop(benchmark::State& state)
     state.counters["sim_events"] = static_cast<double>(report.sim_events);
 }
 
-// 4,096 batches of 256: ~1 M operations per run, fixed so every run does the same work.
-constexpr benchmark::IterationCount kIterations = 4'096;
-
 #define BOOK_BENCHMARK(...)                                                                                            \
-    BENCHMARK(__VA_ARGS__)->ArgName("depth")->Arg(1'000)->Arg(1'000'000)->UseManualTime()->Iterations(kIterations)
+    BENCHMARK(__VA_ARGS__)                                                                                             \
+        ->ArgNames({"book", "depth"})                                                                                  \
+        ->ArgsProduct({{0, 1}, {1'000, 1'000'000}})                                                                    \
+        ->UseManualTime()                                                                                              \
+        ->Iterations(kIterations)
 
 BOOK_BENCHMARK(BM_Add);
 BOOK_BENCHMARK(BM_Remove<T::Delete>)->Name("BM_Delete");
@@ -401,6 +524,26 @@ BOOK_BENCHMARK(BM_Remove<T::Execute>)->Name("BM_ExecuteFull");
 BOOK_BENCHMARK(BM_Reduce<T::Execute>)->Name("BM_ExecutePartial");
 BOOK_BENCHMARK(BM_Reduce<T::Cancel>)->Name("BM_Cancel");
 BOOK_BENCHMARK(BM_Replace);
+BENCHMARK(BM_Churn)->ArgName("book")->Arg(0)->Arg(1)->UseManualTime()->Iterations(kIterations);
+BENCHMARK(BM_Dispatch<Dispatch::Selected>)
+    ->Name("BM_DispatchSelected")
+    ->ArgName("book")
+    ->Arg(0)
+    ->Arg(1)
+    ->UseManualTime()
+    ->Iterations(kIterations);
+BENCHMARK(BM_Dispatch<Dispatch::List>)
+    ->Name("BM_DispatchFixed")
+    ->ArgName("book")
+    ->Arg(0)
+    ->UseManualTime()
+    ->Iterations(kIterations);
+BENCHMARK(BM_Dispatch<Dispatch::Ladder>)
+    ->Name("BM_DispatchFixed")
+    ->ArgName("book")
+    ->Arg(1)
+    ->UseManualTime()
+    ->Iterations(kIterations);
 BENCHMARK(BM_ItchSourceNext)->ArgName("all")->Arg(1)->Arg(0)->UseManualTime()->Iterations(8);
 BENCHMARK(BM_PoolReleaseAcquire)
     ->ArgName("capacity")

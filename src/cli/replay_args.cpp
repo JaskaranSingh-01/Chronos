@@ -191,6 +191,9 @@ bool parse_replay_args(std::span<const std::string_view> args, ReplayArgs& out, 
         } else if (arg == "--capacity") {
             ok = has_capacity =
                 parse_number(value, parsed.capacity) && parsed.capacity > 0 && parsed.capacity <= max_capacity;
+        } else if (arg == "--book") {
+            ok = value == "list" || value == "ladder";
+            parsed.book = value == "ladder" ? BookBackend::Ladder : BookBackend::List;
         } else if (!backtest && arg == "--latency-batch") {
             ok = parse_number(value, parsed.latency_batch) && parsed.latency_batch > 0;
         } else if (arg == "--json") {
