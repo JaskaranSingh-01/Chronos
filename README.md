@@ -678,9 +678,9 @@ mm only:
 exit status:
   0  the run succeeded and every check passed (also --help and --version)
   1  the run failed: a source error (a file cut mid-message without --allow-truncated-tail,
-     no stock directory message for --symbol, ...), an out-of-order timestamp, or a failed
-     book invariant (e.g. a book crossed in regular trading hours while it is trading);
-     rejected events alone are counted, not failures
+     no stock directory message for --symbol, ...), an out-of-order timestamp, a failed
+     book invariant (e.g. a book crossed in regular trading hours while it is trading), or
+     a book out of room (raise --capacity); rejected events alone are counted, not failures
   2  bad usage, an input file that cannot be opened, a symbol the store does not hold on --date,
      a store that cannot be read, or a --json file that cannot be written
 ```

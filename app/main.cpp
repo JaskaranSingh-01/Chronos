@@ -195,7 +195,8 @@ void print_applied(const ReplayReport& report, const char* indent)
     }
 }
 
-void print_failure(const ReplayReport& report, const ReplayArgs& args, std::uint8_t failed_message_type)
+void print_failure(const ReplayReport& report, const ReplayArgs& args, std::uint8_t failed_message_type,
+                   const BookStorage& storage)
 {
     if (report.succeeded()) {
         return;
@@ -211,6 +212,10 @@ void print_failure(const ReplayReport& report, const ReplayArgs& args, std::uint
     } else if (report.source_error == SourceError::SymbolNotFound) {
         std::printf("  hint: no stock directory (R) message for %.*s in this file\n",
                     static_cast<int>(args.symbol.size()), args.symbol.data());
+    } else if (report.failure == ReplayFailure::CapacityExhausted) {
+        const std::string_view full = to_string(report.exhausted);
+        std::printf("  hint: %.*s (%zu) is full; raise --capacity\n", static_cast<int>(full.size()), full.data(),
+                    storage.capacity(report.exhausted));
     }
 }
 
@@ -578,7 +583,7 @@ int replay(const ReplayArgs& args)
 
     std::printf("\n");
     print_applied(report, "");
-    print_failure(report, args, source.failed_message_type());
+    print_failure(report, args, source.failed_message_type(), book.storage());
 
     const bool invariants = print_final_book(book, report, args.depth, source.instrument().price_scale, midnight);
 
@@ -674,8 +679,8 @@ int replay_books(const ReplayArgs& args)
 
     std::printf("\n");
     print_applied(total, "");
-    print_failure(total, args, source.failed_message_type());
-    if (total.failure == ReplayFailure::InvariantViolation) {
+    print_failure(total, args, source.failed_message_type(), storage);
+    if (total.failure == ReplayFailure::InvariantViolation || total.failure == ReplayFailure::CapacityExhausted) {
         const std::string_view failed = name(*registry.find(report.failed_symbol));
         std::printf("  in symbol %.*s\n", static_cast<int>(failed.size()), failed.data());
     }
@@ -941,7 +946,7 @@ int backtest(const ReplayArgs& args)
         std::printf("  sim events       %" PRIu64 " handled (%" PRIu64 " drained after end of stream), %" PRIu64
                     " discarded\n",
                     report.sim_events, report.drained_sim_events, report.discarded_sim_events);
-        print_failure(replay, args, source.failed_message_type());
+        print_failure(replay, args, source.failed_message_type(), book.storage());
 
         print_strategy(strategy.stats());
         print_execution(execution.statistics());

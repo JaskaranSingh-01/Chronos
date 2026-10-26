@@ -221,6 +221,12 @@ public:
         ++replay.by_type[static_cast<std::size_t>(pending_.type)];
         ++replay.by_result[static_cast<std::size_t>(applied)];
 
+        if (applied == ApplyResult::CapacityExhausted) {
+            replay.exhausted = book_.exhausted();
+            fail(ReplayFailure::CapacityExhausted, "CapacityExhausted");
+            return {applied, false};
+        }
+
         if (applied == ApplyResult::Applied && until_check_ != 0 && --until_check_ == 0) {
             until_check_ = options_.check_invariants_every;
             ++replay.invariant_checks;

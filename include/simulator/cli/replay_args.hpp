@@ -67,9 +67,9 @@ inline constexpr std::string_view usage =
     "exit status:\n"
     "  0  the run succeeded and every check passed (also --help and --version)\n"
     "  1  the run failed: a source error (a file cut mid-message without --allow-truncated-tail,\n"
-    "     no stock directory message for --symbol, ...), an out-of-order timestamp, or a failed\n"
-    "     book invariant (e.g. a book crossed in regular trading hours while it is trading);\n"
-    "     rejected events alone are counted, not failures\n"
+    "     no stock directory message for --symbol, ...), an out-of-order timestamp, a failed\n"
+    "     book invariant (e.g. a book crossed in regular trading hours while it is trading), or\n"
+    "     a book out of room (raise --capacity); rejected events alone are counted, not failures\n"
     "  2  bad usage, an input file that cannot be opened, a symbol the store does not hold on --date,\n"
     "     a store that cannot be read, or a --json file that cannot be written\n";
 

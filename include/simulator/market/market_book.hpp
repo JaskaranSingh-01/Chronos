@@ -176,6 +176,10 @@ public:
     {
         return exhausted_;
     }
+    const BookStorage& storage() const noexcept
+    {
+        return *storage_;
+    }
 
     bool is_crossed() const noexcept;  // best bid >  best ask
     bool is_locked() const noexcept;  // best bid == best ask

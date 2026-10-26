@@ -52,6 +52,24 @@ struct BookStorage
 
     BookStorage(const BookStorage&) = delete;
     BookStorage& operator=(const BookStorage&) = delete;
+
+    // The entries `structure` holds; 0 for None.
+    std::size_t capacity(BookStructure structure) const noexcept
+    {
+        switch (structure) {
+        case BookStructure::None:
+            break;
+        case BookStructure::OrderPool:
+            return orders.capacity();
+        case BookStructure::OrderIndex:
+            return order_index.capacity();
+        case BookStructure::LevelPool:
+            return levels.capacity();
+        case BookStructure::LevelIndex:
+            return level_index.capacity();
+        }
+        return 0;
+    }
 };
 
 } // namespace simulator

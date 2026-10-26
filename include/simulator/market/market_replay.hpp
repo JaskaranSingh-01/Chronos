@@ -18,7 +18,8 @@ enum class ReplayFailure : std::uint8_t {
     None,
     SourceError,
     OutOfOrderTimestamp,  // an event earlier than the one before it; not applied
-    InvariantViolation    // a periodic check_invariants() failed
+    InvariantViolation,   // a periodic check_invariants() failed
+    CapacityExhausted     // a pool or index is full: the event that needed it was refused
 };
 
 struct ReplayOptions
@@ -48,6 +49,7 @@ struct ReplayReport
     ReplayFailure failure{ReplayFailure::None};
     SourceError source_error{SourceError::None};
     InvariantError invariant_error{InvariantError::None};
+    BookStructure exhausted{BookStructure::None};  // CapacityExhausted's
     std::uint64_t failed_position{0};  // MarketEventSource::position() at the failure
     std::string_view message;          // e.g. "TruncatedMessage"; empty on success
 
@@ -96,7 +98,7 @@ struct BooksReplayReport
     ReplayReport total;
     std::vector<SymbolReport> symbols;  // index = SymbolId, one per book
     std::size_t peak_live_orders{0};    // max OrderPool::in_use(), all books together
-    SymbolId failed_symbol{0};          // the book of an InvariantViolation
+    SymbolId failed_symbol{0};          // the book of an InvariantViolation or CapacityExhausted
 
     bool operator==(const BooksReplayReport&) const = default;
 };
@@ -117,5 +119,6 @@ std::string_view to_string(ApplyResult result) noexcept;
 std::string_view to_string(SourceError error) noexcept;
 std::string_view to_string(InvariantError error) noexcept;
 std::string_view to_string(TradingState state) noexcept;
+std::string_view to_string(BookStructure structure) noexcept;  // "the level pool"
 
 } // namespace simulator

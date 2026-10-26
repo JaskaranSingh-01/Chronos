@@ -54,6 +54,12 @@ void replay_loop(MarketEventSource& source, const ReplayOptions& options, Replay
         ++report.by_result[static_cast<std::size_t>(applied)];
         count(event, applied);
 
+        if (applied == ApplyResult::CapacityExhausted) {
+            report.exhausted = book->exhausted();
+            fail(ReplayFailure::CapacityExhausted, "CapacityExhausted");
+            break;
+        }
+
         if constexpr (Timed) {
             if (--until_sample == 0) {
                 const clock::time_point now = clock::now();
@@ -131,7 +137,8 @@ BooksReplayReport MarketReplay::run(MarketEventSource& source, MarketBooks& book
         symbols[id].peak_orders = books[id].peak_order_count();
         symbols[id].orders_left = books[id].order_count();
     }
-    if (report.total.failure == ReplayFailure::InvariantViolation) {
+    if (report.total.failure == ReplayFailure::InvariantViolation ||
+        report.total.failure == ReplayFailure::CapacityExhausted) {
         report.failed_symbol = event.symbol;
     }
     return report;
@@ -266,6 +273,23 @@ std::string_view to_string(TradingState state) noexcept
         return "Paused";
     case TradingState::QuotationOnly:
         return "QuotationOnly";
+    }
+    return "?";
+}
+
+std::string_view to_string(BookStructure structure) noexcept
+{
+    switch (structure) {
+    case BookStructure::None:
+        return "None";
+    case BookStructure::OrderPool:
+        return "the order pool";
+    case BookStructure::OrderIndex:
+        return "the order index";
+    case BookStructure::LevelPool:
+        return "the level pool";
+    case BookStructure::LevelIndex:
+        return "the level index";
     }
     return "?";
 }

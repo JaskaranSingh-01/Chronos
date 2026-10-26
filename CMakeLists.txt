@@ -408,6 +408,14 @@ add_test(NAME SimulatorCliTest.TheAllocationCountCoversOnlyTheReplay
                         grep -q '\"allocations\": 0,' \"$1\""
                  $<TARGET_FILE:simulator> ${PROJECT_BINARY_DIR}/allocation-interval.json)
 
+# A full book stops the replay and says what is full (spec §3.2): ACME's day adds two orders, and --capacity holds one.
+add_test(NAME SimulatorCliTest.AFullOrderPoolStopsTheReplayAndSaysSo
+         COMMAND sh -c "dir=$(mktemp -d) && \"$1\" \"$dir\" || exit 1
+                        out=$(\"$0\" replay \"$dir/12302019.NASDAQ_ITCH50.bin\" --symbol ACME --date 2019-12-30 --capacity 1)
+                        code=$?; rm -rf \"$dir\"
+                        test $code -eq 1 && echo \"$out\" | grep -qF 'hint: the order pool (1) is full; raise --capacity'"
+                 $<TARGET_FILE:simulator> $<TARGET_FILE:chronos-e2e-fixture>)
+
 # --store: a symbol the store lacks on the day, or an index that is invalid, exits 2 and says which.
 set(empty_store ${PROJECT_BINARY_DIR}/empty-store)
 set(bad_store ${PROJECT_BINARY_DIR}/bad-store)

@@ -43,7 +43,8 @@ NLOHMANN_JSON_SERIALIZE_ENUM(ReplayFailure,
                              {{ReplayFailure::None, "none"},
                               {ReplayFailure::SourceError, "source_error"},
                               {ReplayFailure::OutOfOrderTimestamp, "out_of_order_timestamp"},
-                              {ReplayFailure::InvariantViolation, "invariant_violation"}})
+                              {ReplayFailure::InvariantViolation, "invariant_violation"},
+                              {ReplayFailure::CapacityExhausted, "capacity_exhausted"}})
 
 }  // namespace simulator
 

@@ -199,6 +199,27 @@ TEST(MarketReplayTest, SourceErrorIsFatalAndPropagated)
     EXPECT_EQ(report.applied(), 1u);
 }
 
+// A full pool or index stops the replay at the event that needed it, naming the structure (spec §3.2).
+TEST(MarketReplayTest, AFullStructureStopsTheReplayAndNamesIt)
+{
+    const std::vector<MarketEvent> input{add(1, 1, Side::Buy, 100, 10), add(2, 2, Side::Buy, 101, 10),
+                                         add(3, 3, Side::Buy, 102, 10),  // no free order slot
+                                         add(4, 4, Side::Buy, 103, 10)};
+
+    VectorSource source{input};
+    MarketBook book{kSymbol, 2};
+    const ReplayReport report = MarketReplay::run(source, book, {});
+
+    EXPECT_EQ(report.failure, ReplayFailure::CapacityExhausted);
+    EXPECT_EQ(report.exhausted, BookStructure::OrderPool);
+    EXPECT_EQ(report.message, "CapacityExhausted");
+    EXPECT_EQ(report.failed_position, 3u);
+    EXPECT_EQ(report.events, 3u);
+    EXPECT_EQ(by_result(report, ApplyResult::CapacityExhausted), 1u);
+    EXPECT_EQ(book.order_count(), 2u);  // the event before it applied, the one after it never read
+    EXPECT_EQ(to_string(BookStructure::LevelIndex), "the level index");
+}
+
 TEST(MarketReplayTest, ChecksInvariantsEveryNAppliedEvents)
 {
     std::vector<MarketEvent> input;
@@ -409,24 +430,25 @@ TEST(MarketReplayBooksTest, RoutesEachEventToTheBookOfItsSymbol)
     EXPECT_TRUE(books.check_invariants(error, failed)) << to_string(error);
 }
 
-TEST(MarketReplayBooksTest, AFullSharedPoolRejectsAddsAsCapacityExhausted)
+TEST(MarketReplayBooksTest, AFullSharedPoolStopsTheReplayInTheBookThatNeededIt)
 {
     const InstrumentRegistry registry = registry_of(2);
     const std::vector<MarketEvent> input{on(0, add(1, 1, Side::Buy, 100, 10)), on(1, add(2, 1, Side::Buy, 100, 10)),
                                          on(1, add(3, 2, Side::Buy, 100, 10)),  // no free slot
-                                         on(0, event(4, MarketEventType::Delete, 1)),
-                                         on(1, add(5, 2, Side::Buy, 100, 10))};
+                                         on(0, event(4, MarketEventType::Delete, 1))};
 
     BookStorage storage{2};
     MarketBooks books{registry, storage};
     VectorSource source{input};
     const BooksReplayReport report = MarketReplay::run(source, books, {});
 
-    EXPECT_TRUE(report.total.succeeded());
-    EXPECT_EQ(report.total.applied(), 4u);
+    EXPECT_EQ(report.total.failure, ReplayFailure::CapacityExhausted);
+    EXPECT_EQ(report.total.exhausted, BookStructure::OrderPool);
+    EXPECT_EQ(report.failed_symbol, 1u);
+    EXPECT_EQ(report.total.events, 3u);
     EXPECT_EQ(by_result(report.total, ApplyResult::CapacityExhausted), 1u);
     EXPECT_EQ(by_result(report.symbols[1], ApplyResult::CapacityExhausted), 1u);
-    EXPECT_EQ(report.symbols[1].orders_left, 2u);
+    EXPECT_EQ(report.symbols[1].orders_left, 1u);
     EXPECT_EQ(report.peak_live_orders, 2u);
 }
 

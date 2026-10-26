@@ -415,6 +415,8 @@ TEST(ProtocolTest, EncodesSnapshotsRecordsAndReplies)
     EXPECT_EQ(state["source_error"], to_string(SourceError::TruncatedMessage));
     EXPECT_EQ(state["candle"], nullptr);
     EXPECT_EQ(state["metrics"]["log_failed"], true);
+    failed.failure = ReplayFailure::CapacityExhausted;
+    EXPECT_EQ(json::parse(encode_snapshot("s1", failed, false, false))["failure"], "capacity_exhausted");
     snapshot_keys.insert({"full_resync", "spec", "run_id"});
     EXPECT_EQ(keys_of(state), snapshot_keys);
 

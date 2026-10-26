@@ -38,6 +38,8 @@ std::string failure(const ReplayReport& replay, std::span<const DayHandle> days,
         return "out_of_order_timestamp";
     case ReplayFailure::InvariantViolation:
         return "invariant_violation";
+    case ReplayFailure::CapacityExhausted:
+        return "capacity_exhausted";
     }
     return {};
 }

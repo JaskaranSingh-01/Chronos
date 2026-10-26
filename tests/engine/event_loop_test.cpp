@@ -588,6 +588,10 @@ TEST(EventLoopTest, FatalFailuresMatchMarketReplay)
     constexpr Timestamp midnight = 1'577'682'000'000'000'000;  // 2019-12-30, -05:00
     const std::vector<MarketEvent> crossed_in_rth{add(midnight + RTH_OPEN_NS, 1, Side::Buy, 101, 5),
                                                   add(midnight + RTH_OPEN_NS, 2, Side::Sell, 100, 5)};
+    std::vector<MarketEvent> nine_adds;  // the books hold 8
+    for (OrderId id = 1; id <= 9; ++id) {
+        nine_adds.push_back(add(static_cast<Timestamp>(id), id, Side::Buy, 90 + static_cast<std::int64_t>(id), 5));
+    }
 
     auto compare = [](auto make_source, std::span<const MarketEvent> events, const ReplayOptions& options,
                       ReplayFailure failure) {
@@ -606,6 +610,7 @@ TEST(EventLoopTest, FatalFailuresMatchMarketReplay)
         EXPECT_EQ(expected.failure, failure);
         EXPECT_EQ(report.replay, expected);
         EXPECT_EQ(book.digest(), replay_book.digest());
+        EXPECT_EQ(book.order_count(), replay_book.order_count());
     };
 
     compare([](std::span<const MarketEvent> e) { return VectorSource{e}; }, out_of_order, {},
@@ -613,6 +618,8 @@ TEST(EventLoopTest, FatalFailuresMatchMarketReplay)
     compare([](std::span<const MarketEvent> e) { return FailingSource{e}; }, clean, {}, ReplayFailure::SourceError);
     compare([](std::span<const MarketEvent> e) { return VectorSource{e}; }, crossed_in_rth,
             {.check_invariants_every = 1, .session_midnight = midnight}, ReplayFailure::InvariantViolation);
+    compare([](std::span<const MarketEvent> e) { return VectorSource{e}; }, nine_adds, {},
+            ReplayFailure::CapacityExhausted);
 }
 
 TEST(EventLoopTest, NoDrainAfterAFatalFailure)

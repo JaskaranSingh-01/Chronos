@@ -91,7 +91,7 @@ export interface Snapshot extends Envelope {
   state: SessionState;
   speed: number; // 0 = as fast as possible
   progress: number; // the fraction of the file read
-  failure: 'none' | 'source_error' | 'out_of_order_timestamp' | 'invariant_violation';
+  failure: 'none' | 'source_error' | 'out_of_order_timestamp' | 'invariant_violation' | 'capacity_exhausted';
   source_error: string;
   trading_state: TradingState;
   bids: Level[];
