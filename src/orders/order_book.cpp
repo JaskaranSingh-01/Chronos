@@ -20,9 +20,10 @@ std::size_t index(Side side) noexcept
 } // namespace
 
 template <Dispatch D>
-BasicOrderBook<D>::BasicOrderBook(SymbolId symbol, BookStorage& storage) noexcept
-    : symbol_(symbol), storage_(storage), ladder_(storage.backend == BookBackend::Ladder)
+BasicOrderBook<D>::BasicOrderBook(SymbolId symbol, BookStorage& storage, std::uint64_t step) noexcept
+    : symbol_(symbol), storage_(storage), step_(step), ladder_(storage.backend == BookBackend::Ladder)
 {
+    assert(step_ != 0);
     assert(D == Dispatch::Selected || ladder() == ladder_);
     if (ladder()) {
         for (const Side side : {Side::Buy, Side::Sell}) {
@@ -36,29 +37,40 @@ template <Dispatch D>
 std::size_t BasicOrderBook<D>::slot(Side side, Price price) const noexcept
 {
     const std::uint64_t offset = static_cast<std::uint64_t>(price.ticks) - low_[index(side)];
-    return offset < ladder_window ? static_cast<std::size_t>(offset) : ladder_window;
+    if (offset >= ladder_window * step_) {
+        return ladder_window;
+    }
+    const std::uint64_t at = offset / step_;
+    return at * step_ == offset ? static_cast<std::size_t>(at) : ladder_window;
 }
 
 template <Dispatch D>
 bool BasicOrderBook<D>::central(Side side, Price price) const noexcept
 {
-    const std::size_t at = slot(side, price);
+    const std::uint64_t at = (static_cast<std::uint64_t>(price.ticks) - low_[index(side)]) / step_;
     return at >= ladder_window / 4 && at < ladder_window * 3 / 4;
 }
 
-// Centres the window on the best and sets the slot of each level inside it: O(ladder_window + levels inside).
+// Centres the window on the best, its slots on whole steps, and sets the slot of each level inside it on the
+// grid: O(ladder_window + levels inside).
 template <Dispatch D>
 void BasicOrderBook<D>::recentre(Side side) noexcept
 {
+    const auto step = static_cast<std::int64_t>(step_);
+    const std::int64_t best = best_[index(side)]->price().ticks;
+    const std::int64_t grid = best - ((best % step) + step) % step;  // the step at or below the best
+    low_[index(side)] = static_cast<std::uint64_t>(grid - step * static_cast<std::int64_t>(ladder_window / 2));
+
     LevelRef* window = window_[index(side)];
-    low_[index(side)] = static_cast<std::uint64_t>(best_[index(side)]->price().ticks) - ladder_window / 2;
     std::fill_n(window, ladder_window, LevelRef{0});
     for (const PriceLevel* level = best_[index(side)]; level != nullptr; level = level->worse_) {
-        const std::size_t at = slot(side, level->price());
-        if (at == ladder_window) {
+        const std::uint64_t offset = static_cast<std::uint64_t>(level->price().ticks) - low_[index(side)];
+        if (offset >= ladder_window * step_) {
             break;  // every level after it is further from the best
         }
-        window[at] = storage_.levels.ref(*level);
+        if (const std::size_t at = slot(side, level->price()); at < ladder_window) {
+            window[at] = storage_.levels.ref(*level);
+        }
     }
 }
 
@@ -75,9 +87,11 @@ PriceLevel* BasicOrderBook<D>::find_level(Side side, Price price) const noexcept
     return ref != 0 ? &storage_.levels.at(ref) : nullptr;
 }
 
-// Links a new level after every level better than it. The list walks from the best, O(levels passed); the ladder,
-// inside its window, scans from the level's slot towards the best, which the window holds, for the nearest slot set.
-// ponytail: the list's walk is the book thread's largest cost (44 % on the full day); a tick-scaled ladder skips it.
+// Links a new level after every level better than it. The list walks from the best, O(levels passed); the
+// ladder, for a level on its grid behind the best, first scans from the level's slot towards the best for the
+// nearest slot set, then walks past any level off the grid between them.
+// ponytail: the list's walk is its largest cost on the full day, which the ladder skips inside its window; the
+// scan reads up to ladder_window slots, where a bitmap of the slots set would find the nearest in a few words.
 template <Dispatch D>
 PriceLevel& BasicOrderBook<D>::new_level(Side side, Price price) noexcept
 {
@@ -88,9 +102,8 @@ PriceLevel& BasicOrderBook<D>::new_level(Side side, Price price) noexcept
 
     PriceLevel*& best = best_[index(side)];
     PriceLevel* before = nullptr;
-    PriceLevel* after = best;
     const std::size_t at = ladder() ? slot(side, price) : ladder_window;
-    if (at < ladder_window) {
+    if (at < ladder_window && best != nullptr && better(side, best->price(), price)) {
         const LevelRef* window = window_[index(side)];
         if (side == Side::Buy) {
             for (std::size_t i = at + 1; i < ladder_window && before == nullptr; ++i) {
@@ -101,12 +114,11 @@ PriceLevel& BasicOrderBook<D>::new_level(Side side, Price price) noexcept
                 before = window[i - 1] != 0 ? &storage_.levels.at(window[i - 1]) : nullptr;
             }
         }
-        after = before != nullptr ? before->worse_ : best;
-    } else {
-        while (after != nullptr && !better(side, price, after->price())) {
-            before = after;
-            after = after->worse_;
-        }
+    }
+    PriceLevel* after = before != nullptr ? before->worse_ : best;
+    while (after != nullptr && !better(side, price, after->price())) {
+        before = after;
+        after = after->worse_;
     }
 
     level.better_ = before;

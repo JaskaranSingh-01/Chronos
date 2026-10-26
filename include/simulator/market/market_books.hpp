@@ -60,7 +60,8 @@ public:
     void sync(std::size_t count = SIZE_MAX) noexcept
     {
         for (const std::size_t end = std::min(count, registry_.size()); size_ < end; ++size_) {
-            slots_[size_].book.emplace(static_cast<SymbolId>(size_), storage_);
+            const auto id = static_cast<SymbolId>(size_);
+            slots_[size_].book.emplace(id, storage_, ladder_step(registry_.find(id)->price_scale));
         }
     }
 

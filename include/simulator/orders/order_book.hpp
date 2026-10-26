@@ -20,11 +20,11 @@ enum class Dispatch : std::uint8_t {
     Ladder
 };
 
-// One symbol's price levels over Orders it links but does not own. Each side is a list of levels, best first, kept in
-// the storage's level pool; the storage's indices, which every book shares, find an order or a level (spec §2.2). With
-// the ladder backend, each side also keeps a window of ladder_window price units, recentred on its best whenever the
-// best leaves the window's middle half, where a level is found by its slot and placed by the nearest slot set towards
-// the best (spec §2.3).
+// One symbol's price levels over Orders it links but does not own. Each side is a list of levels, best first,
+// kept in the storage's level pool; the storage's indices, which every book shares, find an order or a level
+// (spec §2.2). With the ladder backend, each side also keeps a window of ladder_window slots a step apart,
+// recentred on its best whenever the best leaves the window's middle half, where a level is found by its slot
+// and placed by the nearest slot set towards the best (spec §2.3).
 template <Dispatch D>
 class BasicOrderBook
 {
@@ -34,6 +34,7 @@ private:
     std::array<PriceLevel*, 2> best_{};    // index = Side: the head of its list
     std::array<LevelRef*, 2> window_{};    // ladder: each side's slots in the storage, a level's ref or 0
     std::array<std::uint64_t, 2> low_{};   // ladder: the price of each window's slot 0, as unsigned ticks
+    std::uint64_t step_;                   // ladder: the ticks between slots
     std::size_t size_{0};
     bool ladder_;                          // the storage's backend, which Selected reads
 
@@ -46,8 +47,8 @@ private:
         }
     }
 
-    std::size_t slot(Side side, Price price) const noexcept;  // ladder_window if outside the window
-    bool central(Side side, Price price) const noexcept;      // in the window's middle half
+    std::size_t slot(Side side, Price price) const noexcept;  // ladder_window if outside the window or off grid
+    bool central(Side side, Price price) const noexcept;      // in the window's middle half, on grid or not
     void recentre(Side side) noexcept;
     PriceLevel* find_level(Side side, Price price) const noexcept;
     PriceLevel& new_level(Side side, Price price) noexcept;
@@ -55,8 +56,9 @@ private:
     bool remove(Order& order) noexcept;  // unlinks it and drops it from the index
 
 public:
-    // With the ladder backend, `symbol` is below the storage's book count, and the book clears its own windows.
-    BasicOrderBook(SymbolId symbol, BookStorage& storage) noexcept;
+    // With the ladder backend, `symbol` is below the storage's book count, and the book clears its own windows;
+    // its slots are `step` ticks apart (ladder_step()).
+    BasicOrderBook(SymbolId symbol, BookStorage& storage, std::uint64_t step = 1) noexcept;
 
     BasicOrderBook(const BasicOrderBook&) = delete;
     BasicOrderBook& operator=(const BasicOrderBook&) = delete;

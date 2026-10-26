@@ -5,15 +5,15 @@
 
 namespace simulator {
 
-MarketBook::MarketBook(SymbolId symbol, std::size_t capacity, BookBackend backend)
+MarketBook::MarketBook(SymbolId symbol, std::size_t capacity, BookBackend backend, std::uint64_t step)
     : symbol_(symbol),
       owned_(std::make_unique<BookStorage>(capacity, backend, std::size_t{symbol} + 1)),  // its window at its id
       storage_(owned_.get()),
-      book_(symbol, *storage_)
+      book_(symbol, *storage_, step)
 {}
 
-MarketBook::MarketBook(SymbolId symbol, BookStorage& storage) noexcept
-    : symbol_(symbol), storage_(&storage), book_(symbol, storage)
+MarketBook::MarketBook(SymbolId symbol, BookStorage& storage, std::uint64_t step) noexcept
+    : symbol_(symbol), storage_(&storage), book_(symbol, storage, step)
 {}
 
 // Every case validates before mutating, so a rejected event leaves the book unchanged.

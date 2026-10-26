@@ -95,11 +95,11 @@ private:
     void insert(Order& order) noexcept;                     // activate, sequence, link
 
 public:
-    // Reserves a BookStorage of its own for `capacity` orders up front.
-    MarketBook(SymbolId symbol, std::size_t capacity, BookBackend backend = BookBackend::List);
+    // Reserves a BookStorage of its own for `capacity` orders up front. `step`: the ladder's, ladder_step().
+    MarketBook(SymbolId symbol, std::size_t capacity, BookBackend backend = BookBackend::List, std::uint64_t step = 1);
 
     // Keeps its orders and levels in `storage`, which other books may share and which outlives the book.
-    MarketBook(SymbolId symbol, BookStorage& storage) noexcept;
+    MarketBook(SymbolId symbol, BookStorage& storage, std::uint64_t step = 1) noexcept;
 
     MarketBook(const MarketBook&) = delete;
     MarketBook& operator=(const MarketBook&) = delete;

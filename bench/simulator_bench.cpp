@@ -96,7 +96,7 @@ struct FilledBook
     {}
 
     FilledBook(std::size_t depth, BookBackend backend)
-        : book{0, depth + 2 * kBatch, backend}
+        : book{0, depth + 2 * kBatch, backend, ladder_step(4)}
     {
         live.reserve(depth);
         for (std::size_t i = 0; i < depth; ++i) {
@@ -266,7 +266,7 @@ void BM_Churn(benchmark::State& state)
 {
     const std::vector<MarketEvent>& events = churn_stream();
     const std::size_t fill = events.size() - std::size_t{kIterations} * kBatch;
-    MarketBook book{0, 4'096, backend(state)};
+    MarketBook book{0, 4'096, backend(state), ladder_step(4)};
     for (std::size_t i = 0; i < fill; ++i) {
         book.apply(events[i]);
     }
@@ -294,7 +294,7 @@ void BM_Dispatch(benchmark::State& state)
     const std::vector<MarketEvent>& events = churn_stream();
     const std::size_t fill = events.size() - std::size_t{kIterations} * kBatch;
     BookStorage storage{4'096, backend(state)};
-    BasicOrderBook<D> book{0, storage};
+    BasicOrderBook<D> book{0, storage, ladder_step(4)};
     std::vector<Order*> orders(events.size() + 1);  // by id; the stream's ids rise from 1
     auto apply = [&](const MarketEvent& event) {
         if (event.type == T::Delete) {

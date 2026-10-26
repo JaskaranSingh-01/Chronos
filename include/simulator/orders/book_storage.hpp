@@ -23,16 +23,27 @@ enum class BookStructure : std::uint8_t {
 };
 
 // How a book keeps its levels, chosen once per replay (spec §2.2-§2.4). List: each side a list, best first, its levels
-// found through the level index. Ladder: the list and index, and each side a window of ladder_window price units
-// around its best, where a level is found and placed by slot.
+// found through the level index. Ladder: the list and index, and each side a window of ladder_window steps of a
+// cent around its best, where a level is found and placed by slot.
 enum class BookBackend : std::uint8_t {
     List,
     Ladder
 };
 
-// ponytail: the window counts price units, which at ITCH's $0.0001 span about one cent level per side; scale slot()
-// by the exchange tick to make it a ladder of levels.
+// ponytail: one window of $2.56 for every symbol; size it per symbol only if the churn benchmark shows recentring
+// dominates.
 inline constexpr std::size_t ladder_window = 256;
+
+// A ladder slot's width in prices of `price_scale` decimals: a cent, the US equity tick, or one unit below two
+// decimals. A price off that grid is the list's alone.
+constexpr std::uint64_t ladder_step(unsigned price_scale) noexcept
+{
+    std::uint64_t step = 1;
+    for (unsigned i = 2; i < price_scale; ++i) {
+        step *= 10;
+    }
+    return step;
+}
 
 // How many entries each structure holds.
 struct BookCapacity

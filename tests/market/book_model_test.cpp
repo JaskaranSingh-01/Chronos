@@ -7,6 +7,7 @@
 #include <map>
 #include <optional>
 #include <random>
+#include <string>
 #include <utility>
 #include <vector>
 
@@ -203,12 +204,15 @@ std::optional<MarketEvent> next(const Model& model, std::mt19937_64& rng, std::i
                        .type = MarketEventType::Replace};
 }
 
-// Both backends against one model, over the same stream (spec §6, Differential).
+// Both backends against one model, over the same stream (spec §6, Differential); the ladder also at a step of 4,
+// so a quarter of the prices are on its grid.
 TEST(BookModelTest, ARandomStreamGivesTheModelsBookAfterEveryOperation)
 {
-    for (const BookBackend backend : {BookBackend::List, BookBackend::Ladder}) {
-        SCOPED_TRACE(backend == BookBackend::List ? "list" : "ladder");
-        MarketBook book{kSymbol, 4'096, backend};
+    for (const auto& [backend, step] :
+         {std::pair{BookBackend::List, std::uint64_t{1}}, std::pair{BookBackend::Ladder, std::uint64_t{1}},
+          std::pair{BookBackend::Ladder, std::uint64_t{4}}}) {
+        SCOPED_TRACE(backend == BookBackend::List ? "list" : "ladder, step " + std::to_string(step));
+        MarketBook book{kSymbol, 4'096, backend, step};
         Model model;
         std::mt19937_64 rng{11};
         std::int64_t mid = 1'000'000;

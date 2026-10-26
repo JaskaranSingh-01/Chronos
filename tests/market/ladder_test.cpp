@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 
 #include <cstdint>
+#include <string>
 #include <vector>
 
 #include "simulator/market/market_book.hpp"
@@ -10,8 +11,8 @@ namespace simulator {
 namespace {
 
 constexpr SymbolId kSymbol = 4;
-constexpr std::int64_t kWindow = ladder_window;  // 256: the first price P's window is [P - 128, P + 128)
-constexpr std::int64_t kP = 1'000'000;
+constexpr std::int64_t kWindow = ladder_window;  // 256 slots: P's window is P - 128 to P + 127 steps
+constexpr std::int64_t kP = 1'000'000;           // on the grid of either step
 
 std::vector<LevelInfo> levels(const MarketBook& book, Side side)
 {
@@ -23,14 +24,27 @@ std::vector<LevelInfo> levels(const MarketBook& book, Side side)
     return out;
 }
 
-// A list book and a ladder book given the same events: after each, the same result, the same levels and orders (the
-// digest), and every invariant on both, the ladder's windows included (spec §2.3's transition tests).
-class LadderTest : public testing::Test
+// A list book and a ladder book given the same events: after each, the same result, the same levels and orders
+// (the digest), and every invariant on both, the ladder's windows included (spec §2.3's transition tests). The
+// parameter is the ladder's step: 1, every price on its grid, or 100, a cent at ITCH's four decimals.
+class LadderTest : public testing::TestWithParam<std::uint64_t>
 {
 protected:
     MarketBook list{kSymbol, 1'024, BookBackend::List};
-    MarketBook ladder{kSymbol, 1'024, BookBackend::Ladder};
+    MarketBook ladder{kSymbol, 1'024, BookBackend::Ladder, GetParam()};
     OrderId next_id{1};
+
+    // The price `units` ticks from P towards the best: up for bids, down for asks.
+    static std::int64_t units(Side side, std::int64_t units)
+    {
+        return side == Side::Buy ? kP + units : kP - units;
+    }
+
+    // The price `offset` steps from P towards the best.
+    std::int64_t at(Side side, std::int64_t offset) const
+    {
+        return units(side, offset * static_cast<std::int64_t>(GetParam()));
+    }
 
     void apply(const MarketEvent& event)
     {
@@ -74,13 +88,7 @@ protected:
     }
 };
 
-// The price `offset` ticks from P towards the best: up for bids, down for asks.
-std::int64_t at(Side side, std::int64_t offset)
-{
-    return side == Side::Buy ? kP + offset : kP - offset;
-}
-
-TEST_F(LadderTest, InsertsAtJustInsideAndJustOutsideEachWindowEdgeOnBothSides)
+TEST_P(LadderTest, InsertsAtJustInsideAndJustOutsideEachWindowEdgeOnBothSides)
 {
     for (const Side side : {Side::Buy, Side::Sell}) {
         // Away from the best: the far edge stays put while the best does.
@@ -102,10 +110,10 @@ TEST_F(LadderTest, InsertsAtJustInsideAndJustOutsideEachWindowEdgeOnBothSides)
     }
 }
 
-TEST_F(LadderTest, TheBestCrossesTheRecentringThresholdEachWayAndBack)
+TEST_P(LadderTest, TheBestCrossesTheRecentringThresholdEachWayAndBack)
 {
     for (const Side side : {Side::Buy, Side::Sell}) {
-        // The middle half of P's window is [P - 64, P + 64).
+        // The middle half of P's window is P - 64 to P + 63 steps.
         const OrderId p = add(side, kP);
         const OrderId inside = add(side, at(side, kWindow / 4 - 1));  // the best, still central
         const OrderId over = add(side, at(side, kWindow / 4));        // off-centre: the window recentres on it
@@ -119,7 +127,7 @@ TEST_F(LadderTest, TheBestCrossesTheRecentringThresholdEachWayAndBack)
     }
 }
 
-TEST_F(LadderTest, ABestFarBeyondTheWindowAndASparseBook)
+TEST_P(LadderTest, ABestFarBeyondTheWindowAndASparseBook)
 {
     for (const Side side : {Side::Buy, Side::Sell}) {
         add(side, kP);
@@ -133,7 +141,7 @@ TEST_F(LadderTest, ABestFarBeyondTheWindowAndASparseBook)
     }
 }
 
-TEST_F(LadderTest, ALevelDroppedAsTheWindowRecentresAndARecycledNodeAtANewPrice)
+TEST_P(LadderTest, ALevelDroppedAsTheWindowRecentresAndARecycledNodeAtANewPrice)
 {
     for (const Side side : {Side::Buy, Side::Sell}) {
         const OrderId best = add(side, kP);
@@ -149,7 +157,7 @@ TEST_F(LadderTest, ALevelDroppedAsTheWindowRecentresAndARecycledNodeAtANewPrice)
     }
 }
 
-TEST_F(LadderTest, ASideEmptiedAndRefilledAtANewPrice)
+TEST_P(LadderTest, ASideEmptiedAndRefilledAtANewPrice)
 {
     for (const Side side : {Side::Buy, Side::Sell}) {
         const OrderId only = add(side, kP);
@@ -163,7 +171,7 @@ TEST_F(LadderTest, ASideEmptiedAndRefilledAtANewPrice)
 }
 
 // A stock under a cent: its window runs below zero ticks.
-TEST_F(LadderTest, ATouchNearZeroTicks)
+TEST_P(LadderTest, ATouchNearZeroTicks)
 {
     for (const Side side : {Side::Buy, Side::Sell}) {
         const OrderId one = add(side, 1);
@@ -175,6 +183,31 @@ TEST_F(LadderTest, ATouchNearZeroTicks)
         add(side, kWindow + 5);
     }
 }
+
+// Off the grid at a step of 100: a level between two cents is the list's alone, yet sits between them; a
+// recentre passes it and still places the cents after it; and an off-grid best keeps the window on whole cents.
+TEST_P(LadderTest, LevelsOffTheGridBetweenLevelsOnIt)
+{
+    for (const Side side : {Side::Buy, Side::Sell}) {
+        const OrderId p = add(side, kP);
+        add(side, units(side, -150));  // between P - 100 and P - 200
+        add(side, units(side, -200));  // its scan finds P; the walk passes P - 150
+        add(side, units(side, -100));
+        const OrderId jump = add(side, units(side, 7'000));  // off-centre: a recentre walks past P - 150
+        add(side, units(side, -250));
+        erase(jump);
+        const OrderId off = add(side, units(side, 50));  // an off-grid best
+        add(side, units(side, -300));
+        add(side, units(side, 40));
+        erase(off);
+        erase(p);
+    }
+}
+
+INSTANTIATE_TEST_SUITE_P(Steps, LadderTest, testing::Values(std::uint64_t{1}, std::uint64_t{100}),
+                         [](const testing::TestParamInfo<std::uint64_t>& info) {
+                             return info.param == 1 ? std::string{"Unit"} : std::string{"Cent"};
+                         });
 
 } // namespace
 } // namespace simulator

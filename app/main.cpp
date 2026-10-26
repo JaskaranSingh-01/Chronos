@@ -635,7 +635,8 @@ int replay(const ReplayArgs& args)
 
     InstrumentRegistry registry{1};
     ItchSource source{input, config, registry};
-    MarketBook book{0, args.capacity, args.book};  // the registry's first id: ItchSource registers the only instrument
+    // The registry's first id: ItchSource registers the only instrument.
+    MarketBook book{0, args.capacity, args.book, ladder_step(source.instrument().price_scale)};
 
     LatencyHistogram latency;
     const ReplayOptions options = replay_options(args, midnight, latency);
@@ -993,7 +994,8 @@ int backtest(const ReplayArgs& args)
 
     InstrumentRegistry registry{1};
     ItchSource source{input, config, registry};
-    MarketBook book{0, args.capacity, args.book};  // the registry's first id: ItchSource registers the only instrument
+    // The registry's first id: ItchSource registers the only instrument.
+    MarketBook book{0, args.capacity, args.book, ladder_step(source.instrument().price_scale)};
     const Instrument& instrument = source.instrument();
     const unsigned price_scale = instrument.price_scale;
     const unsigned money_scale = instrument.price_scale + instrument.quantity_scale;
