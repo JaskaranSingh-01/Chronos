@@ -332,6 +332,28 @@ per share maker rebate, and the imbalance taker paying $0.0030 per share (the Re
 ./build/simulator backtest data/itch/12302019.NASDAQ_ITCH50.bin --symbol SPY --date 2019-12-30 --strategy imbalance --taker-fee-ticks 30
 ```
 
+The opening range breakout trades the range of every execution's price from 09:30 to 09:45: an IOC at the touch
+on the first trade strictly beyond it, once per direction a day, a stop on a trade strictly through the other side,
+and a flatten at 15:55, retrying any IOC that fills in part until it is flat. On AAPL's full day, read from the store
+in under a second:
+
+```bash
+./build/simulator backtest --store data/itch/store --symbol AAPL --date 2019-12-30 --strategy orb
+```
+
+```text
+Strategy
+  entries          1 long, 1 short
+  closing          1 stops, 1 flattens, 3 orders
+  risk rejects     0
+  no-range days    0
+  last range       286.4400 to 289.7200
+  shares           500 requested, 200 bought, 200 sold, 100 expired
+```
+
+It went long on the breakout, was stopped out, went short on a later trade, and was flattened at 15:55 after one
+closing IOC expired unfilled and was sent again: flat at the end, a total PnL of -$146.00. A toy result.
+
 ### Real-data tests
 
 ```bash
@@ -550,7 +572,7 @@ ITCH 5.0 file ─► MappedFile ─► ItchSource ── R messages ──► In
 | `include/simulator/sim/` | `SimEvent` and `SimQueue`, `OrderGateway`, `ExecutionReport`, `ExecutionSimulator` |
 | `include/simulator/portfolio/` | `Portfolio`, `RiskLimits`, `FeeSchedule` |
 | `include/simulator/engine/` | `EventLoop<S>`, the `Strategy` concept, `StrategyContext`, `NullStrategy` |
-| `include/simulator/strategies/` | `ImbalanceTaker` and `MarketMaker`, both toys |
+| `include/simulator/strategies/` | `ImbalanceTaker` and `MarketMaker`, both toys, and `Orb`, an opening range breakout |
 | `include/simulator/metrics/` | `LatencyHistogram` |
 | `include/simulator/cli/` | argument parsing and the usage text |
 | `src/` | the implementations, mirroring `include/simulator/` |
@@ -682,21 +704,25 @@ replay only:
 
 backtest runs a toy strategy against the replayed book, which our orders never change:
   --strategy S            imbalance (default): IOCs on top-of-book imbalance;
-                          mm: post-only quotes at the best bid and ask
+                          mm: post-only quotes at the best bid and ask;
+                          orb: opening range breakout, an IOC on a trade beyond the range
   --order-latency-ns N    strategy to exchange, in nanoseconds (default 50000)
   --order-latency-us N    the same in microseconds
   --report-latency-ns N   exchange back to strategy and portfolio (default 50000)
   --report-latency-us N   the same in microseconds
 risk limits (the largest order is the strategy's own --clip or --quote-size):
   --max-position N        |position| limit in shares (default 500)
-  --max-open-orders N     live orders at once (default 1 for imbalance, 2 for mm)
+  --max-open-orders N     live orders at once (default 2 for mm, else 1)
 fees, per share in price ticks ($0.0001 for ITCH):
   --taker-fee-ticks N     paid when taking liquidity (default 0)
   --maker-fee-ticks N     paid when providing it; negative = rebate (default 0)
+imbalance and orb:
+  --clip N                shares per order (default 100); for orb at most --max-position
 imbalance only:
   --threshold X           trade when one top-of-book size >= X times the other (>= 1, default 3)
-  --clip N                shares per order (default 100)
   --cooldown-ms N         wait after each order (default 100)
+orb only (session 09:30-16:00 ET; flattens at 15:55):
+  --range-minutes N       the opening range from 09:30, 1-390 (default 15)
 mm only:
   --quote-size N          shares per quote (default 100)
   --requote-ms N          a quote lives at least this long before it is moved (default 100)
@@ -750,7 +776,8 @@ A bad argument prints a two-line error on stderr and exits 2. `--json PATH` writ
 - The L3 `MarketBook`, with invariant checks and digests. Multi-symbol replay over a shared order pool.
 - The full-day replay of every symbol with 0 rejections.
 - The benchmark harness, a profile, and two profile-driven optimisations (see [`bench/RESULTS.md`](bench/RESULTS.md)).
-- The strategy layer: event loop, latency, fill model, portfolio with risk limits and fees, two toy strategies.
+- The strategy layer: event loop, latency, fill model, portfolio with risk limits and fees, two toy strategies, and an
+  opening range breakout (`--strategy orb`) that sees every execution's price.
 - The CLI with `--help`, `--version`, documented exit codes and `--json`.
 - The Trading Terminal: `chronos-serve` (HTTP and WebSocket, a command log, reconnect and resync) and a React UI with
   a TradingView-style chart, L3 queue positions and Playwright end-to-end tests.

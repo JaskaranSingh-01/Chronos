@@ -248,6 +248,32 @@ TEST(ReplayArgsTest, StrategyDefaultsAndBadValues)
     EXPECT_FALSE(parse({"replay", "day.bin", "--symbol", "SPY", "--date", "2019-12-30", "--strategy", "mm"}).ok);
 }
 
+// The ORB: its range within the session, and a clip it could enter with.
+TEST(ReplayArgsTest, ParsesTheOrbAndRefusesARangeOrClipItCouldNotTradeWith)
+{
+    auto orb = [](std::initializer_list<std::string_view> more) {
+        std::vector<std::string_view> args{"backtest", "day.bin", "--symbol", "SPY", "--date", "2019-12-30",
+                                           "--strategy", "orb"};
+        args.insert(args.end(), more);
+        return parse(args);
+    };
+    const Parsed p = orb({"--range-minutes", "30", "--clip", "50"});
+    ASSERT_TRUE(p.ok) << p.error;
+    EXPECT_EQ(p.args.backtest.strategy, StrategyKind::Orb);
+    EXPECT_EQ(p.args.backtest.range_minutes, 30u);
+    EXPECT_EQ(p.args.backtest.clip, 50u);
+    EXPECT_EQ(orb({}).args.backtest.range_minutes, 15u);
+    EXPECT_EQ(default_max_open_orders(StrategyKind::Orb), 1u);
+    EXPECT_TRUE(orb({"--range-minutes", "1"}).ok);
+    EXPECT_TRUE(orb({"--range-minutes", "390"}).ok);
+    EXPECT_FALSE(orb({"--range-minutes", "0"}).ok);
+    EXPECT_FALSE(orb({"--range-minutes", "391"}).ok);
+    const Parsed too_big = orb({"--clip", "600"});  // more than the default --max-position of 500
+    EXPECT_FALSE(too_big.ok);
+    EXPECT_EQ(too_big.error, "--clip is more than --max-position: the ORB could never enter");
+    EXPECT_TRUE(orb({"--clip", "600", "--max-position", "600"}).ok);
+}
+
 TEST(ReplayArgsTest, ParsesASymbolListOrAll)
 {
     const Parsed list = parse({"replay", "day.bin", "--symbols", "AAPL,MSFT,SPY", "--date", "2019-12-30"});

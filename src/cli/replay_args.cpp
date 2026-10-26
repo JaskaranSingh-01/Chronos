@@ -218,10 +218,14 @@ bool parse_replay_args(std::span<const std::string_view> args, ReplayArgs& out, 
         } else if (backtest && arg == "--taker-fee-ticks") {
             ok = parse_number(value, b.taker_fee_ticks) && b.taker_fee_ticks <= 1'000'000;
         } else if (backtest && arg == "--strategy") {
-            ok = value == "imbalance" || value == "mm";
-            b.strategy = value == "mm" ? StrategyKind::MarketMaker : StrategyKind::Imbalance;
+            ok = value == "imbalance" || value == "mm" || value == "orb";
+            b.strategy = value == "mm" ? StrategyKind::MarketMaker
+                : value == "orb"       ? StrategyKind::Orb
+                                       : StrategyKind::Imbalance;
         } else if (backtest && arg == "--max-open-orders") {
             ok = parse_number(value, b.max_open_orders) && b.max_open_orders > 0 && b.max_open_orders <= max_value;
+        } else if (backtest && arg == "--range-minutes") {
+            ok = parse_number(value, b.range_minutes) && b.range_minutes >= 1 && b.range_minutes <= 390;
         } else if (backtest && arg == "--quote-size") {
             ok = parse_number(value, b.quote_size) && b.quote_size > 0 && b.quote_size <= max_value;
         } else if (backtest && arg == "--requote-ms") {
@@ -261,6 +265,9 @@ bool parse_replay_args(std::span<const std::string_view> args, ReplayArgs& out, 
         error = "backtest runs one symbol: use --symbol, not --symbols or --all";
     } else if (!has_date) {
         error = "missing --date";
+    } else if (backtest && parsed.backtest.strategy == StrategyKind::Orb &&
+               parsed.backtest.clip > static_cast<std::uint64_t>(parsed.backtest.max_position)) {
+        error = "--clip is more than --max-position: the ORB could never enter";
     } else {
         if (!has_offset) {
             parsed.utc_offset = us_eastern_utc_offset(parsed.date);

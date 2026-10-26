@@ -47,21 +47,25 @@ inline constexpr std::string_view usage =
     "\n"
     "backtest runs a toy strategy against the replayed book, which our orders never change:\n"
     "  --strategy S            imbalance (default): IOCs on top-of-book imbalance;\n"
-    "                          mm: post-only quotes at the best bid and ask\n"
+    "                          mm: post-only quotes at the best bid and ask;\n"
+    "                          orb: opening range breakout, an IOC on a trade beyond the range\n"
     "  --order-latency-ns N    strategy to exchange, in nanoseconds (default 50000)\n"
     "  --order-latency-us N    the same in microseconds\n"
     "  --report-latency-ns N   exchange back to strategy and portfolio (default 50000)\n"
     "  --report-latency-us N   the same in microseconds\n"
     "risk limits (the largest order is the strategy's own --clip or --quote-size):\n"
     "  --max-position N        |position| limit in shares (default 500)\n"
-    "  --max-open-orders N     live orders at once (default 1 for imbalance, 2 for mm)\n"
+    "  --max-open-orders N     live orders at once (default 2 for mm, else 1)\n"
     "fees, per share in price ticks ($0.0001 for ITCH):\n"
     "  --taker-fee-ticks N     paid when taking liquidity (default 0)\n"
     "  --maker-fee-ticks N     paid when providing it; negative = rebate (default 0)\n"
+    "imbalance and orb:\n"
+    "  --clip N                shares per order (default 100); for orb at most --max-position\n"
     "imbalance only:\n"
     "  --threshold X           trade when one top-of-book size >= X times the other (>= 1, default 3)\n"
-    "  --clip N                shares per order (default 100)\n"
     "  --cooldown-ms N         wait after each order (default 100)\n"
+    "orb only (session 09:30-16:00 ET; flattens at 15:55):\n"
+    "  --range-minutes N       the opening range from 09:30, 1-390 (default 15)\n"
     "mm only:\n"
     "  --quote-size N          shares per quote (default 100)\n"
     "  --requote-ms N          a quote lives at least this long before it is moved (default 100)\n"
@@ -87,7 +91,8 @@ enum class CliCommand : std::uint8_t {
 
 enum class StrategyKind : std::uint8_t {
     Imbalance,
-    MarketMaker
+    MarketMaker,
+    Orb
 };
 
 struct BacktestArgs
@@ -104,9 +109,10 @@ struct BacktestArgs
     std::uint64_t quote_size{100};   // mm
     std::uint64_t requote_ms{100};
     std::int64_t maker_fee_ticks{0};
+    std::uint32_t range_minutes{15};  // orb
 };
 
-// One IOC in flight for imbalance; one quote per side for mm.
+// One IOC in flight for imbalance and orb; one quote per side for mm.
 constexpr std::size_t default_max_open_orders(StrategyKind strategy) noexcept
 {
     return strategy == StrategyKind::MarketMaker ? 2 : 1;

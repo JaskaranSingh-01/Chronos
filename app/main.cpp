@@ -36,6 +36,7 @@
 #include "simulator/store/store.hpp"
 #include "simulator/strategies/imbalance_taker.hpp"
 #include "simulator/strategies/market_maker.hpp"
+#include "simulator/strategies/orb.hpp"
 
 namespace {
 
@@ -574,10 +575,25 @@ void fill_record(RunRecord& run, const ReplayReport& report, const MarketBook& b
     run.succeeded = report.succeeded() && invariants;
 }
 
+// --strategy's spelling of each strategy.
+const char* strategy_name(StrategyKind strategy) noexcept
+{
+    switch (strategy) {
+    case StrategyKind::MarketMaker:
+        return "mm";
+    case StrategyKind::Orb:
+        return "orb";
+    case StrategyKind::Imbalance:
+        break;
+    }
+    return "imbalance";
+}
+
 // backtest --json: the numbers backtest prints, as exact integers; money in
 // units of 10^-money_scale, fees per share in price ticks (10^-price_scale).
 std::string backtest_json(const BacktestArgs& b, const RiskLimits& limits, const Instrument& instrument,
-                          const LoopReport& loop, const ExecutionStatistics& e, const Portfolio& p)
+                          const LoopReport& loop, const ExecutionStatistics& e, const Portfolio& p,
+                          const std::string& strategy)
 {
     char text[4'096];  // about 1,300 bytes at most: 30 numbers of at most 20 digits
     std::snprintf(
@@ -593,15 +609,14 @@ std::string backtest_json(const BacktestArgs& b, const RiskLimits& limits, const
         ", \"fifo_anomalies\": %" PRIu64 ",\n"
         "    \"position\": %" PRId64 ", \"max_abs_position\": %" PRId64 ", \"open_orders\": %zu, \"cash\": %" PRId64
         ", \"realised_pnl\": %" PRId64 ", \"unrealised_pnl\": %" PRId64 ", \"fees\": %" PRId64 ", \"pnl\": %" PRId64
-        ", \"max_drawdown\": %" PRId64 "},\n",
-        b.strategy == StrategyKind::MarketMaker ? "mm" : "imbalance", b.order_latency_ns, b.report_latency_ns,
-        limits.max_position, limits.max_order_quantity.value(), limits.max_open_orders, b.maker_fee_ticks,
-        b.taker_fee_ticks, unsigned{instrument.price_scale},
-        unsigned{instrument.price_scale} + instrument.quantity_scale, loop.sim_events, loop.drained_sim_events,
-        loop.discarded_sim_events, e.maker_fills, e.maker_quantity, e.taker_fills, e.taker_quantity,
-        e.accepted_quantity, e.cancelled, e.cancel_rejects, e.would_cross_rejects, e.not_trading_rejects,
-        e.fifo_anomalies, p.position(), p.max_abs_position(), p.open_orders(), p.cash(), p.realised_pnl(),
-        p.unrealised_pnl(), p.fees(), p.pnl(), p.max_drawdown());
+        ", \"max_drawdown\": %" PRId64 "%s},\n",
+        strategy_name(b.strategy), b.order_latency_ns, b.report_latency_ns, limits.max_position,
+        limits.max_order_quantity.value(), limits.max_open_orders, b.maker_fee_ticks, b.taker_fee_ticks,
+        unsigned{instrument.price_scale}, unsigned{instrument.price_scale} + instrument.quantity_scale, loop.sim_events,
+        loop.drained_sim_events, loop.discarded_sim_events, e.maker_fills, e.maker_quantity, e.taker_fills,
+        e.taker_quantity, e.accepted_quantity, e.cancelled, e.cancel_rejects, e.would_cross_rejects,
+        e.not_trading_rejects, e.fifo_anomalies, p.position(), p.max_abs_position(), p.open_orders(), p.cash(),
+        p.realised_pnl(), p.unrealised_pnl(), p.fees(), p.pnl(), p.max_drawdown(), strategy.c_str());
     return text;
 }
 
@@ -880,7 +895,7 @@ int replay_books(const ReplayArgs& args)
     return run.succeeded ? 0 : 1;
 }
 
-void print_strategy(const ImbalanceTakerStats& stats)
+void print_strategy(const ImbalanceTakerStats& stats, unsigned)
 {
     std::printf("\nStrategy\n");
     std::printf("  orders sent      %" PRIu64 "\n", stats.sent);
@@ -891,7 +906,51 @@ void print_strategy(const ImbalanceTakerStats& stats)
     std::printf("  sold             %" PRIu64 " shares\n", stats.sold);
 }
 
-void print_strategy(const MarketMakerStats& stats)
+void print_strategy(const OrbStats& stats, unsigned price_scale)
+{
+    std::printf("\nStrategy\n");
+    std::printf("  entries          %" PRIu64 " long, %" PRIu64 " short\n", stats.long_entries, stats.short_entries);
+    std::printf("  closing          %" PRIu64 " stops, %" PRIu64 " flattens, %" PRIu64 " orders\n", stats.stops,
+                stats.flattens, stats.closing_orders);
+    std::printf("  risk rejects     %" PRIu64 "\n", stats.risk_rejects);
+    std::printf("  no-range days    %" PRIu64 "\n", stats.no_range_days);
+    if (stats.has_range) {
+        std::printf("  last range       %s to %s\n", dollars(stats.range_low.ticks, price_scale).c_str(),
+                    dollars(stats.range_high.ticks, price_scale).c_str());
+    }
+    std::printf("  shares           %" PRIu64 " requested, %" PRIu64 " bought, %" PRIu64 " sold, %" PRIu64 " expired\n",
+                stats.requested, stats.bought, stats.sold, stats.expired);
+}
+
+// A strategy's own stats in backtest --json: ORB's; the toys' are in the text output only.
+std::string strategy_json(const ImbalanceTaker&)
+{
+    return {};
+}
+
+std::string strategy_json(const MarketMaker&)
+{
+    return {};
+}
+
+std::string strategy_json(const Orb& orb)
+{
+    const OrbStats& s = orb.stats();
+    const std::string high = s.has_range ? std::to_string(s.range_high.ticks) : "null";
+    const std::string low = s.has_range ? std::to_string(s.range_low.ticks) : "null";
+    char text[1'024];
+    std::snprintf(text, sizeof text,
+                  ",\n    \"orb\": {\"session\": \"fallback\", \"long_entries\": %" PRIu64
+                  ", \"short_entries\": %" PRIu64 ", \"stops\": %" PRIu64 ", \"flattens\": %" PRIu64
+                  ", \"closing_orders\": %" PRIu64 ", \"risk_rejects\": %" PRIu64 ", \"no_range_days\": %" PRIu64
+                  ", \"requested\": %" PRIu64 ", \"bought\": %" PRIu64 ", \"sold\": %" PRIu64 ", \"expired\": %" PRIu64
+                  ", \"range_high\": %s, \"range_low\": %s}",
+                  s.long_entries, s.short_entries, s.stops, s.flattens, s.closing_orders, s.risk_rejects,
+                  s.no_range_days, s.requested, s.bought, s.sold, s.expired, high.c_str(), low.c_str());
+    return text;
+}
+
+void print_strategy(const MarketMakerStats& stats, unsigned)
 {
     std::printf("\nStrategy\n");
     std::printf("  quotes sent      %" PRIu64 "\n", stats.quotes);
@@ -981,6 +1040,7 @@ int backtest(const ReplayArgs& args)
                                                 .clip = b.clip,
                                                 .max_position = b.max_position,
                                                 .cooldown_ns = static_cast<Timestamp>(b.cooldown_ms) * 1'000'000};
+    const OrbParams orb_params{.range_minutes = b.range_minutes, .clip = b.clip};
     const MarketMakerParams mm_params{.quote_size = b.quote_size,
                                       .max_position = b.max_position,
                                       .requote_cooldown_ns = static_cast<Timestamp>(b.requote_ms) * 1'000'000};
@@ -1007,6 +1067,10 @@ int backtest(const ReplayArgs& args)
         std::printf("  strategy         MarketMaker (a toy): quote size %" PRIu64 ", max position %" PRId64
                     ", requote cooldown %" PRIu64 " ms, joins the best bid and ask\n",
                     b.quote_size, b.max_position, b.requote_ms);
+    } else if (b.strategy == StrategyKind::Orb) {
+        std::printf("  strategy         ORB: range %u min from 09:30, clip %" PRIu64
+                    ", flatten 15:55 ET (fallback session)\n",
+                    unsigned{b.range_minutes}, b.clip);
     } else {
         std::printf("  strategy         ImbalanceTaker (a toy): threshold %g, clip %" PRIu64 ", max position %" PRId64
                     ", cooldown %" PRIu64 " ms\n",
@@ -1044,7 +1108,7 @@ int backtest(const ReplayArgs& args)
                     report.sim_events, report.drained_sim_events, report.discarded_sim_events);
         print_failure(replay, args, source.failed_message_type(), book.storage());
 
-        print_strategy(strategy.stats());
+        print_strategy(strategy.stats(), price_scale);
         print_execution(execution.statistics());
         print_attribution(execution.statistics());
         print_anomaly_samples(execution, midnight, price_scale);
@@ -1067,7 +1131,8 @@ int backtest(const ReplayArgs& args)
 
         if (!args.json.empty() &&
             !write_json(args, input, record,
-                        backtest_json(b, limits, instrument, report, execution.statistics(), portfolio))) {
+                        backtest_json(b, limits, instrument, report, execution.statistics(), portfolio,
+                                      strategy_json(strategy)))) {
             return 2;
         }
         return record.succeeded ? 0 : 1;
@@ -1075,6 +1140,11 @@ int backtest(const ReplayArgs& args)
 
     if (mm) {
         MarketMaker strategy{mm_params};
+        return run(strategy);
+    }
+    if (b.strategy == StrategyKind::Orb) {
+        const OrbSession session{.open = midnight + RTH_OPEN_NS, .close = midnight + RTH_CLOSE_NS};
+        Orb strategy{orb_params, {&session, 1}};
         return run(strategy);
     }
     ImbalanceTaker strategy{imbalance_params};
