@@ -8,21 +8,40 @@
 
 namespace simulator {
 
-// FIFO of the orders at one price, intrusively linked through Order::prev_/next_.
+// A PriceLevel's slot in its LevelPool; 0 is none.
+using LevelRef = std::uint32_t;
+
+// FIFO of the orders at one price, intrusively linked through Order::prev_/next_, and a node of its side's list of
+// levels, best first.
 class PriceLevel
 {
 private:
-    Price price_{};
+    std::int64_t price_;  // Price::ticks: a plain integer, so a LevelPool slot needs no initialization
 
-    Order* head_{nullptr};
-    Order* tail_{nullptr};
+    Order* head_;
+    Order* tail_;
 
-    std::uint64_t total_quantity_{0};  // sum of remaining over the level
-    std::uint32_t order_count_{0};
+    std::uint64_t total_quantity_;  // sum of remaining over the level
+    std::uint32_t order_count_;
+
+    PriceLevel* better_;  // the level before it in its side's list; nullptr at the best
+    PriceLevel* worse_;   // the level after it; in a LevelPool's free list, the next free slot
+
+    friend class OrderBook;
+    friend class LevelPool;
 
 public:
+    // Uninitialized: a LevelPool slot, which the pool writes when it hands it out.
+    PriceLevel() = default;
+
     explicit PriceLevel(Price price) noexcept
-        : price_(price)
+        : price_(price.ticks),
+          head_(nullptr),
+          tail_(nullptr),
+          total_quantity_(0),
+          order_count_(0),
+          better_(nullptr),
+          worse_(nullptr)
     {}
 
     bool add(Order& order) noexcept;
@@ -46,9 +65,19 @@ public:
         return head_;
     }
 
+    const PriceLevel* better() const noexcept
+    {
+        return better_;
+    }
+
+    const PriceLevel* worse() const noexcept
+    {
+        return worse_;
+    }
+
     constexpr Price price() const noexcept
     {
-        return price_;
+        return Price{price_};
     }
 
     constexpr std::uint32_t order_count() const noexcept

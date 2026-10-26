@@ -4,7 +4,7 @@ namespace simulator {
 
 bool PriceLevel::add(Order& order) noexcept
 {
-    if (order.price() != price_) {
+    if (order.price() != price()) {
         return false;
     }
 

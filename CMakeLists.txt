@@ -52,6 +52,7 @@ add_library(simulator_lib
     src/orders/order.cpp
     src/orders/order_pool.cpp
     src/orders/order_index.cpp
+    src/orders/level_pool.cpp
     src/itch/byte_reader.cpp
     src/itch/itch_message_reader.cpp
     src/itch/itch_decoder.cpp
@@ -269,6 +270,9 @@ add_executable(simulator_tests
     tests/order_book_test.cpp
     tests/order_pool_test.cpp
     tests/order_index_test.cpp
+    tests/hash_index_test.cpp
+    tests/level_index_test.cpp
+    tests/level_pool_test.cpp
     tests/order_pool_integration_test.cpp
     tests/itch/byte_reader_test.cpp
     tests/itch/itch_message_reader_test.cpp
