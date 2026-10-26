@@ -5,8 +5,11 @@
 
 namespace simulator {
 
-MarketBook::MarketBook(SymbolId symbol, std::size_t capacity)
-    : symbol_(symbol), owned_(std::make_unique<BookStorage>(capacity)), storage_(owned_.get()), book_(symbol, *storage_)
+MarketBook::MarketBook(SymbolId symbol, std::size_t capacity, BookBackend backend)
+    : symbol_(symbol),
+      owned_(std::make_unique<BookStorage>(capacity, backend, std::size_t{symbol} + 1)),  // its window at its id
+      storage_(owned_.get()),
+      book_(symbol, *storage_)
 {}
 
 MarketBook::MarketBook(SymbolId symbol, BookStorage& storage) noexcept
@@ -288,6 +291,10 @@ bool MarketBook::check_invariants(InvariantError& error, bool rth) const noexcep
 
     if (error == InvariantError::None && linked != book_.size()) {
         error = InvariantError::IndexWithoutLevel;
+    }
+
+    if (error == InvariantError::None && !book_.windows_hold()) {
+        error = InvariantError::WindowMismatch;
     }
 
     if (error == InvariantError::None && owned_ &&

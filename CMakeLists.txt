@@ -283,6 +283,7 @@ add_executable(simulator_tests
     tests/market/vector_source_test.cpp
     tests/market/market_book_test.cpp
     tests/market/book_model_test.cpp
+    tests/market/ladder_test.cpp
     tests/source_conformance_test.cpp
     tests/io/mapped_file_test.cpp
     tests/csv/csv_source_test.cpp

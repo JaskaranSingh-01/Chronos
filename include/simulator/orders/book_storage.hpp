@@ -1,7 +1,9 @@
 #pragma once
 
+#include <cassert>
 #include <cstddef>
 #include <cstdint>
+#include <memory>
 
 #include "simulator/orders/level_index.hpp"
 #include "simulator/orders/level_pool.hpp"
@@ -19,6 +21,18 @@ enum class BookStructure : std::uint8_t {
     LevelIndex
 };
 
+// How a book keeps its levels, chosen once per replay (spec §2.2-§2.4). List: each side a list, best first, its levels
+// found through the level index. Ladder: the list and index, and each side a window of ladder_window ticks around its
+// best, where a level is found and placed by slot.
+enum class BookBackend : std::uint8_t {
+    List,
+    Ladder
+};
+
+// ponytail: one window width for every symbol; size it per symbol only if the churn benchmark shows recentring
+// dominates.
+inline constexpr std::size_t ladder_window = 256;
+
 // How many entries each structure holds.
 struct BookCapacity
 {
@@ -29,34 +43,59 @@ struct BookCapacity
 };
 
 // Everything the books of one replay share, reserved before it starts (spec §3.1). From --capacity C: C orders and an
-// order index of C, and C levels and a level index of C, as every live level holds a live order. Nothing here
-// allocates after the constructor.
+// order index of C, and C levels and a level index of C, as every live level holds a live order; and for the ladder,
+// the windows of `books` books, SymbolIds 0 to books - 1. Nothing here allocates after the constructor.
 struct BookStorage
 {
+private:
+    std::unique_ptr<LevelRef[]> windows_;  // ladder: 2 x ladder_window per book, untouched until its book clears them
+    std::size_t books_;
+
+public:
     OrderPool orders;
     OrderIndex order_index;
     LevelPool levels;
     LevelIndex level_index;
+    BookBackend backend;
 
-    explicit BookStorage(std::size_t capacity)
+    explicit BookStorage(std::size_t capacity, BookBackend backend = BookBackend::List, std::size_t books = 1)
         : BookStorage(
-              BookCapacity{.orders = capacity, .order_index = capacity, .levels = capacity, .level_index = capacity})
+              BookCapacity{.orders = capacity, .order_index = capacity, .levels = capacity, .level_index = capacity},
+              backend, books)
     {}
 
-    explicit BookStorage(const BookCapacity& capacity)
-        : orders(capacity.orders),
+    explicit BookStorage(const BookCapacity& capacity, BookBackend backend = BookBackend::List, std::size_t books = 1)
+        : windows_(backend == BookBackend::Ladder
+                       ? std::make_unique_for_overwrite<LevelRef[]>(2 * ladder_window * books)
+                       : nullptr),
+          books_(books),
+          orders(capacity.orders),
           order_index(capacity.order_index),
           levels(capacity.levels),
-          level_index(capacity.level_index)
+          level_index(capacity.level_index),
+          backend(backend)
     {}
 
     BookStorage(const BookStorage&) = delete;
     BookStorage& operator=(const BookStorage&) = delete;
 
+    // Ladder only: the ladder_window slots of `book`'s window on `side`.
+    LevelRef* window(SymbolId book, Side side) noexcept
+    {
+        assert(windows_ && book < books_);
+        return &windows_[(2 * std::size_t{book} + static_cast<std::size_t>(side)) * ladder_window];
+    }
+
     // Every byte reserved for them.
     std::size_t bytes() const noexcept
     {
-        return orders.bytes() + order_index.bytes() + levels.bytes() + level_index.bytes();
+        return orders.bytes() + order_index.bytes() + levels.bytes() + level_index.bytes() + window_bytes(books_);
+    }
+
+    // The windows of `books` books: what the ladder reserves for books_, and touches for the books made.
+    std::size_t window_bytes(std::size_t books) const noexcept
+    {
+        return windows_ ? 2 * ladder_window * books * sizeof(LevelRef) : 0;
     }
 
     // The entries `structure` holds; 0 for None.
@@ -78,4 +117,4 @@ struct BookStorage
     }
 };
 
-} // namespace simulator
+}  // namespace simulator

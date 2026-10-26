@@ -11,6 +11,10 @@ namespace simulator {
 // A PriceLevel's slot in its LevelPool; 0 is none.
 using LevelRef = std::uint32_t;
 
+enum class Dispatch : std::uint8_t;
+template <Dispatch D>
+class BasicOrderBook;
+
 // FIFO of the orders at one price, intrusively linked through Order::prev_/next_, and a node of its side's list of
 // levels, best first.
 class PriceLevel
@@ -27,7 +31,8 @@ private:
     PriceLevel* better_;  // the level before it in its side's list; nullptr at the best
     PriceLevel* worse_;   // the level after it; in a LevelPool's free list, the next free slot
 
-    friend class OrderBook;
+    template <Dispatch>
+    friend class BasicOrderBook;
     friend class LevelPool;
 
 public:

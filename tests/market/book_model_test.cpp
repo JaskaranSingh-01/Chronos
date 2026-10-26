@@ -203,27 +203,31 @@ std::optional<MarketEvent> next(const Model& model, std::mt19937_64& rng, std::i
                        .type = MarketEventType::Replace};
 }
 
+// Both backends against one model, over the same stream (spec §6, Differential).
 TEST(BookModelTest, ARandomStreamGivesTheModelsBookAfterEveryOperation)
 {
-    MarketBook book{kSymbol, 4'096};
-    Model model;
-    std::mt19937_64 rng{11};
-    std::int64_t mid = 1'000'000;
-    OrderId next_id = 1;
+    for (const BookBackend backend : {BookBackend::List, BookBackend::Ladder}) {
+        SCOPED_TRACE(backend == BookBackend::List ? "list" : "ladder");
+        MarketBook book{kSymbol, 4'096, backend};
+        Model model;
+        std::mt19937_64 rng{11};
+        std::int64_t mid = 1'000'000;
+        OrderId next_id = 1;
 
-    for (int step = 0; step < 2'000; ++step) {
-        const std::optional<MarketEvent> event = next(model, rng, mid, next_id);
-        if (!event) {
-            continue;
+        for (int step = 0; step < 2'000; ++step) {
+            const std::optional<MarketEvent> event = next(model, rng, mid, next_id);
+            if (!event) {
+                continue;
+            }
+            ASSERT_EQ(book.apply(*event), ApplyResult::Applied) << "step " << step;
+            model.apply(*event);
+            ASSERT_EQ(levels(book, Side::Buy), model.levels(Side::Buy)) << "step " << step;
+            ASSERT_EQ(levels(book, Side::Sell), model.levels(Side::Sell)) << "step " << step;
+            InvariantError error{InvariantError::None};
+            ASSERT_TRUE(book.check_invariants(error)) << "step " << step << ": " << to_string(error);
         }
-        ASSERT_EQ(book.apply(*event), ApplyResult::Applied) << "step " << step;
-        model.apply(*event);
-        ASSERT_EQ(levels(book, Side::Buy), model.levels(Side::Buy)) << "step " << step;
-        ASSERT_EQ(levels(book, Side::Sell), model.levels(Side::Sell)) << "step " << step;
-        InvariantError error{InvariantError::None};
-        ASSERT_TRUE(book.check_invariants(error)) << "step " << step << ": " << to_string(error);
+        EXPECT_GT(book.order_count(), 100u);
     }
-    EXPECT_GT(book.order_count(), 100u);
 }
 
 } // namespace

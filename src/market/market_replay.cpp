@@ -242,6 +242,8 @@ std::string_view to_string(InvariantError error) noexcept
         return "LevelNotIndexed";
     case InvariantError::LevelCountMismatch:
         return "LevelCountMismatch";
+    case InvariantError::WindowMismatch:
+        return "WindowMismatch";
     }
     return "?";
 }

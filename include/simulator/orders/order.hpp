@@ -14,6 +14,9 @@ namespace simulator {
 
 class PriceLevel;
 class OrderPool;
+enum class Dispatch : std::uint8_t;
+template <Dispatch D>
+class BasicOrderBook;
 
 class Order
 {
@@ -36,7 +39,8 @@ private:
 
     friend class PriceLevel;
     friend class OrderPool;
-    friend class OrderBook;  // reduces level_->total_quantity on partial changes
+    template <Dispatch>
+    friend class BasicOrderBook;  // reduces level_->total_quantity on partial changes
 
 
 public:

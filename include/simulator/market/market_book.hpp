@@ -50,7 +50,8 @@ enum class InvariantError : std::uint8_t {
     CrossedInRth,           // best bid > best ask during regular trading hours, while Trading
     LevelOutOfOrder,        // a side's list not strictly best first, or its links disagree
     LevelNotIndexed,        // the level index does not map a level's price to it
-    LevelCountMismatch      // level pool slots in use or level index size != live levels (of all books, if shared)
+    LevelCountMismatch,     // level pool slots in use or level index size != live levels (of all books, if shared)
+    WindowMismatch          // ladder: a window slot and the level at its price disagree, or a best off-centre
 };
 
 // True in [09:30, 16:00) exchange-local; session_midnight comes from session_midnight_ns().
@@ -95,7 +96,7 @@ private:
 
 public:
     // Reserves a BookStorage of its own for `capacity` orders up front.
-    MarketBook(SymbolId symbol, std::size_t capacity);
+    MarketBook(SymbolId symbol, std::size_t capacity, BookBackend backend = BookBackend::List);
 
     // Keeps its orders and levels in `storage`, which other books may share and which outlives the book.
     MarketBook(SymbolId symbol, BookStorage& storage) noexcept;
