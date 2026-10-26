@@ -5,6 +5,7 @@
 
 #include "simulator/market/market_book.hpp"
 #include "simulator/market/market_event.hpp"
+#include "simulator/market/trade.hpp"
 #include "simulator/portfolio/portfolio.hpp"
 #include "simulator/sim/execution_report.hpp"
 #include "simulator/sim/order_gateway.hpp"
@@ -17,6 +18,7 @@ struct StrategyContext
     const MarketBook& book;
     const Portfolio& portfolio;
     OrderGateway& gateway;
+    const Trade* trade{nullptr};  // in on_market, the trade the event printed (market_trade()), else null
 
     Timestamp now() const noexcept
     {

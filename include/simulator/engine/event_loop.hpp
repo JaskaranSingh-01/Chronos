@@ -78,12 +78,16 @@ private:
         execution_.on_market(event, book_, reports_);  // sees the pre-event book
         schedule_reports(event.timestamp);
 
-        const ApplyResult applied = book_.apply(event);  // the only writer of the historical book
+        Trade trade;
+        const bool traded = market_trade(event, book_, trade);  // read before the book applies the event
+        const ApplyResult applied = book_.apply(event);         // the only writer of the historical book
         if (portfolio_.position() != 0) {
             portfolio_.mark(book_);  // a flat pnl does not depend on the mark
         }
         if (applied == ApplyResult::Applied) {
+            context_.trade = traded ? &trade : nullptr;
             strategy_.on_market(context_, event);
+            context_.trade = nullptr;
         }
         return applied;
     }

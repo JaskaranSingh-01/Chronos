@@ -7,22 +7,9 @@
 
 #include "simulator/market/market_book.hpp"
 #include "simulator/market/market_event.hpp"
+#include "simulator/market/trade.hpp"
 
 namespace simulator::server {
-
-// A historical trade print; `side` is the resting order's, so the aggressor took the other side.
-struct Trade
-{
-    Timestamp timestamp{0};
-    Price price{};
-    std::uint64_t quantity{0};
-    Side side{Side::Buy};
-
-    bool operator==(const Trade&) const = default;
-};
-
-// The trade a pending `event` prints (ITCH E at the resting order's price, C at its own, P); call before step().
-bool market_trade(const MarketEvent& event, const MarketBook& book, Trade& trade) noexcept;
 
 // A 1 s OHLCV bar of market trades.
 struct Candle

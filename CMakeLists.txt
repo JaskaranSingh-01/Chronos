@@ -62,6 +62,7 @@ add_library(simulator_lib
     src/itch/itch_source.cpp
     src/market/market_replay.cpp
     src/market/pipeline_source.cpp
+    src/market/trade.cpp
     src/cli/replay_args.cpp
     src/portfolio/portfolio.cpp
     src/sim/execution_simulator.cpp

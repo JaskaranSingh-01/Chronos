@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <functional>
+#include <optional>
 #include <random>
 #include <span>
 #include <type_traits>
@@ -145,6 +146,54 @@ void buy_at_twenty(Harness& h)
             ASSERT_TRUE(ctx.set_timer(70, 9));
         }
     };
+}
+
+
+// A strategy sees the trade each event printed, read before the book applied it: the same trade the server's candles
+// read (market_trade), an E deep in the book at its resting order's price, a C at its own, a P as given, and none
+// for an event that is not a trade (spec: the ORB's trade-price contract).
+TEST(EventLoopTest, OnMarketSeesTheTradeEachEventPrintedBeforeTheBookApplies)
+{
+    MarketEvent c = execute(6, 1, 10);
+    c.price = Price{999'950};  // ITCH C: its own price
+    const MarketEvent print{.timestamp = 7,
+                            .price = Price{1'000'300},
+                            .quantity = Quantity{25},
+                            .symbol = kSymbol,
+                            .type = MarketEventType::Trade,
+                            .side = Side::Sell};
+    const std::vector<MarketEvent> events = {
+        add(1, 1, Side::Buy, 1'000'000, 100),
+        add(2, 2, Side::Buy, 999'000, 50),
+        add(3, 3, Side::Sell, 1'000'100, 40),
+        execute(4, 2, 50),  // deep in the book, not the touch: the whole order, so the book drops it
+        execute(5, 3, 41),  // more than it has: rejected, no trade
+        c,
+        print,
+        MarketEvent{.timestamp = 8, .order_id = 1, .symbol = kSymbol, .type = MarketEventType::Delete}};
+    Harness h{events};
+    std::vector<std::optional<Trade>> seen;
+    h.strategy.act = [&](StrategyContext& ctx, const MarketEvent&) {
+        seen.push_back(ctx.trade != nullptr ? std::optional<Trade>{*ctx.trade} : std::nullopt);
+    };
+    h.run({});
+
+    MarketBook book{kSymbol, 64};
+    std::vector<std::optional<Trade>> candles;
+    for (const MarketEvent& event : events) {
+        Trade trade;
+        const bool traded = market_trade(event, book, trade);
+        if (book.apply(event) == ApplyResult::Applied) {
+            candles.push_back(traded ? std::optional<Trade>{trade} : std::nullopt);
+        }
+    }
+    EXPECT_EQ(seen, candles);
+    ASSERT_EQ(seen.size(), 7u);  // the rejected execute reaches no callback
+    EXPECT_EQ(seen[3], (Trade{.timestamp = 4, .price = Price{999'000}, .quantity = 50, .side = Side::Buy}));
+    EXPECT_EQ(seen[4], (Trade{.timestamp = 6, .price = Price{999'950}, .quantity = 10, .side = Side::Buy}));
+    EXPECT_EQ(seen[5], (Trade{.timestamp = 7, .price = Price{1'000'300}, .quantity = 25, .side = Side::Sell}));
+    EXPECT_EQ(seen[0], std::nullopt);
+    EXPECT_EQ(seen[6], std::nullopt);
 }
 
 TEST(EventLoopTest, LatencySchedulesArrivalAndDelivery)
