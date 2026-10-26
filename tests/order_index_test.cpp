@@ -2,9 +2,9 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <map>
 #include <random>
-#include <unordered_map>
-#include <vector>
+#include <utility>
 
 #include "simulator/orders/order.hpp"
 #include "simulator/orders/order_index.hpp"
@@ -12,147 +12,103 @@
 namespace simulator {
 namespace {
 
-// Distinct addresses to store; the index never dereferences them.
-Order orders[64];
-
-// `count` ids, from `from` up, that hash to the same slot as `from`.
-std::vector<OrderId> colliding(const OrderIndex& index, OrderId from, std::size_t count)
+// The order `id` of `book`, one per (book, id) for the test's ids, as OrderBook::add marks it.
+Order& order(SymbolId book, OrderId id)
 {
-    std::vector<OrderId> ids;
-    for (OrderId id = from; ids.size() < count; ++id) {
-        if (index.home(id) == index.home(from)) {
-            ids.push_back(id);
-        }
-    }
-    return ids;
+    static std::map<std::pair<SymbolId, OrderId>, Order> orders;
+    Order& o = orders[{book, id}];
+    o.initialize(id, Side::Buy, Price{100}, Quantity{1}, 0);
+    o.set_book(book);
+    return o;
 }
 
-TEST(OrderIndexTest, FindsWhatWasInsertedAndNothingElse)
+TEST(OrderIndexTest, FindsAnOrderByItsBookAndId)
 {
-    OrderIndex index;
-    EXPECT_EQ(index.find(1), nullptr);
-    EXPECT_FALSE(index.erase(1));
+    OrderIndex index{8};
+    EXPECT_EQ(index.find(0, 1), nullptr);
+    EXPECT_FALSE(index.erase(0, 1));
 
-    EXPECT_TRUE(index.insert(1, &orders[1]));
-    EXPECT_TRUE(index.insert(42, &orders[2]));
-    EXPECT_FALSE(index.insert(42, &orders[3]));  // duplicate id: kept as it was
-
+    Order& one = order(0, 1);
+    Order& other = order(0, 42);
+    ASSERT_TRUE(index.add(one));
+    ASSERT_TRUE(index.add(other));
     EXPECT_EQ(index.size(), 2u);
-    EXPECT_EQ(index.find(1), &orders[1]);
-    EXPECT_EQ(index.find(42), &orders[2]);
-    EXPECT_EQ(index.find(7), nullptr);
+    EXPECT_EQ(index.find(0, 1), &one);
+    EXPECT_EQ(index.find(0, 42), &other);
+    EXPECT_EQ(index.find(1, 1), nullptr);  // another book
+    EXPECT_EQ(index.find(0, 7), nullptr);
 
-    EXPECT_TRUE(index.erase(1));
-    EXPECT_FALSE(index.erase(1));
-    EXPECT_EQ(index.find(1), nullptr);
-    EXPECT_EQ(index.find(42), &orders[2]);
+    EXPECT_TRUE(index.erase(0, 1));
+    EXPECT_FALSE(index.erase(0, 1));
+    EXPECT_EQ(index.find(0, 1), nullptr);
+    EXPECT_EQ(index.find(0, 42), &other);
     EXPECT_EQ(index.size(), 1u);
 }
 
-TEST(OrderIndexTest, CollidingIdsStayFindableThroughErase)
+// MarketEvent promises an id unique only within its symbol: one id in two books is two orders.
+TEST(OrderIndexTest, OneIdInTwoBooksIsTwoOrders)
 {
     OrderIndex index{8};
-    const std::vector<OrderId> ids = colliding(index, 1'000, 4);
-    for (std::size_t i = 0; i < ids.size(); ++i) {
-        ASSERT_TRUE(index.insert(ids[i], &orders[i]));
-    }
+    Order& first = order(1, 5);
+    Order& second = order(2, 5);
+    ASSERT_TRUE(index.add(first));
+    ASSERT_TRUE(index.add(second));
+    EXPECT_EQ(index.find(1, 5), &first);
+    EXPECT_EQ(index.find(2, 5), &second);
 
-    // Erasing the head of the probe run shifts the rest back over the hole.
-    ASSERT_TRUE(index.erase(ids[0]));
-    EXPECT_EQ(index.find(ids[0]), nullptr);
-    EXPECT_EQ(index.find(ids[1]), &orders[1]);
-    EXPECT_EQ(index.find(ids[2]), &orders[2]);
-    EXPECT_EQ(index.find(ids[3]), &orders[3]);
-
-    ASSERT_TRUE(index.erase(ids[2]));
-    EXPECT_EQ(index.find(ids[1]), &orders[1]);
-    EXPECT_EQ(index.find(ids[3]), &orders[3]);
-
-    ASSERT_TRUE(index.insert(ids[0], &orders[0]));
-    EXPECT_EQ(index.find(ids[0]), &orders[0]);
-    EXPECT_EQ(index.size(), 3u);
+    ASSERT_TRUE(index.erase(1, 5));
+    EXPECT_EQ(index.find(1, 5), nullptr);
+    EXPECT_EQ(index.find(2, 5), &second);
+    EXPECT_FALSE(index.erase(3, 5));
 }
 
-TEST(OrderIndexTest, ProbeRunsWrapAroundTheEndOfTheTable)
-{
-    OrderIndex index{8};  // 16 slots
-    OrderId last = 1;
-    while (index.home(last) != 15) {
-        ++last;
-    }
-    const std::vector<OrderId> ids = colliding(index, last, 3);  // slots 15, 0, 1
-    OrderId zero = 1;
-    while (index.home(zero) != 0) {
-        ++zero;
-    }
-
-    for (std::size_t i = 0; i < ids.size(); ++i) {
-        ASSERT_TRUE(index.insert(ids[i], &orders[i]));
-    }
-    ASSERT_TRUE(index.insert(zero, &orders[9]));  // its home is taken by the wrapped run
-
-    ASSERT_TRUE(index.erase(ids[0]));
-    EXPECT_EQ(index.find(ids[1]), &orders[1]);
-    EXPECT_EQ(index.find(ids[2]), &orders[2]);
-    EXPECT_EQ(index.find(zero), &orders[9]);
-    ASSERT_TRUE(index.erase(ids[1]));
-    EXPECT_EQ(index.find(ids[2]), &orders[2]);
-    EXPECT_EQ(index.find(zero), &orders[9]);
-}
-
-// A small, often half-full table: long probe runs, wrap-around and backward shifts.
-TEST(OrderIndexTest, MatchesAReferenceMapUnderChurn)
+// Ids shared by three books and a small table: their entries meet in long probe runs, where only the book tells them
+// apart.
+TEST(OrderIndexTest, MatchesAReferenceUnderChurn)
 {
     OrderIndex index{8};
-    const std::size_t capacity = index.capacity();
-    std::unordered_map<OrderId, Order*> reference;
+    Order orders[3][6];             // by book and id - 1
+    Order* reference[3][6]{};       // the order indexed there, or nullptr
+    std::size_t size = 0;
+    for (SymbolId book = 0; book < 3; ++book) {
+        for (OrderId id = 1; id <= 6; ++id) {
+            orders[book][id - 1].initialize(id, Side::Buy, Price{100}, Quantity{1}, 0);
+            orders[book][id - 1].set_book(book);
+        }
+    }
     std::mt19937_64 rng{1};
 
-    for (int step = 0; step < 200'000; ++step) {
-        const OrderId id = 1 + rng() % 48;
-        if (reference.contains(id)) {
-            ASSERT_TRUE(index.erase(id));
-            reference.erase(id);
-        } else if (reference.size() < capacity) {
-            ASSERT_TRUE(index.insert(id, &orders[id]));
-            reference.emplace(id, &orders[id]);
+    for (int step = 0; step < 20'000; ++step) {
+        const auto book = static_cast<SymbolId>(rng() % 3);
+        const OrderId id = 1 + rng() % 6;
+        Order*& entry = reference[book][id - 1];
+        if (entry != nullptr) {
+            ASSERT_TRUE(index.erase(book, id));
+            entry = nullptr;
+            --size;
+        } else if (size < index.capacity()) {
+            entry = &orders[book][id - 1];
+            ASSERT_TRUE(index.add(*entry));
+            ++size;
         }
-        const OrderId probe = 1 + rng() % 48;
-        const auto it = reference.find(probe);
-        ASSERT_EQ(index.find(probe), it == reference.end() ? nullptr : it->second) << "step " << step;
-        ASSERT_EQ(index.size(), reference.size());
-    }
-    EXPECT_EQ(index.capacity(), capacity);  // never grew
-}
-
-TEST(OrderIndexTest, ACapacityFromThePoolIsNeverOutgrown)
-{
-    OrderIndex index{1'000};
-    const std::size_t capacity = index.capacity();
-    ASSERT_GE(capacity, 1'000u);
-
-    for (OrderId id = 1; id <= 1'000; ++id) {
-        ASSERT_TRUE(index.insert(id * 7'919, &orders[id % 64]));
-    }
-    EXPECT_EQ(index.capacity(), capacity);
-    for (OrderId id = 1; id <= 1'000; ++id) {
-        ASSERT_EQ(index.find(id * 7'919), &orders[id % 64]);
+        const auto probe_book = static_cast<SymbolId>(rng() % 3);
+        const OrderId probe_id = 1 + rng() % 6;
+        ASSERT_EQ(index.find(probe_book, probe_id), reference[probe_book][probe_id - 1]) << "step " << step;
+        ASSERT_EQ(index.size(), size);
     }
 }
 
-TEST(OrderIndexTest, GrowsWithoutACapacity)
+TEST(OrderIndexTest, AFullIndexRefusesAnAdd)
 {
-    OrderIndex index;
-    EXPECT_EQ(index.capacity(), 0u);
-
-    for (OrderId id = 1; id <= 10'000; ++id) {
-        ASSERT_TRUE(index.insert(id, &orders[id % 64]));
+    OrderIndex index{8};
+    ASSERT_EQ(index.capacity(), 8u);
+    for (OrderId id = 1; id <= 8; ++id) {
+        ASSERT_TRUE(index.add(order(0, id)));
     }
-    EXPECT_GE(index.capacity(), 10'000u);
-    for (OrderId id = 1; id <= 10'000; ++id) {
-        ASSERT_EQ(index.find(id), &orders[id % 64]);
-    }
-    EXPECT_EQ(index.find(10'001), nullptr);
+    EXPECT_TRUE(index.full());
+    EXPECT_FALSE(index.add(order(0, 9)));
+    EXPECT_EQ(index.find(0, 9), nullptr);
+    EXPECT_EQ(index.size(), 8u);
 }
 
 } // namespace

@@ -5,12 +5,12 @@
 
 namespace simulator {
 
-MarketBook::MarketBook(SymbolId symbol, std::size_t order_capacity)
-    : symbol_(symbol), owned_pool_(std::in_place, order_capacity), pool_(&*owned_pool_), book_(order_capacity)
+MarketBook::MarketBook(SymbolId symbol, std::size_t capacity)
+    : symbol_(symbol), owned_(std::make_unique<BookStorage>(capacity)), storage_(owned_.get()), book_(symbol, *storage_)
 {}
 
-MarketBook::MarketBook(SymbolId symbol, OrderPool& pool) noexcept
-    : symbol_(symbol), pool_(&pool)
+MarketBook::MarketBook(SymbolId symbol, BookStorage& storage) noexcept
+    : symbol_(symbol), storage_(&storage), book_(symbol, storage)
 {}
 
 // Every case validates before mutating, so a rejected event leaves the book unchanged.
@@ -55,6 +55,12 @@ void MarketBook::insert(Order& order) noexcept
     peak_order_count_ = std::max(peak_order_count_, book_.size());
 }
 
+ApplyResult MarketBook::full(BookStructure structure) noexcept
+{
+    exhausted_ = structure;
+    return ApplyResult::CapacityExhausted;
+}
+
 ApplyResult MarketBook::add(const MarketEvent& event) noexcept
 {
     if (event.quantity.is_zero()) {
@@ -65,12 +71,15 @@ ApplyResult MarketBook::add(const MarketEvent& event) noexcept
         return ApplyResult::DuplicateOrder;
     }
 
-    Order* order = pool_->acquire(event.order_id, event.side, event.price, event.quantity, event.timestamp);
-
-    if (order == nullptr) {
-        return ApplyResult::PoolExhausted;
+    if (storage_->orders.available() == 0) {
+        return full(BookStructure::OrderPool);
     }
 
+    if (const BookStructure structure = book_.room(event.side, event.price); structure != BookStructure::None) {
+        return full(structure);
+    }
+
+    Order* order = storage_->orders.acquire(event.order_id, event.side, event.price, event.quantity, event.timestamp);
     insert(*order);
     return ApplyResult::Applied;
 }
@@ -99,7 +108,7 @@ ApplyResult MarketBook::reduce(const MarketEvent& event) noexcept
 
     // At zero the book has already unlinked it.
     if (order->remaining_quantity().is_zero()) {
-        [[maybe_unused]] const bool released = pool_->release(*order);
+        [[maybe_unused]] const bool released = storage_->orders.release(*order);
         assert(released);
     }
 
@@ -117,7 +126,7 @@ ApplyResult MarketBook::erase(const MarketEvent& event) noexcept
     // Unlink before delete_order(), which zeroes the remaining the level subtracts on unlink.
     [[maybe_unused]] const bool erased = book_.erase(event.order_id);
     [[maybe_unused]] const bool deleted = order->delete_order();
-    [[maybe_unused]] const bool released = pool_->release(*order);
+    [[maybe_unused]] const bool released = storage_->orders.release(*order);
     assert(erased && deleted && released);
 
     return ApplyResult::Applied;
@@ -145,11 +154,15 @@ ApplyResult MarketBook::replace(const MarketEvent& event) noexcept
 
     const Side side = old_order->side();
 
+    if (const BookStructure structure = book_.room(side, event.price, old_order); structure != BookStructure::None) {
+        return full(structure);
+    }
+
     [[maybe_unused]] const bool erased = book_.erase(event.order_id);
-    [[maybe_unused]] const bool released = pool_->release(*old_order);
+    [[maybe_unused]] const bool released = storage_->orders.release(*old_order);
 
     // Cannot fail: the old order's slot was just freed.
-    Order* order = pool_->acquire(event.new_order_id, side, event.price, event.quantity, event.timestamp);
+    Order* order = storage_->orders.acquire(event.new_order_id, side, event.price, event.quantity, event.timestamp);
     assert(erased && released && order != nullptr);
 
     insert(*order);  // fresh sequence: back of the queue
@@ -190,43 +203,55 @@ std::size_t MarketBook::depth(Side side, std::span<LevelInfo> out) const noexcep
 
 std::uint64_t MarketBook::quantity_at(Side side, Price price) const noexcept
 {
-    auto at = [price](const auto& levels) -> std::uint64_t {
-        const auto it = levels.find(price);
-        return it == levels.end() ? 0 : it->second.total_quantity();
-    };
-
-    return side == Side::Buy ? at(book_.bids()) : at(book_.asks());
+    const PriceLevel* level = book_.level(side, price);
+    return level != nullptr ? level->total_quantity() : 0;
 }
 
 bool MarketBook::is_crossed() const noexcept
 {
-    return !book_.bids().empty() && !book_.asks().empty() && book_.bids().begin()->first > book_.asks().begin()->first;
+    const PriceLevel* bid = book_.best(Side::Buy);
+    const PriceLevel* ask = book_.best(Side::Sell);
+    return bid != nullptr && ask != nullptr && bid->price() > ask->price();
 }
 
 bool MarketBook::is_locked() const noexcept
 {
-    return !book_.bids().empty() && !book_.asks().empty() && book_.bids().begin()->first == book_.asks().begin()->first;
+    const PriceLevel* bid = book_.best(Side::Buy);
+    const PriceLevel* ask = book_.best(Side::Sell);
+    return bid != nullptr && ask != nullptr && bid->price() == ask->price();
 }
 
 bool MarketBook::check_invariants(InvariantError& error, bool rth) const noexcept
 {
     std::size_t linked = 0;
+    std::size_t levels = 0;
 
-    auto check_side = [&](const auto& levels, Side side) {
-        for (const auto& [price, level] : levels) {
-            if (level.empty()) {
+    auto check_side = [&](Side side) {
+        const PriceLevel* before = nullptr;
+        for (const PriceLevel* level = book_.best(side); level != nullptr; before = level, level = level->worse()) {
+            const Price price = level->price();
+            if (level->better() != before ||
+                (before != nullptr && (side == Side::Buy ? before->price() <= price : before->price() >= price))) {
+                return InvariantError::LevelOutOfOrder;
+            }
+
+            if (book_.level(side, price) != level) {
+                return InvariantError::LevelNotIndexed;
+            }
+
+            if (level->empty()) {
                 return InvariantError::EmptyLevel;
             }
 
             std::uint64_t total = 0;
             std::uint64_t previous_sequence = 0;  // sequences start at 1
 
-            for (const Order* order = level.front(); order != nullptr; order = order->next()) {
+            for (const Order* order = level->front(); order != nullptr; order = order->next()) {
                 if (book_.find(order->id()) != order) {
                     return InvariantError::LevelWithoutIndex;
                 }
 
-                if (order->level() != &level || order->price() != price || order->side() != side) {
+                if (order->level() != level || order->price() != price || order->side() != side) {
                     return InvariantError::IndexWithoutLevel;
                 }
 
@@ -244,28 +269,35 @@ bool MarketBook::check_invariants(InvariantError& error, bool rth) const noexcep
                 total += order->remaining_quantity().value();
             }
 
-            if (total != level.total_quantity()) {
+            if (total != level->total_quantity()) {
                 return InvariantError::LevelTotalMismatch;
             }
 
-            linked += level.order_count();
+            linked += level->order_count();
+            ++levels;
         }
 
         return InvariantError::None;
     };
 
-    error = check_side(book_.bids(), Side::Buy);
+    error = check_side(Side::Buy);
 
     if (error == InvariantError::None) {
-        error = check_side(book_.asks(), Side::Sell);
+        error = check_side(Side::Sell);
     }
 
     if (error == InvariantError::None && linked != book_.size()) {
         error = InvariantError::IndexWithoutLevel;
     }
 
-    if (error == InvariantError::None && owned_pool_ && pool_->in_use() != book_.size()) {
+    if (error == InvariantError::None && owned_ &&
+        (storage_->orders.in_use() != book_.size() || storage_->order_index.size() != book_.size())) {
         error = InvariantError::PoolCountMismatch;
+    }
+
+    if (error == InvariantError::None && owned_ &&
+        (storage_->levels.in_use() != levels || storage_->level_index.size() != levels)) {
+        error = InvariantError::LevelCountMismatch;
     }
 
     if (error == InvariantError::None && rth && trading_state_ == TradingState::Trading && is_crossed()) {
@@ -280,20 +312,17 @@ std::uint64_t MarketBook::digest() const noexcept
     std::uint64_t hash = fnv1a_offset_basis;
     auto mix = [&hash](std::uint64_t value) { fnv1a_mix(hash, value); };
 
-    auto mix_side = [&mix](const auto& levels) {
-        for (const auto& [price, level] : levels) {
-            for (const Order* order = level.front(); order != nullptr; order = order->next()) {
+    for (const Side side : {Side::Buy, Side::Sell}) {
+        for (const PriceLevel* level = book_.best(side); level != nullptr; level = level->worse()) {
+            for (const Order* order = level->front(); order != nullptr; order = order->next()) {
                 mix(static_cast<std::uint64_t>(order->side()));
-                mix(static_cast<std::uint64_t>(price.ticks));
+                mix(static_cast<std::uint64_t>(level->price().ticks));
                 mix(order->id());
                 mix(order->remaining_quantity().value());
                 mix(order->sequence());
             }
         }
-    };
-
-    mix_side(book_.bids());
-    mix_side(book_.asks());
+    }
 
     return hash;
 }

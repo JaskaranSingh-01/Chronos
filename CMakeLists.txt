@@ -51,7 +51,6 @@ add_library(simulator_lib
     src/orders/order_book.cpp
     src/orders/order.cpp
     src/orders/order_pool.cpp
-    src/orders/order_index.cpp
     src/orders/level_pool.cpp
     src/itch/byte_reader.cpp
     src/itch/itch_message_reader.cpp
@@ -283,6 +282,7 @@ add_executable(simulator_tests
     tests/market/instrument_registry_test.cpp
     tests/market/vector_source_test.cpp
     tests/market/market_book_test.cpp
+    tests/market/book_model_test.cpp
     tests/source_conformance_test.cpp
     tests/io/mapped_file_test.cpp
     tests/csv/csv_source_test.cpp

@@ -179,8 +179,8 @@ std::string_view to_string(ApplyResult result) noexcept
         return "ExceedsRemaining";
     case ApplyResult::InvalidReplace:
         return "InvalidReplace";
-    case ApplyResult::PoolExhausted:
-        return "PoolExhausted";
+    case ApplyResult::CapacityExhausted:
+        return "CapacityExhausted";
     case ApplyResult::Unsupported:
         return "Unsupported";
     }
@@ -245,6 +245,12 @@ std::string_view to_string(InvariantError error) noexcept
         return "PoolCountMismatch";
     case InvariantError::CrossedInRth:
         return "CrossedInRth";
+    case InvariantError::LevelOutOfOrder:
+        return "LevelOutOfOrder";
+    case InvariantError::LevelNotIndexed:
+        return "LevelNotIndexed";
+    case InvariantError::LevelCountMismatch:
+        return "LevelCountMismatch";
     }
     return "?";
 }

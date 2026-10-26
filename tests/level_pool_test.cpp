@@ -49,6 +49,11 @@ TEST(LevelPoolTest, AFullPoolHandsOutNothingUntilALevelIsReleased)
     EXPECT_EQ(again, first);
     expect_fresh(*again, Price{103});
     EXPECT_EQ(pool.in_use(), 2u);
+
+    pool.release(*again);  // the free list links it from the next one released
+    pool.release(*second);
+    expect_fresh(*pool.acquire(Price{104}), Price{104});
+    expect_fresh(*pool.acquire(Price{105}), Price{105});
 }
 
 // A released slot is handed out before one never used, so the pool touches only as many slots as were ever live.

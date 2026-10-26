@@ -1,6 +1,8 @@
 #include "simulator/orders/level_pool.hpp"
 
 #include <cassert>
+#include <cstdio>
+#include <cstdlib>
 #include <type_traits>
 
 namespace simulator {
@@ -8,11 +10,23 @@ namespace simulator {
 // So make_unique_for_overwrite leaves the slots untouched until they are handed out.
 static_assert(std::is_trivially_default_constructible_v<PriceLevel>);
 
-LevelPool::LevelPool(std::size_t capacity)
-    : slots_(std::make_unique_for_overwrite<PriceLevel[]>(capacity + 1)), capacity_(capacity)
+namespace {
+
+// A LevelRef is 31 bits in the level index, so a larger pool cannot be addressed; checked in every build type.
+std::size_t addressable(std::size_t capacity)
 {
-    assert(capacity < (std::size_t{1} << 31));
+    if (capacity >= (std::size_t{1} << 31)) {
+        std::fprintf(stderr, "a level pool of %zu levels is more than a LevelRef can address\n", capacity);
+        std::abort();
+    }
+    return capacity;
 }
+
+}  // namespace
+
+LevelPool::LevelPool(std::size_t capacity)
+    : slots_(std::make_unique_for_overwrite<PriceLevel[]>(addressable(capacity) + 1)), capacity_(capacity)
+{}
 
 PriceLevel* LevelPool::acquire(Price price) noexcept
 {

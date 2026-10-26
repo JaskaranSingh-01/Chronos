@@ -635,8 +635,8 @@ int replay_books(const ReplayArgs& args)
     // ITCH locates are 16-bit, so a day has at most 65,536 instruments.
     InstrumentRegistry registry{args.all_symbols ? std::size_t{1} << 16 : args.symbols.size()};
     ItchSource source{file.bytes(), config, registry};
-    OrderPool pool{args.capacity};
-    MarketBooks books{registry, pool};
+    BookStorage storage{args.capacity};
+    MarketBooks books{registry, storage};
 
     LatencyHistogram latency;
     const ReplayOptions options = replay_options(args, midnight, latency);
@@ -718,7 +718,7 @@ int replay_books(const ReplayArgs& args)
     }
 
     std::printf("\nLive orders       peak %zu, %zu at the end, all books together (capacity %zu)\n",
-                report.peak_live_orders, pool.in_use(), pool.capacity());
+                report.peak_live_orders, storage.orders.in_use(), storage.orders.capacity());
 
     // Structure first, so a crossed book cannot hide another problem. A book that is
     // not Trading may cross (NASDAQ queues without matching), so it is listed, not failed.
@@ -738,7 +738,7 @@ int replay_books(const ReplayArgs& args)
     if (!structure) {
         const std::string_view error_name = to_string(invariant_error);
         const std::string_view failed =
-            invariant_symbol < books.size() ? name(*registry.find(invariant_symbol)) : "(the shared pool)";
+            invariant_symbol < books.size() ? name(*registry.find(invariant_symbol)) : "(the shared storage)";
         std::printf("Invariants at end: FAILED %.*s in %.*s\n", static_cast<int>(error_name.size()), error_name.data(),
                     static_cast<int>(failed.size()), failed.data());
     } else if (!crossed.empty()) {

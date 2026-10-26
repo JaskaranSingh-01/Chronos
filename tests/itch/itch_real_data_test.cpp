@@ -139,8 +139,8 @@ TEST(ItchRealDataTest, ReplaysEverySymbolWithoutRejections)
     auto replay = [&] {
         InstrumentRegistry registry{65'536};  // one per locate at most
         ItchSource source{file.bytes(), config, registry};
-        OrderPool pool{default_books_capacity};
-        MarketBooks books{registry, pool};
+        BookStorage storage{default_books_capacity};
+        MarketBooks books{registry, storage};
 
         AllOutcome run;
         run.report = MarketReplay::run(source, books, options);

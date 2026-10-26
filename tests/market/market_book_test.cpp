@@ -204,7 +204,8 @@ TEST(MarketBookTest, RejectsEachInvalidEventWithItsOwnResult)
     EXPECT_EQ(book.apply(execute(1, 11)), ApplyResult::ExceedsRemaining);
     EXPECT_EQ(book.apply(cancel(1, 11)), ApplyResult::ExceedsRemaining);
 
-    EXPECT_EQ(book.apply(add(2, Side::Buy, 100, 10)), ApplyResult::PoolExhausted);
+    EXPECT_EQ(book.apply(add(2, Side::Buy, 100, 10)), ApplyResult::CapacityExhausted);
+    EXPECT_EQ(book.exhausted(), BookStructure::OrderPool);
 
     EXPECT_EQ(book.apply(reduce(MarketEventType::Modify, 1, 5)), ApplyResult::Unsupported);
 
@@ -569,26 +570,27 @@ MarketEvent on(SymbolId symbol, MarketEvent event)
 
 TEST(MarketBookTest, BooksOnASharedPoolDrawFromTheSameSlots)
 {
-    OrderPool pool{3};
-    MarketBook a{1, pool};
-    MarketBook b{2, pool};
+    BookStorage storage{3};
+    const OrderPool& pool = storage.orders;
+    MarketBook a{1, storage};
+    MarketBook b{2, storage};
 
     ASSERT_EQ(a.apply(on(1, add(1, Side::Buy, 100, 10))), ApplyResult::Applied);
     ASSERT_EQ(b.apply(on(2, add(1, Side::Sell, 101, 10))), ApplyResult::Applied);  // ids are per book
     ASSERT_EQ(a.apply(on(1, add(2, Side::Buy, 99, 10))), ApplyResult::Applied);
     EXPECT_EQ(pool.in_use(), 3u);
 
-    EXPECT_EQ(b.apply(on(2, add(2, Side::Sell, 102, 10))), ApplyResult::PoolExhausted);
+    EXPECT_EQ(b.apply(on(2, add(2, Side::Sell, 102, 10))), ApplyResult::CapacityExhausted);
     EXPECT_EQ(b.order_count(), 1u);
     EXPECT_EQ(b.apply(on(1, add(2, Side::Sell, 102, 10))), ApplyResult::WrongSymbol);
 
     // A slot one book frees, the other can use.
     ASSERT_EQ(a.apply(on(1, erase(1))), ApplyResult::Applied);
-    EXPECT_EQ(pool.in_use(), 2u);
+    EXPECT_EQ(storage.orders.in_use(), 2u);
     ASSERT_EQ(b.apply(on(2, add(2, Side::Sell, 102, 10))), ApplyResult::Applied);
     ASSERT_EQ(b.apply(on(2, replace(2, 3, 103, 5))), ApplyResult::Applied);  // full pool: frees, then takes
     ASSERT_EQ(b.apply(on(2, execute(1, 10))), ApplyResult::Applied);
-    EXPECT_EQ(pool.in_use(), 2u);
+    EXPECT_EQ(storage.orders.in_use(), 2u);
     EXPECT_EQ(a.order_count() + b.order_count(), pool.in_use());
 
     // A book on a shared pool cannot compare the pool with its own orders alone.
@@ -635,6 +637,65 @@ TEST(MarketBookTest, VisitOrdersWalksOneLevelFrontFirst)
         return true;
     });
     EXPECT_TRUE(ids.empty());
+}
+
+// Each structure, filled, refuses the Add or Replace that needs one more entry, names itself and leaves the book as it
+// was; the storage still agrees with the book.
+TEST(MarketBookTest, EachFullStructureRefusesWhatNeedsItAndLeavesTheBookIntact)
+{
+    auto expect_refused = [](MarketBook& book, const BookStorage& storage, const MarketEvent& event,
+                             BookStructure full) {
+        const std::uint64_t before = book.digest();
+        const std::size_t orders = book.order_count();
+        EXPECT_EQ(book.apply(event), ApplyResult::CapacityExhausted);
+        EXPECT_EQ(book.exhausted(), full);
+        EXPECT_EQ(book.digest(), before);
+        EXPECT_EQ(book.order_count(), orders);
+        expect_invariants(book);
+        EXPECT_EQ(storage.orders.in_use(), book.order_count());
+        EXPECT_EQ(storage.order_index.size(), book.order_count());
+        EXPECT_EQ(storage.levels.in_use(), book.level_count());
+        EXPECT_EQ(storage.level_index.size(), book.level_count());
+    };
+
+    {
+        BookStorage storage{BookCapacity{.orders = 2, .order_index = 16, .levels = 16, .level_index = 16}};
+        MarketBook book{kSymbol, storage};
+        ASSERT_EQ(book.apply(add(1, Side::Buy, 100, 10)), ApplyResult::Applied);
+        ASSERT_EQ(book.apply(add(2, Side::Buy, 100, 10)), ApplyResult::Applied);
+        expect_refused(book, storage, add(3, Side::Buy, 100, 10), BookStructure::OrderPool);
+        ASSERT_EQ(book.apply(replace(2, 3, 101, 10)), ApplyResult::Applied);  // frees a slot, then takes it
+    }
+    {
+        BookStorage storage{BookCapacity{.orders = 16, .order_index = 8, .levels = 16, .level_index = 16}};
+        MarketBook book{kSymbol, storage};
+        for (OrderId id = 1; id <= 8; ++id) {
+            ASSERT_EQ(book.apply(add(id, Side::Sell, 100, 10)), ApplyResult::Applied);
+        }
+        expect_refused(book, storage, add(9, Side::Sell, 100, 10), BookStructure::OrderIndex);
+        ASSERT_EQ(book.apply(replace(8, 9, 100, 10)), ApplyResult::Applied);  // its entry goes first
+    }
+    {
+        BookStorage storage{BookCapacity{.orders = 16, .order_index = 16, .levels = 2, .level_index = 16}};
+        MarketBook book{kSymbol, storage};
+        ASSERT_EQ(book.apply(add(1, Side::Buy, 100, 10)), ApplyResult::Applied);
+        ASSERT_EQ(book.apply(add(2, Side::Buy, 100, 10)), ApplyResult::Applied);
+        ASSERT_EQ(book.apply(add(3, Side::Sell, 105, 10)), ApplyResult::Applied);
+        ASSERT_EQ(book.apply(add(4, Side::Buy, 100, 10)), ApplyResult::Applied);  // an existing level
+        expect_refused(book, storage, add(5, Side::Buy, 99, 10), BookStructure::LevelPool);
+        expect_refused(book, storage, replace(1, 5, 99, 10), BookStructure::LevelPool);  // 100 keeps its others
+        ASSERT_EQ(book.apply(replace(3, 5, 106, 10)), ApplyResult::Applied);            // 105 empties first
+        ASSERT_EQ(book.apply(replace(1, 6, 100, 10)), ApplyResult::Applied);            // to a level that exists
+    }
+    {
+        BookStorage storage{BookCapacity{.orders = 32, .order_index = 32, .levels = 32, .level_index = 8}};
+        MarketBook book{kSymbol, storage};
+        for (OrderId id = 1; id <= 8; ++id) {
+            ASSERT_EQ(book.apply(add(id, Side::Buy, 100 - static_cast<std::int64_t>(id), 10)), ApplyResult::Applied);
+        }
+        expect_refused(book, storage, add(9, Side::Sell, 200, 10), BookStructure::LevelIndex);
+        ASSERT_EQ(book.apply(add(9, Side::Buy, 95, 10)), ApplyResult::Applied);
+    }
 }
 
 } // namespace

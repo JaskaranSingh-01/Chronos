@@ -2,16 +2,16 @@
 
 #include <cstddef>
 #include <cstdint>
-#include <memory>
 
+#include "simulator/orders/hash_index.hpp"
+#include "simulator/orders/order.hpp"
 #include "simulator/types/order_id.hpp"
+#include "simulator/types/symbol_id.hpp"
 
 namespace simulator {
 
-class Order;
-
-// OrderId -> Order*: linear probing over a power-of-two table at most half full.
-// erase() back-shifts the probe run, so there are no tombstones. Allocates only to grow.
+// (book, OrderId) -> Order*, one table for every book. MarketEvent promises a live order's id unique only within its
+// symbol, so the book is part of the key; the order holds it.
 class OrderIndex
 {
 private:
@@ -19,58 +19,63 @@ private:
     {
         OrderId id{0};
         Order* order{nullptr};  // nullptr: a free slot
+
+        bool empty() const noexcept
+        {
+            return order == nullptr;
+        }
+
+        std::uint64_t hash() const noexcept
+        {
+            return id;
+        }
     };
 
-    std::unique_ptr<Slot[]> slots_;
-    std::size_t mask_{0};  // slot count - 1
-    int shift_{64};        // 64 - log2(slot count)
-    std::size_t size_{0};
+    HashIndex<Slot> table_;
 
-    void rehash(std::size_t slot_count);
+    // Reads the order's book only for a slot of the same id: the order a lookup reads next anyway.
+    static auto matches(SymbolId book, OrderId id) noexcept
+    {
+        return [=](const Slot& slot) { return slot.id == id && slot.order->book() == book; };
+    }
 
 public:
-    // Room for `capacity` orders before the first growth; 0 allocates on the first insert().
-    explicit OrderIndex(std::size_t capacity = 0);
+    explicit OrderIndex(std::size_t capacity)
+        : table_(capacity)
+    {}
 
-    // Fibonacci hashing (top bits of id * 2^64 / phi) spreads sequential ids evenly.
-    // Public for tests.
-    std::size_t home(OrderId id) const noexcept
+    // nullptr if absent.
+    Order* find(SymbolId book, OrderId id) const noexcept
     {
-        return static_cast<std::size_t>((id * 0x9E37'79B9'7F4A'7C15ULL) >> shift_);
+        const Slot* slot = table_.find(id, matches(book, id));
+        return slot != nullptr ? slot->order : nullptr;
     }
 
-    // nullptr if `id` is absent.
-    Order* find(OrderId id) const noexcept
+    // False, changing nothing, if full; the order's (book, id) is absent.
+    bool add(Order& order) noexcept
     {
-        if (size_ == 0) {
-            return nullptr;
-        }
-        for (std::size_t i = home(id);; i = (i + 1) & mask_) {
-            const Slot& slot = slots_[i];
-            if (slot.order == nullptr) {
-                return nullptr;
-            }
-            if (slot.id == id) {
-                return slot.order;
-            }
-        }
+        return table_.add(Slot{.id = order.id(), .order = &order});
     }
 
-    // False if `id` is present. Doubles the table first if it is full (size() == capacity()).
-    bool insert(OrderId id, Order* order);
-
-    // False if `id` is absent.
-    bool erase(OrderId id) noexcept;
+    // False if absent.
+    bool erase(SymbolId book, OrderId id) noexcept
+    {
+        return table_.erase(id, matches(book, id));
+    }
 
     std::size_t size() const noexcept
     {
-        return size_;
+        return table_.size();
     }
 
-    // Orders it holds before it grows.
     std::size_t capacity() const noexcept
     {
-        return slots_ ? (mask_ + 1) / 2 : 0;
+        return table_.capacity();
+    }
+
+    bool full() const noexcept
+    {
+        return table_.full();
     }
 };
 

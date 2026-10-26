@@ -1,5 +1,8 @@
 #include <gtest/gtest.h>
 
+#include <cstdint>
+#include <vector>
+
 #include "simulator/orders/order_book.hpp"
 
 namespace simulator {
@@ -20,21 +23,36 @@ void activate(Order& order)
     ASSERT_TRUE(order.activate());
 }
 
+class OrderBookTest : public testing::Test
+{
+protected:
+    BookStorage storage{64};
+    OrderBook book{0, storage};
+
+    // The prices of `side`'s levels, best first, each checked against its neighbours' links.
+    std::vector<std::int64_t> prices(Side side) const
+    {
+        std::vector<std::int64_t> out;
+        const PriceLevel* before = nullptr;
+        for (const PriceLevel* level = book.best(side); level != nullptr; before = level, level = level->worse()) {
+            EXPECT_EQ(level->better(), before);
+            out.push_back(level->price().ticks);
+        }
+        return out;
+    }
+};
+
 } // namespace
 
-TEST(OrderBookTest, StartsEmpty)
+TEST_F(OrderBookTest, StartsEmpty)
 {
-    OrderBook book;
-
     EXPECT_TRUE(book.empty());
     EXPECT_EQ(book.best_bid(), nullptr);
     EXPECT_EQ(book.best_ask(), nullptr);
 }
 
-TEST(OrderBookTest, AddsActiveBuyOrder)
+TEST_F(OrderBookTest, AddsActiveBuyOrder)
 {
-    OrderBook book;
-
     auto order = make_buy_order(1, Price{100});
     activate(order);
 
@@ -45,10 +63,8 @@ TEST(OrderBookTest, AddsActiveBuyOrder)
     EXPECT_EQ(book.best_bid(), &order);
 }
 
-TEST(OrderBookTest, AddsActiveSellOrder)
+TEST_F(OrderBookTest, AddsActiveSellOrder)
 {
-    OrderBook book;
-
     auto order = make_sell_order(1, Price{101});
     activate(order);
 
@@ -59,10 +75,8 @@ TEST(OrderBookTest, AddsActiveSellOrder)
     EXPECT_EQ(book.best_ask(), &order);
 }
 
-TEST(OrderBookTest, RejectsInactiveOrder)
+TEST_F(OrderBookTest, RejectsInactiveOrder)
 {
-    OrderBook book;
-
     auto order = make_buy_order(1, Price{100});
 
     EXPECT_EQ(order.state(), OrderState::New);
@@ -72,10 +86,8 @@ TEST(OrderBookTest, RejectsInactiveOrder)
     EXPECT_EQ(book.find(1), nullptr);
 }
 
-TEST(OrderBookTest, RejectsDuplicateOrderId)
+TEST_F(OrderBookTest, RejectsDuplicateOrderId)
 {
-    OrderBook book;
-
     auto first = make_buy_order(1, Price{100});
     auto second = make_buy_order(1, Price{101});
 
@@ -91,24 +103,20 @@ TEST(OrderBookTest, RejectsDuplicateOrderId)
 
 // Order::activate accepts a zero quantity, so every add path relies on this
 // guard: nothing may rest with 0 shares.
-TEST(OrderBookTest, RejectsZeroQuantityOrder)
+TEST_F(OrderBookTest, RejectsZeroQuantityOrder)
 {
-    OrderBook book;
-
     auto order = make_sell_order(1, Price{100}, Quantity{0});
     activate(order);
 
     EXPECT_FALSE(book.add(order));
 
     EXPECT_TRUE(book.empty());
-    EXPECT_TRUE(book.asks().empty());  // no empty level left behind
+    EXPECT_EQ(book.best(Side::Sell), nullptr);  // no empty level left behind
     EXPECT_EQ(order.level(), nullptr);
 }
 
-TEST(OrderBookTest, FindsExistingOrder)
+TEST_F(OrderBookTest, FindsExistingOrder)
 {
-    OrderBook book;
-
     auto order = make_buy_order(42, Price{100});
     activate(order);
 
@@ -117,17 +125,13 @@ TEST(OrderBookTest, FindsExistingOrder)
     EXPECT_EQ(book.find(42), &order);
 }
 
-TEST(OrderBookTest, ReturnsNullForMissingOrder)
+TEST_F(OrderBookTest, ReturnsNullForMissingOrder)
 {
-    OrderBook book;
-
     EXPECT_EQ(book.find(999), nullptr);
 }
 
-TEST(OrderBookTest, ConstFindWorks)
+TEST_F(OrderBookTest, ConstFindWorks)
 {
-    OrderBook book;
-
     auto order = make_buy_order(1, Price{100});
     activate(order);
 
@@ -139,10 +143,8 @@ TEST(OrderBookTest, ConstFindWorks)
     EXPECT_EQ(const_book.find(999), nullptr);
 }
 
-TEST(OrderBookTest, BestBidIsHighestPrice)
+TEST_F(OrderBookTest, BestBidIsHighestPrice)
 {
-    OrderBook book;
-
     auto low = make_buy_order(1, Price{100});
     auto high = make_buy_order(2, Price{105});
     auto middle = make_buy_order(3, Price{102});
@@ -158,10 +160,8 @@ TEST(OrderBookTest, BestBidIsHighestPrice)
     EXPECT_EQ(book.best_bid(), &high);
 }
 
-TEST(OrderBookTest, BestBidUpdatesAfterCancellation)
+TEST_F(OrderBookTest, BestBidUpdatesAfterCancellation)
 {
-    OrderBook book;
-
     auto low = make_buy_order(1, Price{100});
     auto high = make_buy_order(2, Price{105});
 
@@ -178,10 +178,8 @@ TEST(OrderBookTest, BestBidUpdatesAfterCancellation)
     EXPECT_EQ(book.best_bid(), &low);
 }
 
-TEST(OrderBookTest, BestAskIsLowestPrice)
+TEST_F(OrderBookTest, BestAskIsLowestPrice)
 {
-    OrderBook book;
-
     auto high = make_sell_order(1, Price{105});
     auto low = make_sell_order(2, Price{100});
     auto middle = make_sell_order(3, Price{102});
@@ -197,10 +195,8 @@ TEST(OrderBookTest, BestAskIsLowestPrice)
     EXPECT_EQ(book.best_ask(), &low);
 }
 
-TEST(OrderBookTest, BestAskUpdatesAfterCancellation)
+TEST_F(OrderBookTest, BestAskUpdatesAfterCancellation)
 {
-    OrderBook book;
-
     auto low = make_sell_order(1, Price{100});
     auto high = make_sell_order(2, Price{105});
 
@@ -217,10 +213,8 @@ TEST(OrderBookTest, BestAskUpdatesAfterCancellation)
     EXPECT_EQ(book.best_ask(), &high);
 }
 
-TEST(OrderBookTest, BuyOrdersAtSamePricePreserveFIFO)
+TEST_F(OrderBookTest, BuyOrdersAtSamePricePreserveFIFO)
 {
-    OrderBook book;
-
     auto first = make_buy_order(1, Price{100}, Quantity{100}, 1);
     auto second = make_buy_order(2, Price{100}, Quantity{100}, 2);
     auto third = make_buy_order(3, Price{100}, Quantity{100}, 3);
@@ -236,10 +230,8 @@ TEST(OrderBookTest, BuyOrdersAtSamePricePreserveFIFO)
     EXPECT_EQ(book.best_bid(), &first);
 }
 
-TEST(OrderBookTest, SellOrdersAtSamePricePreserveFIFO)
+TEST_F(OrderBookTest, SellOrdersAtSamePricePreserveFIFO)
 {
-    OrderBook book;
-
     auto first = make_sell_order(1, Price{100}, Quantity{100}, 1);
     auto second = make_sell_order(2, Price{100}, Quantity{100}, 2);
     auto third = make_sell_order(3, Price{100}, Quantity{100}, 3);
@@ -255,10 +247,8 @@ TEST(OrderBookTest, SellOrdersAtSamePricePreserveFIFO)
     EXPECT_EQ(book.best_ask(), &first);
 }
 
-TEST(OrderBookTest, BuyAndSellOrdersCanCoexist)
+TEST_F(OrderBookTest, BuyAndSellOrdersCanCoexist)
 {
-    OrderBook book;
-
     auto buy = make_buy_order(1, Price{100});
     auto sell = make_sell_order(2, Price{101});
 
@@ -275,10 +265,8 @@ TEST(OrderBookTest, BuyAndSellOrdersCanCoexist)
     EXPECT_EQ(book.find(2), &sell);
 }
 
-TEST(OrderBookTest, CancelsOrder)
+TEST_F(OrderBookTest, CancelsOrder)
 {
-    OrderBook book;
-
     auto order = make_buy_order(1, Price{100});
     activate(order);
 
@@ -294,17 +282,13 @@ TEST(OrderBookTest, CancelsOrder)
     EXPECT_TRUE(book.empty());
 }
 
-TEST(OrderBookTest, CancelsMissingOrder)
+TEST_F(OrderBookTest, CancelsMissingOrder)
 {
-    OrderBook book;
-
     EXPECT_FALSE(book.cancel(999));
 }
 
-TEST(OrderBookTest, CancelChangesOrderState)
+TEST_F(OrderBookTest, CancelChangesOrderState)
 {
-    OrderBook book;
-
     auto order = make_buy_order(1, Price{100});
     activate(order);
 
@@ -317,10 +301,8 @@ TEST(OrderBookTest, CancelChangesOrderState)
     EXPECT_EQ(order.state(), OrderState::Cancelled);
 }
 
-TEST(OrderBookTest, CannotCancelOrderTwice)
+TEST_F(OrderBookTest, CannotCancelOrderTwice)
 {
-    OrderBook book;
-
     auto order = make_buy_order(1, Price{100});
     activate(order);
 
@@ -331,10 +313,8 @@ TEST(OrderBookTest, CannotCancelOrderTwice)
     EXPECT_FALSE(book.cancel(order.id()));
 }
 
-TEST(OrderBookTest, CannotCancelInactiveOrder)
+TEST_F(OrderBookTest, CannotCancelInactiveOrder)
 {
-    OrderBook book;
-
     auto order = make_buy_order(1, Price{100});
 
     EXPECT_EQ(order.state(), OrderState::New);
@@ -342,10 +322,8 @@ TEST(OrderBookTest, CannotCancelInactiveOrder)
     EXPECT_FALSE(book.cancel(order.id()));
 }
 
-TEST(OrderBookTest, PartiallyFilledOrderCanBeCancelled)
+TEST_F(OrderBookTest, PartiallyFilledOrderCanBeCancelled)
 {
-    OrderBook book;
-
     auto order = make_buy_order(1, Price{100}, Quantity{100});
 
     activate(order);
@@ -365,10 +343,8 @@ TEST(OrderBookTest, PartiallyFilledOrderCanBeCancelled)
     EXPECT_TRUE(book.empty());
 }
 
-TEST(OrderBookTest, CancellingOnlyOrderRemovesPriceLevel)
+TEST_F(OrderBookTest, CancellingOnlyOrderRemovesPriceLevel)
 {
-    OrderBook book;
-
     auto order = make_buy_order(1, Price{100});
     activate(order);
 
@@ -380,10 +356,8 @@ TEST(OrderBookTest, CancellingOnlyOrderRemovesPriceLevel)
     EXPECT_TRUE(book.empty());
 }
 
-TEST(OrderBookTest, CancellingBestBidRevealsNextPrice)
+TEST_F(OrderBookTest, CancellingBestBidRevealsNextPrice)
 {
-    OrderBook book;
-
     auto best = make_buy_order(1, Price{105});
     auto next = make_buy_order(2, Price{100});
 
@@ -400,10 +374,8 @@ TEST(OrderBookTest, CancellingBestBidRevealsNextPrice)
     EXPECT_EQ(book.best_bid(), &next);
 }
 
-TEST(OrderBookTest, CancellingBestAskRevealsNextPrice)
+TEST_F(OrderBookTest, CancellingBestAskRevealsNextPrice)
 {
-    OrderBook book;
-
     auto best = make_sell_order(1, Price{100});
     auto next = make_sell_order(2, Price{105});
 
@@ -420,10 +392,8 @@ TEST(OrderBookTest, CancellingBestAskRevealsNextPrice)
     EXPECT_EQ(book.best_ask(), &next);
 }
 
-TEST(OrderBookTest, CancellingFirstBuyOrderPreservesRemainingFIFO)
+TEST_F(OrderBookTest, CancellingFirstBuyOrderPreservesRemainingFIFO)
 {
-    OrderBook book;
-
     auto first = make_buy_order(1, Price{100});
     auto second = make_buy_order(2, Price{100});
     auto third = make_buy_order(3, Price{100});
@@ -441,10 +411,8 @@ TEST(OrderBookTest, CancellingFirstBuyOrderPreservesRemainingFIFO)
     EXPECT_EQ(book.best_bid(), &second);
 }
 
-TEST(OrderBookTest, CancellingMiddleBuyOrderPreservesFIFO)
+TEST_F(OrderBookTest, CancellingMiddleBuyOrderPreservesFIFO)
 {
-    OrderBook book;
-
     auto first = make_buy_order(1, Price{100});
     auto second = make_buy_order(2, Price{100});
     auto third = make_buy_order(3, Price{100});
@@ -466,10 +434,8 @@ TEST(OrderBookTest, CancellingMiddleBuyOrderPreservesFIFO)
     EXPECT_EQ(book.best_bid(), &third);
 }
 
-TEST(OrderBookTest, CompleteOrderLifecycle)
+TEST_F(OrderBookTest, CompleteOrderLifecycle)
 {
-    OrderBook book;
-
     auto order = make_buy_order(1, Price{100}, Quantity{100});
 
     EXPECT_EQ(order.state(), OrderState::New);
@@ -499,10 +465,8 @@ TEST(OrderBookTest, CompleteOrderLifecycle)
     EXPECT_TRUE(book.empty());
 }
 
-TEST(OrderBookTest, HandlesMultipleOrdersAcrossMultiplePriceLevels)
+TEST_F(OrderBookTest, HandlesMultipleOrdersAcrossMultiplePriceLevels)
 {
-    OrderBook book;
-
     auto bid1 = make_buy_order(1, Price{100});
     auto bid2 = make_buy_order(2, Price{105});
     auto bid3 = make_buy_order(3, Price{102});
@@ -541,10 +505,8 @@ TEST(OrderBookTest, HandlesMultipleOrdersAcrossMultiplePriceLevels)
     EXPECT_FALSE(book.empty());
 }
 
-TEST(OrderBookTest, ConstBestBidWorks)
+TEST_F(OrderBookTest, ConstBestBidWorks)
 {
-    OrderBook book;
-
     auto order = make_buy_order(1, Price{100});
     activate(order);
 
@@ -555,10 +517,8 @@ TEST(OrderBookTest, ConstBestBidWorks)
     EXPECT_EQ(const_book.best_bid(), &order);
 }
 
-TEST(OrderBookTest, ConstBestAskWorks)
+TEST_F(OrderBookTest, ConstBestAskWorks)
 {
-    OrderBook book;
-
     auto order = make_sell_order(1, Price{100});
     activate(order);
 
@@ -569,10 +529,8 @@ TEST(OrderBookTest, ConstBestAskWorks)
     EXPECT_EQ(const_book.best_ask(), &order);
 }
 
-TEST(OrderBookTest, LevelTotalAfterPartialExecute)
+TEST_F(OrderBookTest, LevelTotalAfterPartialExecute)
 {
-    OrderBook book;
-
     auto order1 = make_buy_order(1, Price{100}, Quantity{100});
     auto order2 = make_buy_order(2, Price{100}, Quantity{50});
     activate(order1);
@@ -580,7 +538,7 @@ TEST(OrderBookTest, LevelTotalAfterPartialExecute)
     ASSERT_TRUE(book.add(order1));
     ASSERT_TRUE(book.add(order2));
 
-    const PriceLevel& level = book.bids().at(Price{100});
+    const PriceLevel& level = *book.level(Side::Buy, Price{100});
     EXPECT_EQ(level.total_quantity(), 150u);
 
     ASSERT_TRUE(book.execute(1, Quantity{40}));
@@ -592,10 +550,8 @@ TEST(OrderBookTest, LevelTotalAfterPartialExecute)
     EXPECT_EQ(level.order_count(), 1u);
 }
 
-TEST(OrderBookTest, LevelTotalAfterPartialCancel)
+TEST_F(OrderBookTest, LevelTotalAfterPartialCancel)
 {
-    OrderBook book;
-
     auto order1 = make_sell_order(1, Price{100}, Quantity{100});
     auto order2 = make_sell_order(2, Price{100}, Quantity{50});
     activate(order1);
@@ -603,7 +559,7 @@ TEST(OrderBookTest, LevelTotalAfterPartialCancel)
     ASSERT_TRUE(book.add(order1));
     ASSERT_TRUE(book.add(order2));
 
-    const PriceLevel& level = book.asks().at(Price{100});
+    const PriceLevel& level = *book.level(Side::Sell, Price{100});
 
     ASSERT_TRUE(book.cancel(2, Quantity{20}));
     EXPECT_EQ(level.total_quantity(), 130u);
@@ -613,10 +569,8 @@ TEST(OrderBookTest, LevelTotalAfterPartialCancel)
     EXPECT_EQ(level.order_count(), 1u);
 }
 
-TEST(OrderBookTest, LevelTotalAfterErase)
+TEST_F(OrderBookTest, LevelTotalAfterErase)
 {
-    OrderBook book;
-
     auto order1 = make_buy_order(1, Price{100}, Quantity{100});
     auto order2 = make_buy_order(2, Price{100}, Quantity{50});
     activate(order1);
@@ -625,15 +579,92 @@ TEST(OrderBookTest, LevelTotalAfterErase)
     ASSERT_TRUE(book.add(order2));
     ASSERT_TRUE(book.execute(2, Quantity{10}));
 
-    const PriceLevel& level = book.bids().at(Price{100});
+    const PriceLevel& level = *book.level(Side::Buy, Price{100});
 
     ASSERT_TRUE(book.erase(2));
     EXPECT_EQ(level.total_quantity(), 100u);
     EXPECT_EQ(book.size(), 1u);
 
     ASSERT_TRUE(book.erase(1));
-    EXPECT_TRUE(book.bids().empty());
+    EXPECT_EQ(book.best(Side::Buy), nullptr);
     EXPECT_EQ(book.size(), 0u);
+}
+
+TEST_F(OrderBookTest, LevelsStayBestFirstWhereverANewOneGoes)
+{
+    std::vector<Order> orders;
+    orders.reserve(10);
+    for (const std::int64_t price : {100, 102, 101, 99, 103}) {
+        orders.push_back(make_buy_order(static_cast<OrderId>(orders.size() + 1), Price{price}));
+        orders.push_back(make_sell_order(static_cast<OrderId>(orders.size() + 1), Price{price + 10}));
+    }
+    for (Order& order : orders) {
+        activate(order);
+        ASSERT_TRUE(book.add(order));
+    }
+
+    EXPECT_EQ(prices(Side::Buy), (std::vector<std::int64_t>{103, 102, 101, 100, 99}));
+    EXPECT_EQ(prices(Side::Sell), (std::vector<std::int64_t>{109, 110, 111, 112, 113}));
+    EXPECT_EQ(book.level_count(), 10u);
+    EXPECT_EQ(storage.levels.in_use(), 10u);
+    EXPECT_EQ(storage.level_index.size(), 10u);
+}
+
+TEST_F(OrderBookTest, AnEmptiedLevelLeavesItsListAndTheStorage)
+{
+    std::vector<Order> orders;
+    orders.reserve(5);
+    for (const std::int64_t price : {100, 101, 102, 103, 101}) {
+        orders.push_back(make_buy_order(static_cast<OrderId>(orders.size() + 1), Price{price}));
+        activate(orders.back());
+        ASSERT_TRUE(book.add(orders.back()));
+    }
+
+    ASSERT_TRUE(book.erase(3));  // the middle level, 102
+    EXPECT_EQ(prices(Side::Buy), (std::vector<std::int64_t>{103, 101, 100}));
+    ASSERT_TRUE(book.erase(4));  // the best, 103
+    EXPECT_EQ(prices(Side::Buy), (std::vector<std::int64_t>{101, 100}));
+    EXPECT_EQ(book.best_bid(), &orders[1]);
+    ASSERT_TRUE(book.erase(1));  // the worst, 100
+    ASSERT_TRUE(book.erase(2));  // 101 keeps order 5
+    EXPECT_EQ(prices(Side::Buy), (std::vector<std::int64_t>{101}));
+    EXPECT_EQ(book.level(Side::Buy, Price{102}), nullptr);
+    EXPECT_EQ(storage.levels.in_use(), 1u);
+    EXPECT_EQ(storage.level_index.size(), 1u);
+    EXPECT_EQ(storage.order_index.size(), 1u);
+
+    ASSERT_TRUE(book.erase(5));
+    EXPECT_EQ(book.best(Side::Buy), nullptr);
+    EXPECT_EQ(storage.levels.in_use(), 0u);
+    EXPECT_EQ(storage.level_index.size(), 0u);
+}
+
+TEST_F(OrderBookTest, RoomNamesTheFirstFullStructure)
+{
+    BookStorage small{BookCapacity{.orders = 0, .order_index = 8, .levels = 2, .level_index = 8}};
+    OrderBook tight{1, small};
+    std::vector<Order> orders;
+    orders.reserve(9);
+    for (OrderId id = 1; id <= 9; ++id) {
+        orders.push_back(make_buy_order(id, Price{id <= 7 ? 100 : 101}));
+        activate(orders.back());
+    }
+
+    for (OrderId id = 1; id <= 7; ++id) {
+        ASSERT_TRUE(tight.add(orders[id - 1]));
+    }
+    EXPECT_EQ(tight.room(Side::Buy, Price{101}), BookStructure::None);
+    ASSERT_TRUE(tight.add(orders[7]));  // the second level
+    EXPECT_EQ(tight.room(Side::Buy, Price{102}), BookStructure::OrderIndex);
+    EXPECT_FALSE(tight.add(orders[8]));
+    EXPECT_EQ(tight.size(), 8u);
+
+    ASSERT_TRUE(tight.erase(1));
+    EXPECT_EQ(tight.room(Side::Buy, Price{100}), BookStructure::None);
+    EXPECT_EQ(tight.room(Side::Buy, Price{102}), BookStructure::LevelPool);
+    EXPECT_EQ(tight.room(Side::Buy, Price{102}, &orders[7]), BookStructure::None);  // 101 empties first
+    EXPECT_EQ(tight.room(Side::Buy, Price{102}, &orders[1]), BookStructure::LevelPool);
+    EXPECT_EQ(book.room(Side::Buy, Price{102}), BookStructure::None);  // another storage
 }
 
 } // namespace simulator

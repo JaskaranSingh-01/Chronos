@@ -10,7 +10,8 @@ namespace {
 TEST(OrderPoolIntegrationTest, PooledOrdersCanBeAddedToOrderBook)
 {
     OrderPool pool{10};
-    OrderBook book;
+    BookStorage storage{10};
+    OrderBook book{0, storage};
 
     Order* order = pool.acquire(1, Side::Buy, Price{100}, Quantity{100}, Timestamp{10});
 
@@ -30,7 +31,8 @@ TEST(OrderPoolIntegrationTest, PooledOrdersCanBeAddedToOrderBook)
 TEST(OrderPoolIntegrationTest, RejectsReleaseWhileInBook)
 {
     OrderPool pool{2};
-    OrderBook book;
+    BookStorage storage{2};
+    OrderBook book{0, storage};
 
     Order* order = pool.acquire(1, Side::Buy, Price{100}, Quantity{100}, Timestamp{10});
 

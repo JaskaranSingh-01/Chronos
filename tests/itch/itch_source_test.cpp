@@ -686,7 +686,7 @@ TEST(ItchEndToEndTest, ExecutedWithPriceReducesTheOrderAtItsOwnPrice)
     EXPECT_EQ(book.quantity_at(Side::Buy, Price{10050}), 0u);
 }
 
-// SPY has an R but is not selected; AAPL and MSFT share one OrderPool.
+// SPY has an R but is not selected; AAPL and MSFT share one BookStorage.
 TEST(ItchEndToEndTest, TwoSymbolsReplayIntoTheirOwnBooks)
 {
     ItchBuilder itch;
@@ -715,8 +715,8 @@ TEST(ItchEndToEndTest, TwoSymbolsReplayIntoTheirOwnBooks)
 
     InstrumentRegistry registry{2};
     ItchSource source{itch.bytes(), config, registry};
-    OrderPool pool{8};
-    MarketBooks books{registry, pool};
+    BookStorage storage{8};
+    MarketBooks books{registry, storage};
     const BooksReplayReport report =
         MarketReplay::run(source, books, {.check_invariants_every = 1, .session_midnight = midnight});
     const ReplayReport& total = report.total;
@@ -758,7 +758,7 @@ TEST(ItchEndToEndTest, TwoSymbolsReplayIntoTheirOwnBooks)
     EXPECT_EQ(msft_report.orders_left, 1u);
 
     EXPECT_EQ(report.peak_live_orders, 4u);
-    EXPECT_EQ(pool.in_use(), 3u);
+    EXPECT_EQ(storage.orders.in_use(), 3u);
 
     // Trades leave both books as the order messages left them.
     const MarketBook& aapl_book = books[0];

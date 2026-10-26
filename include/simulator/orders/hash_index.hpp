@@ -25,6 +25,7 @@ public:
     explicit HashIndex(std::size_t capacity)
     {
         const std::size_t slots = std::bit_ceil(std::max<std::size_t>(16, 2 * capacity));
+        // ponytail: value-initialised, so every page is touched up front; mmap zero pages if resident memory matters.
         slots_ = std::make_unique<Slot[]>(slots);
         mask_ = slots - 1;
         shift_ = 64 - std::countr_zero(slots);
@@ -51,7 +52,7 @@ public:
     }
 
     // False, changing nothing, if full. The caller knows the key is absent.
-    bool add(const Slot& entry) noexcept
+    [[nodiscard]] bool add(const Slot& entry) noexcept
     {
         if (full()) {
             return false;
@@ -114,4 +115,4 @@ public:
     }
 };
 
-} // namespace simulator
+}  // namespace simulator

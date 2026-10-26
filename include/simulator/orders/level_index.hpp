@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cassert>
 #include <cstddef>
 #include <cstdint>
 
@@ -60,8 +61,9 @@ public:
     }
 
     // False, changing nothing, if full; (book, side, price) is absent and `level` is not 0.
-    bool add(SymbolId book, Side side, Price price, LevelRef level) noexcept
+    [[nodiscard]] bool add(SymbolId book, Side side, Price price, LevelRef level) noexcept
     {
+        assert(level != 0);
         return table_.add(Slot{.price = price, .book = book, .entry = level << 1 | static_cast<std::uint32_t>(side)});
     }
 

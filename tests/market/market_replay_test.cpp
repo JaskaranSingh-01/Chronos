@@ -367,8 +367,8 @@ TEST(MarketReplayBooksTest, RoutesEachEventToTheBookOfItsSymbol)
         on(2, event(5, T::Delete, 1)),        on(2, event(6, T::Delete, 7)),           // UnknownOrder
         on(9, add(7, 3, Side::Buy, 100, 10))};  // not registered: WrongSymbol
 
-    OrderPool pool{8};
-    MarketBooks books{registry, pool};
+    BookStorage storage{8};
+    MarketBooks books{registry, storage};
     VectorSource source{input};
     const BooksReplayReport report = MarketReplay::run(source, books, {});
 
@@ -402,14 +402,14 @@ TEST(MarketReplayBooksTest, RoutesEachEventToTheBookOfItsSymbol)
     EXPECT_EQ(books[0].quantity_at(Side::Buy, Price{100}), 6u);
     EXPECT_EQ(books[2].quantity_at(Side::Sell, Price{201}), 5u);
     EXPECT_EQ(report.peak_live_orders, 3u);  // after the third Add
-    EXPECT_EQ(pool.in_use(), 2u);
+    EXPECT_EQ(storage.orders.in_use(), 2u);
 
     InvariantError error{InvariantError::None};
     SymbolId failed{0};
     EXPECT_TRUE(books.check_invariants(error, failed)) << to_string(error);
 }
 
-TEST(MarketReplayBooksTest, AFullSharedPoolRejectsAddsAsPoolExhausted)
+TEST(MarketReplayBooksTest, AFullSharedPoolRejectsAddsAsCapacityExhausted)
 {
     const InstrumentRegistry registry = registry_of(2);
     const std::vector<MarketEvent> input{on(0, add(1, 1, Side::Buy, 100, 10)), on(1, add(2, 1, Side::Buy, 100, 10)),
@@ -417,15 +417,15 @@ TEST(MarketReplayBooksTest, AFullSharedPoolRejectsAddsAsPoolExhausted)
                                          on(0, event(4, MarketEventType::Delete, 1)),
                                          on(1, add(5, 2, Side::Buy, 100, 10))};
 
-    OrderPool pool{2};
-    MarketBooks books{registry, pool};
+    BookStorage storage{2};
+    MarketBooks books{registry, storage};
     VectorSource source{input};
     const BooksReplayReport report = MarketReplay::run(source, books, {});
 
     EXPECT_TRUE(report.total.succeeded());
     EXPECT_EQ(report.total.applied(), 4u);
-    EXPECT_EQ(by_result(report.total, ApplyResult::PoolExhausted), 1u);
-    EXPECT_EQ(by_result(report.symbols[1], ApplyResult::PoolExhausted), 1u);
+    EXPECT_EQ(by_result(report.total, ApplyResult::CapacityExhausted), 1u);
+    EXPECT_EQ(by_result(report.symbols[1], ApplyResult::CapacityExhausted), 1u);
     EXPECT_EQ(report.symbols[1].orders_left, 2u);
     EXPECT_EQ(report.peak_live_orders, 2u);
 }
@@ -440,8 +440,8 @@ TEST(MarketReplayBooksTest, ChecksTheTouchedBookEveryNAppliedEventsAndNamesTheFa
         on(1, add(open, 1, Side::Buy, 101, 10)), on(1, add(open, 2, Side::Sell, 100, 10)),  // crosses book 1 in RTH
         on(0, add(open, 3, Side::Sell, 103, 10))};
 
-    OrderPool pool{8};
-    MarketBooks books{registry, pool};
+    BookStorage storage{8};
+    MarketBooks books{registry, storage};
     VectorSource source{input};
     const BooksReplayReport report =
         MarketReplay::run(source, books, {.check_invariants_every = 1, .session_midnight = midnight});
@@ -456,8 +456,8 @@ TEST(MarketReplayBooksTest, ChecksTheTouchedBookEveryNAppliedEventsAndNamesTheFa
 TEST(MarketReplayBooksTest, InvariantsCompareTheSharedPoolWithAllBooks)
 {
     const InstrumentRegistry registry = registry_of(2);
-    OrderPool pool{4};
-    MarketBooks books{registry, pool};
+    BookStorage storage{4};
+    MarketBooks books{registry, storage};
     ASSERT_NE(books.find(1), nullptr);
     ASSERT_EQ(books.find(1)->apply(on(1, add(1, 1, Side::Buy, 100, 10))), ApplyResult::Applied);
     EXPECT_EQ(books.find(5), nullptr);
@@ -466,10 +466,33 @@ TEST(MarketReplayBooksTest, InvariantsCompareTheSharedPoolWithAllBooks)
     SymbolId failed{0};
     EXPECT_TRUE(books.check_invariants(error, failed));
 
-    MarketBook stray{7, pool};  // holds a slot no book in `books` accounts for
+    MarketBook stray{7, storage};  // holds a slot no book in `books` accounts for
     ASSERT_EQ(stray.apply(on(7, add(1, 1, Side::Buy, 100, 10))), ApplyResult::Applied);
     EXPECT_FALSE(books.check_invariants(error, failed));
     EXPECT_EQ(error, InvariantError::PoolCountMismatch);
+}
+
+TEST(MarketReplayBooksTest, InvariantsCompareTheSharedLevelsWithAllBooks)
+{
+    const InstrumentRegistry registry = registry_of(2);
+    BookStorage storage{4};
+    MarketBooks books{registry, storage};
+    ASSERT_EQ(books.find(0)->apply(on(0, add(1, 1, Side::Buy, 100, 10))), ApplyResult::Applied);
+    InvariantError error{InvariantError::None};
+    SymbolId failed{0};
+    EXPECT_TRUE(books.check_invariants(error, failed));
+
+    PriceLevel* stray = storage.levels.acquire(Price{1});  // a level no book holds
+    EXPECT_FALSE(books.check_invariants(error, failed));
+    EXPECT_EQ(error, InvariantError::LevelCountMismatch);
+    EXPECT_EQ(failed, 2u);
+    storage.levels.release(*stray);
+    EXPECT_TRUE(books.check_invariants(error, failed));
+
+    ASSERT_TRUE(storage.level_index.erase(0, Side::Buy, Price{100}));  // a book's level the index lost
+    EXPECT_FALSE(books.check_invariants(error, failed));
+    EXPECT_EQ(error, InvariantError::LevelNotIndexed);
+    EXPECT_EQ(failed, 0u);
 }
 
 TEST(MarketReplayBooksTest, LatencyRecordsOneSamplePerFullBatch)
@@ -480,8 +503,8 @@ TEST(MarketReplayBooksTest, LatencyRecordsOneSamplePerFullBatch)
         input.push_back(on(static_cast<SymbolId>(id % 2), add(static_cast<Timestamp>(id), id, Side::Sell, 100, 10)));
     }
 
-    OrderPool pool{16};
-    MarketBooks books{registry, pool};
+    BookStorage storage{16};
+    MarketBooks books{registry, storage};
     VectorSource source{input};
     LatencyHistogram latency;
     const BooksReplayReport report = MarketReplay::run(source, books, {.latency = &latency, .latency_batch = 3});
@@ -512,8 +535,8 @@ TEST(MarketReplayBooksTest, CombinedDigestIsStableAndChangesWithAnyBook)
 
     const ReplayOptions options{.check_invariants_every = 50};
     auto replay = [&](const std::vector<MarketEvent>& events, BooksReplayReport& report) {
-        OrderPool pool{4'096};
-        MarketBooks books{registry, pool};
+        BookStorage storage{4'096};
+        MarketBooks books{registry, storage};
         VectorSource source{events};
         report = MarketReplay::run(source, books, options);
         return books.digest();

@@ -7,6 +7,7 @@
 #include "simulator/types/order_state.hpp"
 #include "simulator/types/price.hpp"
 #include "simulator/types/quantity.hpp"
+#include "simulator/types/symbol_id.hpp"
 #include "simulator/types/timestamp.hpp"
 
 namespace simulator {
@@ -27,6 +28,7 @@ private:
     Order* prev_{nullptr};
     Order* next_{nullptr};
     PriceLevel* level_{nullptr};
+    SymbolId book_{0};  // the book it rests in, set by OrderBook::add, which OrderIndex keys on
 
     // 1-byte fields last so an Order packs into 80 bytes.
     Side side_{Side::Buy};
@@ -78,6 +80,14 @@ public:
     const PriceLevel* level() const noexcept
     {
         return level_;
+    }
+    SymbolId book() const noexcept
+    {
+        return book_;
+    }
+    void set_book(SymbolId book) noexcept
+    {
+        book_ = book;
     }
 };
 

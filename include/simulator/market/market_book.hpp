@@ -2,12 +2,12 @@
 
 #include <cstddef>
 #include <cstdint>
-#include <optional>
+#include <memory>
 #include <span>
 
 #include "simulator/market/market_event.hpp"
+#include "simulator/orders/book_storage.hpp"
 #include "simulator/orders/order_book.hpp"
-#include "simulator/orders/order_pool.hpp"
 
 namespace simulator {
 
@@ -20,7 +20,7 @@ enum class ApplyResult : std::uint8_t {
     ZeroQuantity,      // Add/Execute/Cancel/Replace with quantity 0
     ExceedsRemaining,  // Execute/Cancel of more than the order's remaining
     InvalidReplace,    // Replace with new_order_id == order_id
-    PoolExhausted,     // Add with no free order slot
+    CapacityExhausted, // Add or Replace that a full pool or index has no room for; exhausted() names it
     Unsupported        // Modify
 };
 
@@ -46,8 +46,11 @@ enum class InvariantError : std::uint8_t {
     EmptyLevel,
     SequenceNotIncreasing,  // FIFO broken: sequence must rise from head to tail
     InactiveOrderInBook,    // not Active/PartiallyFilled, or remaining == 0
-    PoolCountMismatch,      // pool slots in use != order_count() (of all books, for a shared pool)
-    CrossedInRth            // best bid > best ask during regular trading hours, while Trading
+    PoolCountMismatch,      // order pool slots in use or order index size != order_count() (of all books, if shared)
+    CrossedInRth,           // best bid > best ask during regular trading hours, while Trading
+    LevelOutOfOrder,        // a side's list not strictly best first, or its links disagree
+    LevelNotIndexed,        // the level index does not map a level's price to it
+    LevelCountMismatch      // level pool slots in use or level index size != live levels (of all books, if shared)
 };
 
 // True in [09:30, 16:00) exchange-local; session_midnight comes from session_midnight_ns().
@@ -75,25 +78,27 @@ class MarketBook
 private:
     SymbolId symbol_;
     TradingState trading_state_{TradingState::Trading};
-    std::optional<OrderPool> owned_pool_;  // empty when the pool is shared
-    OrderPool* pool_;                      // owned_pool_ or the shared one
+    std::unique_ptr<BookStorage> owned_;  // null when the storage is shared
+    BookStorage* storage_;                // owned_ or the shared one
     OrderBook book_;
     std::uint64_t next_sequence_{1};
     std::size_t peak_order_count_{0};
+    BookStructure exhausted_{BookStructure::None};
 
     ApplyResult add(const MarketEvent& event) noexcept;
     ApplyResult reduce(const MarketEvent& event) noexcept;  // Execute, Cancel
     ApplyResult erase(const MarketEvent& event) noexcept;   // Delete
     ApplyResult replace(const MarketEvent& event) noexcept;
     ApplyResult clear() noexcept;
+    ApplyResult full(BookStructure structure) noexcept;     // CapacityExhausted, naming `structure`
     void insert(Order& order) noexcept;                     // activate, sequence, link
 
 public:
-    // Reserves `order_capacity` order slots of its own up front.
-    MarketBook(SymbolId symbol, std::size_t order_capacity);
+    // Reserves a BookStorage of its own for `capacity` orders up front.
+    MarketBook(SymbolId symbol, std::size_t capacity);
 
-    // Takes order slots from `pool`, which other books may share and which outlives the book.
-    MarketBook(SymbolId symbol, OrderPool& pool) noexcept;
+    // Keeps its orders and levels in `storage`, which other books may share and which outlives the book.
+    MarketBook(SymbolId symbol, BookStorage& storage) noexcept;
 
     MarketBook(const MarketBook&) = delete;
     MarketBook& operator=(const MarketBook&) = delete;
@@ -128,32 +133,24 @@ public:
     template <class F>
     void visit_levels(Side side, F&& f) const noexcept
     {
-        auto visit = [&f](const auto& levels) {
-            for (const auto& [price, level] : levels) {
-                if (!f(LevelInfo{price, level.total_quantity(), level.order_count()})) {
-                    return;
-                }
+        for (const PriceLevel* level = book_.best(side); level != nullptr; level = level->worse()) {
+            if (!f(LevelInfo{level->price(), level->total_quantity(), level->order_count()})) {
+                return;
             }
-        };
-        side == Side::Buy ? visit(book_.bids()) : visit(book_.asks());
+        }
     }
 
     // Calls f(const Order&) for the orders at `price` on `side`, front of the queue first; stops when f returns false.
     template <class F>
     void visit_orders(Side side, Price price, F&& f) const noexcept
     {
-        auto visit = [&](const auto& levels) {
-            const auto level = levels.find(price);
-            if (level == levels.end()) {
+        const PriceLevel* level = book_.level(side, price);
+        for (const Order* order = level != nullptr ? level->front() : nullptr; order != nullptr;
+             order = order->next()) {
+            if (!f(*order)) {
                 return;
             }
-            for (const Order* order = level->second.front(); order != nullptr; order = order->next()) {
-                if (!f(*order)) {
-                    return;
-                }
-            }
-        };
-        side == Side::Buy ? visit(book_.bids()) : visit(book_.asks());
+        }
     }
 
     // Sequence of the most recent Add or Replace; 0 before the first.
@@ -169,12 +166,22 @@ public:
     {
         return peak_order_count_;
     }
+    std::size_t level_count() const noexcept
+    {
+        return book_.level_count();
+    }
+
+    // The structure the last CapacityExhausted found full; None before one.
+    BookStructure exhausted() const noexcept
+    {
+        return exhausted_;
+    }
 
     bool is_crossed() const noexcept;  // best bid >  best ask
     bool is_locked() const noexcept;  // best bid == best ask
 
-    // O(orders); on failure writes the first broken invariant to `error`. A crossed book
-    // fails only if `rth` and Trading. The pool count is checked only for an owned pool.
+    // O(orders); on failure writes the first broken invariant to `error`. A crossed book fails only if `rth` and
+    // Trading. The storage's counts are checked only for an owned storage (MarketBooks checks a shared one).
     bool check_invariants(InvariantError& error, bool rth = false) const noexcept;
 
     // FNV-1a over (side, price, id, remaining, sequence) of every order, bids then asks,

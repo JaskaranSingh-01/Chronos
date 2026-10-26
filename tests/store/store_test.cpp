@@ -725,8 +725,8 @@ TEST(StoreRealDataTest, EverySymbolsSegmentReplaysToItsBookOfTheFullDay)
                     .utc_offset = us_eastern_utc_offset(date),
                     .allow_truncated_tail = true},
                    registry};
-    OrderPool pool{default_books_capacity};
-    MarketBooks books{registry, pool};
+    BookStorage storage{default_books_capacity};
+    MarketBooks books{registry, storage};
     ASSERT_EQ(MarketReplay::run(all, books, options).total.failure, ReplayFailure::None);
     std::map<std::string, SymbolId, std::less<>> ids;
     for (SymbolId id = 0; id < registry.size(); ++id) {
