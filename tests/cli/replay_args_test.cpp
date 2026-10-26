@@ -252,8 +252,8 @@ TEST(ReplayArgsTest, StrategyDefaultsAndBadValues)
 TEST(ReplayArgsTest, ParsesTheOrbAndRefusesARangeOrClipItCouldNotTradeWith)
 {
     auto orb = [](std::initializer_list<std::string_view> more) {
-        std::vector<std::string_view> args{"backtest", "day.bin", "--symbol", "SPY", "--date", "2019-12-30",
-                                           "--strategy", "orb"};
+        std::vector<std::string_view> args{"backtest", "day.bin",    "--symbol",   "SPY",
+                                           "--date",   "2019-12-30", "--strategy", "orb"};
         args.insert(args.end(), more);
         return parse(args);
     };
