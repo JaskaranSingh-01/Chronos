@@ -77,6 +77,7 @@ PriceLevel* BasicOrderBook<D>::find_level(Side side, Price price) const noexcept
 
 // Links a new level after every level better than it. The list walks from the best, O(levels passed); the ladder,
 // inside its window, scans from the level's slot towards the best, which the window holds, for the nearest slot set.
+// ponytail: the list's walk is the book thread's largest cost (44 % on the full day); a tick-scaled ladder skips it.
 template <Dispatch D>
 PriceLevel& BasicOrderBook<D>::new_level(Side side, Price price) noexcept
 {

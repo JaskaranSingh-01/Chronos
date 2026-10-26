@@ -1,16 +1,17 @@
 # Engine round: zero allocations, the level backends and the pipeline (2026-10-24 to 2026-10-26)
 
 Price levels moved into a preallocated pool, found through an open-addressing index, as a list per side or a list
-with a 256-tick ladder window (`--book list|ladder`); the replay allocates nothing; and `--threads 2` decodes on a
-thread of its own, through a single-producer single-consumer ring of 65,536 events. Every number below comes from the
-JSON in `bench/results/`; `bench/summary.py <folder>...` prints the tables.
+with a ladder window of 256 price units, $0.0256 in ITCH prices (`--book list|ladder`); the replay allocates
+nothing; and `--threads 2` decodes on a thread of its own, through a single-producer single-consumer ring of 65,536
+events. Every number below comes from the JSON in `bench/results/`; `bench/summary.py <folder>...` prints the
+tables.
 
 ## The record
 
 | | |
 |---|---|
 | Engine code | `b6f3517` plus this round's changes, uncommitted when measured, so every JSON says `"dirty": true`; snapshot tree `e573a8c46fa04b31d556b03fa8e4f5fbb570d7ae` |
-| Baseline binary | `git archive b6f3517`, built `Release` the same way |
+| Baseline binary | `git archive b6f3517 \| tar -x -C $BASE_SRC`, then `cmake -S $BASE_SRC -B $BASE -DCMAKE_BUILD_TYPE=Release` and `cmake --build $BASE --target simulator`: `$BASE/simulator` (its JSON says build `unknown`, as the export has no git) |
 | Compiler, build | Apple LLVM 17.0.0 (clang-1700.0.13.5), CMake `Release` (`-O3 -DNDEBUG`), `build/bench` |
 | Machine | Apple M4 (4 performance + 6 efficiency cores), 16 GiB, Darwin 27.0.0, on AC power |
 | Input | `data/itch/12302019.NASDAQ_ITCH50.bin`, 8,251,407,909 bytes, SHA-256 `5d81c2e14a0f748b29c674b6a342796932702034b4dd341e39e9a9ec5bac610f` |
@@ -34,10 +35,18 @@ The commands, from the repo root:
 # correctness mode, each configuration
 build/bench/simulator replay $F --all --date 2019-12-30 --check-invariants 1024 --book B --threads T --json J
 
-# performance mode, interleaved: 3 rounds; each round runs the five in rotating order, each once the 1-minute
-# load average is below 4.5
-build/bench/simulator replay $F --all --date 2019-12-30 --latency --book B --threads T --json J   # the four
-$BASELINE/simulator replay $F --all --date 2019-12-30 --latency --json J                          # b6f3517
+# performance mode, interleaved: round r runs names[(k + r - 1) % 5] for k = 0..4, so the order rotates:
+#   round 1 baseline list-1 list-2 ladder-1 ladder-2; round 2 list-1 ... baseline; round 3 list-2 ... list-1
+F=data/itch/12302019.NASDAQ_ITCH50.bin P=bench/results/2026-10-24-b6f3517-dirty-interleaved
+names=(baseline list-1 list-2 ladder-1 ladder-2)
+quiet() { for _ in $(seq 1 36); do awk "BEGIN{exit !($(sysctl -n vm.loadavg | awk '{print $2}') < 4.5)}" && return; sleep 5; done; }
+for r in 1 2 3; do for k in 0 1 2 3 4; do
+  n=${names[$(( (k + r - 1) % 5 ))]}; quiet
+  if [ $n = baseline ]; then $BASE/simulator replay $F --all --date 2019-12-30 --latency --json $P-$n/full-$r.json
+  else build/bench/simulator replay $F --all --date 2019-12-30 --latency --book ${n%-*} --threads ${n##*-} \
+         --json $P-$n/full-$r.json; fi > $P-$n/full-$r.log
+done; done
+python3 bench/summary.py $P-baseline $P-list-1 $P-list-2 $P-ladder-1 $P-ladder-2 > $P-matrix.md
 
 # the default's slices, micro-benchmarks and profile
 FLAGS="--book list --threads 2" FULL_RUNS=0 SLICE_RUNS=5 BENCH_REPS=5 bench/run.sh list-2-bench
@@ -72,7 +81,8 @@ Full day, `--all`, median of 3 interleaved runs:
 | allocations | 43,910,763 | 0 | 0 | 0 | 0 |
 | heap change bytes | not measured | 0 | 0 | 0 | 0 |
 
-The ranges (min-max of the 3 runs), events/s:
+`summary.py` labels each folder's run 1 "(cold)", but the interleaved runs rotate, so no run is colder than another.
+Every metric's min-max is in each folder's `summary.md`; events/s:
 
 | | min-max |
 |---|---|
@@ -142,8 +152,12 @@ The profile of the book thread (`profile-top.txt`, list × 2, self time inside `
 
 - **One thread is slower than the baseline** on the full day: list −14.6 %, ladder −17.7 %. The baseline found
   levels in a per-book `std::map`; the list places a new level by walking from the best, and that walk is the
-  profile's largest cost. The ladder's window skips the walk near the touch (`BM_Churn` 29.6 against 61.3 ns, at a
-  cv of 23-35 %), but on this day it is slower than the list.
+  profile's largest cost. The ladder was meant to skip it, but its window counts price units, not exchange ticks:
+  256 units are $0.0256 at ITCH's four decimals, about one cent level per side. By construction it recentres whenever
+  the best moves a cent, and places a level two cents or more from the best by the same walk; how often that happened
+  on the day was not counted. Its median is below the list's, within overlapping ranges.
+  `BM_Churn` moves its touch in steps of 100 units, so it shares the mismatch; its 29.6 against 61.3 ns ran at a cv
+  of 23-35 %.
 - **Core placement.** A one-thread replay that lands on an efficiency core runs about half as fast. The first matrix
   ran `bench/run.sh` one configuration after another while other processes held the performance cores: medians
   list × 1 1,481,338, list × 2 2,611,822, ladder × 1 1,488,152 (one run at 2,883,377), ladder × 2 4,785,055 events/s.

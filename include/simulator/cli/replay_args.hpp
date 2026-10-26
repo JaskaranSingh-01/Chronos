@@ -33,7 +33,7 @@ inline constexpr std::string_view usage =
     "  --capacity N            order slots reserved for the book, at most 1073741824 (default 1048576);\n"
     "                          with --symbols or --all, shared by every book (default 4194304)\n"
     "  --book B                the price levels: list (default), each side a list found through an index;\n"
-    "                          or ladder, which adds a window of 256 ticks around each side's best\n"
+    "                          or ladder, which adds a window of 256 price units around each side's best\n"
     "  --threads N             2 (default): one thread decodes, one applies; 1: one thread does both\n"
     "  --json PATH             also write the results, metrics, build and input as JSON;\n"
     "                          backtest adds its config, fills, fees and PnL\n"

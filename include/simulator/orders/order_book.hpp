@@ -22,9 +22,9 @@ enum class Dispatch : std::uint8_t {
 
 // One symbol's price levels over Orders it links but does not own. Each side is a list of levels, best first, kept in
 // the storage's level pool; the storage's indices, which every book shares, find an order or a level (spec §2.2). With
-// the ladder backend, each side also keeps a window of ladder_window ticks, recentred on its best whenever the best
-// leaves the window's middle half, where a level is found by its slot and placed by the nearest slot set towards the
-// best (spec §2.3).
+// the ladder backend, each side also keeps a window of ladder_window price units, recentred on its best whenever the
+// best leaves the window's middle half, where a level is found by its slot and placed by the nearest slot set towards
+// the best (spec §2.3).
 template <Dispatch D>
 class BasicOrderBook
 {

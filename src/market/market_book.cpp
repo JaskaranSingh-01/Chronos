@@ -238,7 +238,7 @@ bool MarketBook::check_invariants(InvariantError& error, bool rth) const noexcep
                 return InvariantError::LevelOutOfOrder;
             }
 
-            if (book_.level(side, price) != level) {
+            if (storage_->level_index.find(symbol_, side, price) != storage_->levels.ref(*level)) {
                 return InvariantError::LevelNotIndexed;
             }
 

@@ -22,7 +22,7 @@ measured on 2026-10-24 and 2026-10-26. Every configuration and the previous engi
 | Books | 8,906, every one empty after the last event (20:00:00.097 ET) |
 | Peak live orders | 1,924,078, all books together |
 | Invariants | pass for all 8,906 books at the end of the run |
-| Combined digest | `6897f945bcef75c2`, identical in all 31 full-day runs of the engine round: four configurations and the previous engine |
+| Combined digest | `6897f945bcef75c2`, identical in all 34 full-day runs of the engine round: four configurations and the previous engine |
 
 From [`full-1.log`](bench/results/2026-10-24-b6f3517-dirty-interleaved-list-2/full-1.log):
 
@@ -53,12 +53,14 @@ Digest (combined) 6897f945bcef75c2
 
 What this evidence shows, and what it does not:
 
-- **0 rejections.** Every Add found a new order id and a free slot. Every Execute, Cancel, Delete and Replace
-  named a live order and stayed within its remaining size. A decoder or book bug (a skipped `F` or `C` message, a
+- **0 rejections.** Every Add found a new order id. Every Execute, Cancel, Delete and Replace named a live order
+  and stayed within its remaining size. (A full pool or index stops the run as `CapacityExhausted`; it is no
+  rejection.) A decoder or book bug (a skipped `F` or `C` message, a
   wrong field offset, a wrong replace) typically shows up as `UnknownOrder` or `ExceedsRemaining` rejections.
 - **Every book empty after the last message.** Every order added during the day was removed by later messages.
-- **Invariants** are checked at the end of the run: the order index matches the levels, level totals match their
-  orders, no level is empty, sequence numbers rise from head to tail (FIFO), and the pool count matches.
+- **Invariants** are checked at the end of the run: each side's levels are strictly ordered from the best, the order
+  and level indices map every order and level, level totals match their orders, no level is empty, sequence numbers
+  rise from head to tail (FIFO), the ladder's windows match its levels, and the pools' and indices' counts match.
   `--check-invariants N` also checks the book of every N-th applied event. Only those periodic checks test "not
   crossed during regular trading hours", because the end-of-run check falls after 16:00. The runs above used the
   end-of-run check only; the engine round's correctness runs (`--check-invariants 1024`) passed 258,271 periodic
@@ -130,7 +132,8 @@ The default, list × 2, against the baseline: events/s +22.0 %. On one thread th
 - **Interleaved runs.** A one-thread replay that lands on an efficiency core runs about half as fast, so runs made
   one configuration after another on a busy machine are not comparable: this round's first, sequential matrix
   measured one thread at about 1.48 M events/s, and the baseline measured alone that morning gave 2.00 M. Each run
-  above started once the load average was below 4.5.
+  above started once the load average was below 4.5; round 3 was re-run whole on 2026-10-26, after the Mac slept
+  through one of its runs.
 - **Per-event figures are a batch-derived per-event estimate.** Each sample is the mean ns/event of a batch of 1,024
   events, as `steady_clock` ticks every 41.67 ns on this machine and cannot time a single event. They show how the
   cost of an event varies across the day, not the latency of any one event. With two threads they are the book
@@ -268,8 +271,9 @@ pass, each into its own book:
 ./build/simulator replay data/itch/12302019.NASDAQ_ITCH50.bin --all --date 2019-12-30
 ```
 
-The second command is the full-day run of [Verified results](#verified-results). Its replay loop took about 131 s
-of wall time on the machine described under [Performance](#performance).
+The second command is the full-day run of [Verified results](#verified-results). With the defaults (`--book list
+--threads 2`) its replay loop takes about 54 s of wall time on the machine described under
+[Performance](#performance), and about 77 s with `--threads 1`.
 
 Once `chronos-serve` has built a day into its per-symbol store (see [Trading Terminal](#trading-terminal)), `replay`
 and `backtest` read one symbol's day from the store in place of the day file, its own bytes alone:
@@ -345,7 +349,9 @@ bench/run.sh [label]
 
 It builds `Release` with `-DCHRONOS_BENCH=ON` in `build/bench`, replays the full day 3 times and the slice 5 times,
 runs `simulator_bench` 5 times, profiles one more full-day replay with `sample` (macOS), and writes everything to
-`bench/results/<date>-<commit>[-dirty][-label]/`. It needs both data files and takes about 13 minutes.
+`bench/results/<date>-<commit>[-dirty][-label]/`. It needs both data files and takes about 5 minutes with the
+defaults. `FLAGS` passes options to every replay (`FLAGS="--book ladder --threads 1" bench/run.sh ladder-1`), and
+`FULL_RUNS`, `SLICE_RUNS` and `BENCH_REPS` set the counts (0 skips that part; `PROFILE=0` skips the profile).
 `bench/summary.py <folder>...` prints and compares the tables.
 
 ### Trading Terminal
@@ -382,7 +388,8 @@ session can be reproduced. The first line on stdout names the URL and that log; 
   that changes is built again at the next listing. A store file damaged after its build fails its checks when read,
   naming the symbol and day, and is not rebuilt on its own: delete `<store>/index.tsv` and restart to build every day
   again.
-- Options: `--host`, `--port` (default 8080), `--web`, `--token`, `--fsync`, `--allow-truncated-tail` and `--store`;
+- Options: `--host`, `--port` (default 8080), `--web`, `--token`, `--fsync`, `--allow-truncated-tail`, `--store` and
+  `--book`;
   `./build/chronos-serve --help` lists them.
 - The slice needs a day's file name, so link it into a directory of its own:
   `mkdir -p data/slice && ln -s ../itch/12302019.NASDAQ_ITCH50.first-256MiB.bin data/slice/12302019.NASDAQ_ITCH50.bin`,
@@ -661,7 +668,7 @@ options, both commands:
   --capacity N            order slots reserved for the book, at most 1073741824 (default 1048576);
                           with --symbols or --all, shared by every book (default 4194304)
   --book B                the price levels: list (default), each side a list found through an index;
-                          or ladder, which adds a window of 256 ticks around each side's best
+                          or ladder, which adds a window of 256 price units around each side's best
   --threads N             2 (default): one thread decodes, one applies; 1: one thread does both
   --json PATH             also write the results, metrics, build and input as JSON;
                           backtest adds its config, fills, fees and PnL
@@ -742,7 +749,7 @@ A bad argument prints a two-line error on stderr and exits 2. `--json PATH` writ
   `ItchSource`.
 - The L3 `MarketBook`, with invariant checks and digests. Multi-symbol replay over a shared order pool.
 - The full-day replay of every symbol with 0 rejections.
-- The benchmark harness, a profile, and two profile-driven optimisations (above).
+- The benchmark harness, a profile, and two profile-driven optimisations (see [`bench/RESULTS.md`](bench/RESULTS.md)).
 - The strategy layer: event loop, latency, fill model, portfolio with risk limits and fees, two toy strategies.
 - The CLI with `--help`, `--version`, documented exit codes and `--json`.
 - The Trading Terminal: `chronos-serve` (HTTP and WebSocket, a command log, reconnect and resync) and a React UI with
@@ -759,7 +766,8 @@ A bad argument prints a two-line error on stderr and exits 2. `--json PATH` writ
 **Not yet:**
 - **Regulatory sell fees:** SEC Section 31 and FINRA TAF.
 - **More performance work, each gated on the profile:** placing a new price level, now 44 % of the book thread's
-  time, then cheaper ITCH decoding.
+  time, by a ladder whose window counts exchange ticks (today's counts price units: 256 of them are $0.0256 in ITCH,
+  about one cent level per side), then cheaper ITCH decoding.
 - **LOBSTER:** a second real adapter, and a check of `MarketBook` against LOBSTER's own book after every message.
 - **`MergedSource`:** a k-way merge by timestamp, for multi-venue or multi-day replay.
 - **Replay through `EventLoop`:** run the replay through `EventLoop` with a null strategy once its throughput is

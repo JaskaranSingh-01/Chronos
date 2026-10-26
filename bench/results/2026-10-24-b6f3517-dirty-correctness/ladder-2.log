@@ -43,6 +43,6 @@ Live orders       peak 1924078, 0 at the end, all books together (capacity 41943
 Invariants at end: ok, all 8906 books
                    258271 periodic checks passed
 Digest (combined) 6897f945bcef75c2
-Elapsed           93.89 s wall, 162.02 s CPU (user 135.97, sys 26.05); 2816805 events/s, 355.0 ns/event, 2862340 messages/s, 87.9 MB/s
-Memory            0 allocations (0.0000 per event), heap change +0 blocks +0 bytes, 1062.7 MB reserved; peak RSS 1874.2 MB, peak footprint 762.0 MB, 499965 major faults
+Elapsed           97.32 s wall, 169.11 s CPU (user 139.88, sys 29.24); 2717446 events/s, 368.0 ns/event, 2761375 messages/s, 84.8 MB/s
+Memory            0 allocations (0.0000 per event), heap change +0 blocks +0 bytes, 1062.7 MB reserved; peak RSS 1993.5 MB, peak footprint 762.0 MB, 499964 major faults
 Ladder windows    134.2 MB reserved, 18.2 MB touched by the books made

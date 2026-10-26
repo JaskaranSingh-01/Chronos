@@ -703,7 +703,7 @@ void print_symbol_row(std::string_view symbol, const SymbolReport& s)
 }
 
 // --symbols or --all: one pass over the file, every symbol into its own book,
-// all books on one shared OrderPool of --capacity slots.
+// all books on one shared BookStorage of --capacity orders and levels.
 int replay_books(const ReplayArgs& args)
 {
     MappedFile file;
