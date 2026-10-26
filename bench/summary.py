@@ -20,7 +20,7 @@ def runs(directory, kind):
     return [json.load(open(p)) for p in paths]
 
 
-# (column, function of one replay JSON, format)
+# (column, function of one replay JSON, format); a function gives None for a field older runs lack.
 REPLAY_COLUMNS = [
     ("wall s", lambda r: r["time"]["wall_s"], "{:.2f}"),
     ("CPU s", lambda r: r["time"]["cpu_s"], "{:.2f}"),
@@ -33,13 +33,29 @@ REPLAY_COLUMNS = [
     ("p99.9", lambda r: r["latency"]["ns_per_event"]["p99_9"], "{:,.0f}"),
     ("allocations", lambda r: r["memory"]["allocations"], "{:,.0f}"),
     ("alloc/event", lambda r: r["memory"]["allocations_per_event"], "{:.3f}"),
+    ("heap change bytes", lambda r: r["memory"].get("heap_bytes_change"), "{:,.0f}"),
+    ("reserved MB", lambda r: none_or(r["memory"].get("reserved_bytes"), lambda b: b / 1e6), "{:,.0f}"),
     ("peak RSS MB", lambda r: r["memory"]["peak_rss_bytes"] / 1e6, "{:,.0f}"),
     ("peak footprint MB", lambda r: r["memory"]["peak_footprint_bytes"] / 1e6, "{:,.0f}"),
 ]
 
 
+def none_or(value, f):
+    return None if value is None else f(value)
+
+
 def median_of(replays, get):
-    return statistics.median(get(r) for r in replays)
+    values = [get(r) for r in replays]
+    return None if None in values else statistics.median(values)
+
+
+def show(fmt, value):
+    return "-" if value is None else fmt.format(value)
+
+
+def span(replays, get, fmt):
+    values = [get(r) for r in replays]
+    return "-" if None in values else "{}-{}".format(fmt.format(min(values)), fmt.format(max(values)))
 
 
 def table(header, rows):
@@ -55,7 +71,9 @@ def outcome(replays):
     agree = "the same in every run" if len(digests) == 1 else "DIFFERENT: " + ", ".join(sorted(digests))
     failed = [str(i) for i, r in enumerate(replays, 1) if not r["result"]["succeeded"]]
     status = "every run succeeded" if not failed else "runs " + ", ".join(failed) + " exited non-zero (see the logs)"
-    return (f"{first['events']:,} events, {first['rejected']:,} rejected, digest {first['digest']} ({agree}), "
+    run = replays[0]["run"]
+    config = f"--book {run['book']} --threads {run['threads']}; " if "book" in run else ""
+    return (f"{config}{first['events']:,} events, {first['rejected']:,} rejected, digest {first['digest']} ({agree}), "
             f"{first['books']:,} books, {first['books_not_empty']:,} not empty at the end, "
             f"peak live orders {first['peak_live_orders']:,}; {status}")
 
@@ -66,13 +84,12 @@ def replay_section(title, replays, cold_first):
     rows = []
     for i, r in enumerate(replays, 1):
         name = f"{i}" + (" (cold)" if cold_first and i == 1 else "")
-        rows.append([name] + [fmt.format(get(r)) for _, get, fmt in REPLAY_COLUMNS])
-    rows.append(["**median**"] + [fmt.format(median_of(replays, get)) for _, get, fmt in REPLAY_COLUMNS])
-    rows.append(["min-max"] + ["{}-{}".format(fmt.format(min(get(r) for r in replays)),
-                                              fmt.format(max(get(r) for r in replays)))
-                              for _, get, fmt in REPLAY_COLUMNS])
+        rows.append([name] + [show(fmt, get(r)) for _, get, fmt in REPLAY_COLUMNS])
+    rows.append(["**median**"] + [show(fmt, median_of(replays, get)) for _, get, fmt in REPLAY_COLUMNS])
+    rows.append(["min-max"] + [span(replays, get, fmt) for _, get, fmt in REPLAY_COLUMNS])
     batch = replays[0]["latency"]
-    note = (f"ns/event p50-p99.9: percentiles of the mean ns/event of each batch of {batch['batch_events']} "
+    thread = " on the book thread" if batch.get("of") == "the book thread" else ""
+    note = (f"ns/event p50-p99.9{thread}: percentiles of the mean ns/event of each batch of {batch['batch_events']} "
             f"events (timer tick {batch['timer_tick_ns']} ns), not of single events.")
     return (f"## {title}\n\n{outcome(replays)}\n\n"
             + table(["run"] + [c for c, _, _ in REPLAY_COLUMNS], rows) + f"\n\n{note}\n")
@@ -137,7 +154,7 @@ def compare(directories):
         rows.append([f"{label} rejected"] + [(f"{r[0]['result']['rejected']:,}" if r else "-") for r in replays])
         rows.append([f"{label} runs"] + [str(len(r)) for r in replays])
         for column, get, fmt in REPLAY_COLUMNS:
-            rows.append([f"{label} {column}"] + [(fmt.format(median_of(r, get)) if r else "-") for r in replays])
+            rows.append([f"{label} {column}"] + [(show(fmt, median_of(r, get)) if r else "-") for r in replays])
     bench = [benchmarks(d) for d in directories]
     for name in dict.fromkeys(n for b in bench for n in b):
         rows.append([short(name) + " ns (cv)"] + [(ns_cv(b[name]) if name in b else "-") for b in bench])

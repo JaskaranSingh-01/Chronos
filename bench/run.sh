@@ -17,8 +17,9 @@
 #    prints its summary (bench/summary.py): medians, min-max, profile top.
 #
 # Environment: FULL, SLICE (input files; the 2019-12-30 NASDAQ day and its
-# first 256 MiB), FULL_RUNS=3, SLICE_RUNS=5, BENCH_REPS=5, PROFILE=1,
-# BUILD_DIR=build/bench.
+# first 256 MiB), FULL_RUNS=3, SLICE_RUNS=5, BENCH_REPS=5 (0 skips step 4),
+# PROFILE=1, BUILD_DIR=build/bench, FLAGS (more replay flags for every replay,
+# e.g. "--book ladder --threads 2").
 set -euo pipefail
 
 cd "$(git -C "$(dirname "$0")" rev-parse --show-toplevel)"
@@ -30,6 +31,7 @@ full_runs=${FULL_RUNS:-3}
 slice_runs=${SLICE_RUNS:-5}
 bench_reps=${BENCH_REPS:-5}
 build=${BUILD_DIR:-build/bench}
+flags=${FLAGS:-}
 session=2019-12-30  # the session date of both files
 
 for file in "$full" "$slice"; do
@@ -52,7 +54,8 @@ echo "== results: $out"
 replay() {
     local name=$1 file=$2
     shift 2
-    "$build/simulator" replay "$file" --all --date "$session" --latency --json "$out/$name.json" "$@" \
+    # $flags unquoted: it is several words.
+    "$build/simulator" replay "$file" --all --date "$session" --latency --json "$out/$name.json" $flags "$@" \
         > "$out/$name.log" || echo "  $name: exit $? (see $name.log)"
     grep -E "^(Digest|Elapsed|Latency)" "$out/$name.log" | sed "s/^/  $name: /" || true
 }
@@ -63,18 +66,20 @@ for i in $(seq 1 "$full_runs"); do replay "full-$i" "$full"; done
 echo "== slice, --all, $slice_runs runs"
 for i in $(seq 1 "$slice_runs"); do replay "slice-$i" "$slice" --allow-truncated-tail; done
 
-echo "== simulator_bench, $bench_reps repetitions"
-"$build/simulator_bench" --benchmark_repetitions="$bench_reps" --benchmark_out="$out/bench.json" \
-    --benchmark_out_format=json > "$out/bench.log" 2>&1
-# Keep the machine's host name out of results that get committed.
-python3 -c 'import json, sys; d = json.load(open(sys.argv[1])); d["context"].pop("host_name", None); json.dump(d, open(sys.argv[1], "w"), indent=1)' \
-    "$out/bench.json"
+if [ "$bench_reps" != 0 ]; then
+    echo "== simulator_bench, $bench_reps repetitions"
+    "$build/simulator_bench" --benchmark_repetitions="$bench_reps" --benchmark_out="$out/bench.json" \
+        --benchmark_out_format=json > "$out/bench.log" 2>&1
+    # Keep the machine's host name out of results that get committed.
+    python3 -c 'import json, sys; d = json.load(open(sys.argv[1])); d["context"].pop("host_name", None); json.dump(d, open(sys.argv[1], "w"), indent=1)' \
+        "$out/bench.json"
+fi
 
 sampler=/usr/bin/sample  # macOS's own: a `sample` earlier on PATH can be another program
 if [ "${PROFILE:-1}" != 0 ] && [ -x "$sampler" ]; then
     echo "== profile: sample, 1 ms, over a full-day --all replay"
     rm -f "$build/profile-sample.txt"  # never summarize an earlier run's samples
-    "$build/simulator" replay "$full" --all --date "$session" > "$build/profile-run.log" &
+    "$build/simulator" replay "$full" --all --date "$session" $flags > "$build/profile-run.log" &
     pid=$!
     "$sampler" "$pid" 3600 1 -mayDie -file "$build/profile-sample.txt" > /dev/null 2>&1 || true
     wait "$pid" || true
