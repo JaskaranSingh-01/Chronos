@@ -1,0 +1,91 @@
+Chronos replay
+  file             /private/tmp/claude-503/-Users-jaskaran-singh-Desktop-code-qu-Chronos/6acf5368-dd94-416b-9e97-2e80c6d6c058/scratchpad/slice/12302019.NASDAQ_ITCH50.first-256MiB.bin (268435456 bytes)
+  symbols          all
+  session          2019-12-30, UTC-05:00
+  truncated tail   allowed
+  invariant checks at the end only
+  capacity         4194304 orders, shared by every book
+  book             ladder
+  threads          1
+
+Source
+  messages 7844756: 0 other symbols, 1305990 unused types, 6529870 events
+  truncated tail   yes (last partial message ignored)
+
+Events 6529870, 03:09:14.328694637 to 09:30:10.748902037 local
+  Add              3254754
+  Modify           0
+  Replace          473352
+  Cancel           514745
+  Delete           2227360
+  Execute          40024
+  Clear            0
+  Trade            10724
+  Status           8911
+
+Applied 6529870, rejected 0
+
+Books 8906: 18 empty at the end, 8888 not empty
+Per symbol: the 10 with most events, then others with rejections or orders left
+  symbol         events      applied   rejected  peak orders  orders left
+  UN             184315       184315          0          176          173
+  RIO            151196       151196          0          217          209
+  QQQ            126818       126818          0          681          673
+  TQQQ           114309       114309          0          565          561
+  DEO            101002       101002          0          122          118
+  BUD             99751        99751          0          210          210
+  NVS             99012        99012          0          180          176
+  SAP             98833        98833          0          120          120
+  PHG             89825        89825          0          189          178
+  AZN             86649        86649          0          194          184
+  A                 311          311          0          133          132
+  AA                190          190          0          124          120
+  AAAU               69           69          0           52           52
+  AACG              136          136          0          114          113
+  AADR              562          562          0           76           74
+  AAL               620          620          0          407          407
+  AAMC               97           97          0           58           57
+  AAME              216          216          0          121          120
+  AAN               191          191          0          112          108
+  AAOI              337          337          0          222          222
+  AAON              359          359          0          129          128
+  AAP               244          244          0          132          128
+  AAPL             8418         8418          0         1391         1391
+  AAT               184          184          0           98           94
+  AAU               165          165          0           95           92
+  AAWW              384          384          0          199          199
+  AAXJ              483          483          0          189          189
+  AAXN              332          332          0          288          288
+  AB                122          122          0           99           96
+  ABB             11923        11923          0          205          205
+  ABBV              482          482          0          233          232
+  ABC               247          247          0          135          131
+  ABCB              374          374          0          177          177
+  ABDC              212          212          0          142          142
+  ABEO              409          409          0          193          186
+  ABEV             1158         1158          0          204          204
+  ABG               180          180          0           95           93
+  ABIO              174          174          0          133          133
+  ABM               157          157          0           96           92
+  ABMD              447          447          0          299          299
+  ABR               161          161          0          131          129
+  ABR-A              37           37          0           36           36
+  ABR-B              50           50          0           33           33
+  ABR-C              83           83          0           32           32
+  ABT              7231         7231          0          143          140
+  ABTX              246          246          0          114          113
+  ABUS              272          272          0          190          190
+  AC                110          110          0           61           58
+  ACA               236          236          0           89           83
+  ACAD              307          307          0          224          224
+  ... and 8838 more with rejections or orders left
+
+Live orders       peak 1004059, 1003956 at the end, all books together (capacity 4194304)
+Invariants at end: ok, all 8906 books
+                   0 periodic checks passed
+Not trading       6 books crossed in RTH, allowed: DNJR (Halted) IPDN (Halted) MKD (Halted) PNRL (Halted) SVA (Halted) ZWZZT (Halted)
+Digest (combined) b00db289f7c388b2
+Elapsed           1.26 s wall, 1.03 s CPU (user 0.94, sys 0.09); 5202152 events/s, 192.2 ns/event, 6249682 messages/s, 213.9 MB/s
+Memory            0 allocations (0.0000 per event), heap change +0 blocks +0 bytes, 1059.1 MB reserved; peak RSS 734.5 MB, peak footprint 737.7 MB, 13116 major faults
+Ladder windows    134.2 MB reserved, 18.2 MB touched by the books made
+Latency           ns/event over 6376 batches of 1024 events (timer tick 41.0 ns): p50 123, p90 319, p99 863, p99.9 2175, max 23825

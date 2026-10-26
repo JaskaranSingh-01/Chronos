@@ -1,36 +1,36 @@
 # Chronos
 
-Chronos is a deterministic, single-threaded C++20 event-driven market simulator. It rebuilds the L3 order book
-of every symbol of a NASDAQ TotalView-ITCH 5.0 day in one pass, and backtests strategies against that book with
-exact queue position. Simulated orders never change the replayed history. At run time it needs only the C++
-standard library and POSIX.
+Chronos is a deterministic C++20 event-driven market simulator: one thread decodes the feed while another applies it
+to the books, and one thread alone gives the same books. It rebuilds the L3 order book of every symbol of a NASDAQ
+TotalView-ITCH 5.0 day in one pass, and backtests strategies against that book with exact queue position. Simulated
+orders never change the replayed history. At run time it needs only the C++ standard library and POSIX.
 
 ## Verified results
 
 **Data:** NASDAQ's public TotalView-ITCH 5.0 sample for 2019-12-30, `12302019.NASDAQ_ITCH50`: 8,251,407,909 bytes
-decompressed, 268,744,780 messages. The replay numbers come from the benchmark runs in
-[`bench/results/2026-10-13-a5ed53b-dirty-m2.04/`](bench/results/2026-10-13-a5ed53b-dirty-m2.04/summary.md),
-measured on 2026-10-13. A later full-day re-run of the final replay code gave the same counts and digest.
+decompressed, 268,744,780 messages. The replay numbers come from the benchmark runs of the default configuration in
+[`bench/results/2026-10-24-b6f3517-dirty-interleaved-list-2/`](bench/results/2026-10-24-b6f3517-dirty-interleaved-list-2/summary.md),
+measured on 2026-10-24 and 2026-10-26. Every configuration and the previous engine gave the same counts and digest.
 
 ### Full day, every symbol in one pass
 
 | | |
 |---|---|
-| Events | 264,460,539 |
-| By type | Add 118,631,456 · Delete 114,360,997 · Replace 21,639,067 · Execute 5,822,741 · Cancel 2,787,676 · Trade 1,218,602 |
+| Events | 264,469,515 |
+| By type | Add 118,631,456 · Delete 114,360,997 · Replace 21,639,067 · Execute 5,822,741 · Cancel 2,787,676 · Trade 1,218,602 · Status 8,976 |
 | Rejected | 0 |
 | Books | 8,906, every one empty after the last event (20:00:00.097 ET) |
 | Peak live orders | 1,924,078, all books together |
 | Invariants | pass for all 8,906 books at the end of the run |
-| Combined digest | `6897f945bcef75c2`, identical in all 9 full-day benchmark runs |
+| Combined digest | `6897f945bcef75c2`, identical in all 31 full-day runs of the engine round: four configurations and the previous engine |
 
-From [`full-1.log`](bench/results/2026-10-13-a5ed53b-dirty-m2.04/full-1.log):
+From [`full-1.log`](bench/results/2026-10-24-b6f3517-dirty-interleaved-list-2/full-1.log):
 
 ```text
 Source
-  messages 268744780: 0 other symbols, 4275335 unused types, 264460539 events
+  messages 268744780: 0 other symbols, 4266369 unused types, 264469515 events
   truncated tail   no
-Events 264460539, 04:00:00.000724386 to 20:00:00.097129306 local
+Events 264469515, 03:09:14.328694637 to 20:00:00.097129306 local
   Add              118631456
   Modify           0
   Replace          21639067
@@ -39,8 +39,9 @@ Events 264460539, 04:00:00.000724386 to 20:00:00.097129306 local
   Execute          5822741
   Clear            0
   Trade            1218602
+  Status           8976
 
-Applied 264460539, rejected 0
+Applied 264469515, rejected 0
 
 Books 8906: 8906 empty at the end, 0 not empty
 ...
@@ -60,13 +61,14 @@ What this evidence shows, and what it does not:
   orders, no level is empty, sequence numbers rise from head to tail (FIFO), and the pool count matches.
   `--check-invariants N` also checks the book of every N-th applied event. Only those periodic checks test "not
   crossed during regular trading hours", because the end-of-run check falls after 16:00. The runs above used the
-  end-of-run check only.
+  end-of-run check only; the engine round's correctness runs (`--check-invariants 1024`) passed 258,271 periodic
+  checks in each configuration ([`bench/RESULTS.md`](bench/RESULTS.md)).
 - **The combined digest** is FNV-1a over (symbol, last sequence, book digest) for every book. With every book empty
   at the end, it fingerprints each symbol's count of Adds and Replaces. It is a regression check across code
   changes, not a proof of correctness.
-- **The 256 MiB slice** (pre-market only, below) replays every symbol with 0 rejections, but `--all` on it exits 1:
-  6 books are crossed after 09:30. All six are halted (ITCH trading state `H`), which Chronos does not model yet
-  (see [Status and roadmap](#status-and-roadmap)).
+- **The 256 MiB slice** (below) replays every symbol with 0 rejections, and `--all` on it passes the invariant
+  check: 6 books are crossed after 09:30, all of them halted (ITCH trading state `H`), and a halted book may cross
+  until trading resumes.
 
 ### Backtest: SPY market maker
 
@@ -89,10 +91,10 @@ ranked and executed one tick better, so the aggressor never reached our price. W
 
 ### Tests
 
-- `simulator_tests`: 429 pass and 6 skip in both RelWithDebInfo and Debug. Five of the skips are the real-data
-  tests, which need `CHRONOS_ITCH_FILE`; the sixth is the error check of the conformance suite, which does not apply
-  to `VectorSource`. `chronos_server_tests`: 152 pass. `alloc_counter_test`: 3 pass. `ctest` runs 606 tests,
-  including 15 CLI exit-code tests.
+- `simulator_tests`: 481 pass and 6 skip in RelWithDebInfo, Debug and g++ 14 Release. Five of the skips are the
+  real-data tests, which need `CHRONOS_ITCH_FILE`; the sixth is the error check of the conformance suite, which does
+  not apply to `VectorSource`. `chronos_server_tests`: 153 pass. `alloc_counter_test`: 3 pass. `ctest` runs 663
+  tests, including 19 CLI tests of `simulator` and `chronos-serve`.
 - 0 compiler warnings with `-Wall -Wextra -Wpedantic` under Apple clang 17 and g++ 14, Release and Debug.
 - UBSan (`-DCHRONOS_SANITIZE=undefined`, where any report aborts): its last local run, of 397 tests, passed them all
   in RelWithDebInfo and in Debug; CI runs it, with ASan and TSan, on every push.
@@ -100,34 +102,51 @@ ranked and executed one tick better, so the aggressor never reached our price. W
 
 ## Performance
 
-Full day, `--all`, median of 3 runs. Each column adds one change to the one before it. Every run gave the same
-digest and 0 rejections.
+Chronos processes **4,913,837** market events per second: the full NASDAQ day of 2019-12-30, every symbol
+(264,469,515 events), on one machine, an Apple M4, with `--book list --threads 2`.
 
-| | baseline | `unlink` through the order's level | open-addressing order index |
-|---|---|---|---|
-| CPU s (user + sys) | 210.9 | 185.8 | 122.2 |
-| wall s | 222.2 | 195.7 | 131.3 |
-| events/s | 1,190,206 | 1,351,231 | 2,013,783 |
-| ns/event, mean | 840.2 | 740.1 | 496.6 |
-| ns/event p50 / p99 / p99.9 | 799 / 1,727 / 4,607 | 735 / 1,471 / 3,583 | 463 / 1,087 / 3,199 |
-| allocations per event | 0.697 | 0.697 | 0.166 |
-| peak footprint MB | 571 | 571 | 593 |
-| results | [baseline](bench/results/2026-10-13-a5ed53b-dirty-baseline/summary.md) | [m2.12](bench/results/2026-10-13-a5ed53b-dirty-m2.12/summary.md) | [m2.04](bench/results/2026-10-13-a5ed53b-dirty-m2.04/summary.md) |
+Full day, `--all`, median of 3 runs. Each round ran the four configurations and the previous engine (commit
+`b6f3517`) back to back, in rotating order, so every column met the same machine. Every run gave digest
+`6897f945bcef75c2` and 0 rejections.
 
-From the baseline to the order-index change, CPU time fell 42.0 % and events/s rose 69 %.
+| | baseline `b6f3517` | list × 1 | **list × 2** | ladder × 1 | ladder × 2 |
+|---|---|---|---|---|---|
+| CPU s (user + sys, both threads) | 56.7 | 68.7 | 95.1 | 71.6 | 110.9 |
+| wall s | 65.7 | 76.9 | 53.8 | 79.8 | 61.9 |
+| events/s | 4,026,805 | 3,440,288 | **4,913,837** | 3,314,434 | 4,270,030 |
+| ns/event, mean | 248.3 | 290.7 | 203.5 | 301.7 | 234.2 |
+| ns/event p50 / p99 / p99.9 | 215 / 639 / 3,199 | 255 / 671 / 2,559 | 191 / 431 / 735 | 271 / 671 / 2,815 | 223 / 495 / 799 |
+| allocations in `run()` | 43,910,763 | 0 | 0 | 0 | 0 |
+| heap change | not measured | 0 | 0 | 0 | 0 |
+| peak footprint MB | 593 | 740 | 744 | 758 | 762 |
+| reserved MB | – | 925 | 929 | 1,059 | 1,063 |
+| results | [baseline](bench/results/2026-10-24-b6f3517-dirty-interleaved-baseline/summary.md) | [list-1](bench/results/2026-10-24-b6f3517-dirty-interleaved-list-1/summary.md) | [list-2](bench/results/2026-10-24-b6f3517-dirty-interleaved-list-2/summary.md) | [ladder-1](bench/results/2026-10-24-b6f3517-dirty-interleaved-ladder-1/summary.md) | [ladder-2](bench/results/2026-10-24-b6f3517-dirty-interleaved-ladder-2/summary.md) |
+
+The default, list × 2, against the baseline: events/s +22.0 %. On one thread the round is slower than the baseline
+(list −14.6 %, ladder −17.7 %); the profile below shows where the book thread's time goes.
 
 - **Machine:** Apple M4 (4 performance + 6 efficiency cores), 16 GiB, macOS 27.0.1, Apple clang 17.0.0, CMake
-  `Release` (`-O3 -DNDEBUG`), one thread.
-- **Latency percentiles** are of the mean ns/event of each batch of 1,024 events, not of single events.
-  `steady_clock` ticks every 41.67 ns on this machine, so single events cannot be timed. Each value is a histogram
-  bucket's upper bound, at most 6.25 % high.
+  `Release` (`-O3 -DNDEBUG`), one or two threads.
+- **Interleaved runs.** A one-thread replay that lands on an efficiency core runs about half as fast, so runs made
+  one configuration after another on a busy machine are not comparable: this round's first, sequential matrix
+  measured one thread at about 1.48 M events/s, and the baseline measured alone that morning gave 2.00 M. Each run
+  above started once the load average was below 4.5.
+- **Per-event figures are a batch-derived per-event estimate.** Each sample is the mean ns/event of a batch of 1,024
+  events, as `steady_clock` ticks every 41.67 ns on this machine and cannot time a single event. They show how the
+  cost of an event varies across the day, not the latency of any one event. With two threads they are the book
+  thread's.
+- **Zero allocations in the replay.** The allocation counter counts every `operator new` in the process from just
+  before `MarketReplay::run` to just after it, both threads included: 0 in every configuration on the full day. The
+  heap's blocks and bytes in use are equal before and after. `scripts/check-hot-path.sh`, run in CI, finds no
+  allocator call and no growing container call on the replay path outside its setup.
 - **I/O.** The 8.25 GB file does not stay in the page cache of a 16 GiB machine, so every full-day run read it from
-  disk again (about 500,000 major faults). Wall time includes that wait; CPU time is the stable metric.
+  disk again (about 500,000 major faults). Wall time includes that wait.
 - **Memory.** Peak RSS counts the resident pages of the mapped input, so the table shows the peak footprint, the
-  process's own memory.
-- **Profile** (`/usr/bin/sample`, 1 ms, last column), self time inside the replay loop: `OrderBook::unlink`
-  21.7 %, `OrderBook::add` 18.6 %, `OrderBook::find` 14.7 %, `ItchSource::next` 10.2 % (28.1 % with its decode
-  callees). The remaining allocations are almost all `std::map` price-level nodes.
+  process's own memory. The reserved bytes are set up before the replay: the order pool, the order and level
+  indices, the level pool, and the ladder's windows or the ring.
+- **Profile** (`/usr/bin/sample`, 1 ms, list × 2), self time of the book thread inside `MarketReplay::run`:
+  `new_level` 43.9 % (placing a new price level, a walk of the list from the best), `remove` 15.1 %, `find` 8.9 %,
+  `MarketBook::apply` 8.5 %.
 
 [`bench/RESULTS.md`](bench/RESULTS.md) has the protocol, the min-max ranges, the slice runs, the Google Benchmark
 micro-benchmarks, the profiles, the decisions (including a rejected candidate) and the caveats. Reproduce with
@@ -507,7 +526,7 @@ ITCH 5.0 file ─► MappedFile ─► ItchSource ── R messages ──► In
             │                                        ① ExecutionSimulator::on_market(e)   pre-event
             ▼                                        ② MarketBook::apply(e)   the only writer
     MarketBooks: a MarketBook per symbol             ③ Portfolio::mark
-    on one shared OrderPool (the history)            ④ Strategy::on_market(e)             post-event
+    on one shared BookStorage (the history)          ④ Strategy::on_market(e)             post-event
                                                    our orders, through SimQueue:
                                                      Strategy ─► OrderGateway ─► ExecutionSimulator
                                                      ExecutionSimulator ─► Portfolio, Strategy
@@ -516,8 +535,8 @@ ITCH 5.0 file ─► MappedFile ─► ItchSource ── R messages ──► In
 | Path | Contents |
 |---|---|
 | `include/simulator/types/` | `Price`, `Quantity` (`uint64`), `Timestamp` (ns since the Unix epoch, UTC), `OrderId`, `SymbolId` (`uint32`), `Side` |
-| `include/simulator/orders/` | `Order`, `PriceLevel`, `OrderBook`, `OrderIndex` (open addressing), `OrderPool`: the internals of `MarketBook` |
-| `include/simulator/market/` | `MarketEvent`, `InstrumentRegistry`, `MarketEventSource`, `VectorSource`, `MarketBook`, `MarketBooks`, `MarketReplay` |
+| `include/simulator/orders/` | `Order`, `PriceLevel`, `OrderBook` (a list or a ladder of levels), `OrderIndex` and `LevelIndex` (open addressing), `OrderPool`, `LevelPool`, and `BookStorage`, which reserves them all up front: the internals of `MarketBook` |
+| `include/simulator/market/` | `MarketEvent`, `InstrumentRegistry`, `MarketEventSource`, `VectorSource`, `MarketBook`, `MarketBooks`, `MarketReplay`, and `SpscRing` and `PipelineSource`, which decode on a thread of their own |
 | `include/simulator/io/` | `MappedFile` |
 | `include/simulator/itch/` | `ItchSource` with its framing (`ItchMessageReader`, `ByteReader`) and `ItchDecoder` |
 | `include/simulator/csv/` | `CsvSource`, a CSV event source for the library and tests (the CLI reads ITCH) |
@@ -643,7 +662,7 @@ options, both commands:
                           with --symbols or --all, shared by every book (default 4194304)
   --book B                the price levels: list (default), each side a list found through an index;
                           or ladder, which adds a window of 256 ticks around each side's best
-  --threads N             1 (default): one thread decodes and applies; 2: one decodes, one applies
+  --threads N             2 (default): one thread decodes, one applies; 1: one thread does both
   --json PATH             also write the results, metrics, build and input as JSON;
                           backtest adds its config, fills, fees and PnL
 
@@ -732,14 +751,15 @@ A bad argument prints a two-line error on stderr and exits 2. `--json PATH` writ
   compared, verified, and watched in the terminal to a digest-checked verdict.
 - The per-symbol store: each symbol's days as zstd segments, built once per day, so every replay of a symbol reads its
   own bytes, about 1% of a day, checked against their hash.
+- ITCH trading status (`H`): a halted book may cross until trading resumes, and the invariant check knows it.
+- Price levels in a preallocated pool, as a list or a ladder (`--book`), zero allocations in the replay, and a
+  two-thread decode → apply pipeline (`--threads 2`).
 - A GitHub Actions workflow and `.clang-format` / `.clang-tidy` configuration.
 
 **Not yet:**
-- **Trading status.** ITCH `H` messages are skipped today, so a halted book that is crossed in regular hours fails
-  the invariant check (the slice's `--all` run above). Status events would make that check halt-aware.
 - **Regulatory sell fees:** SEC Section 31 and FINRA TAF.
-- **More performance work, each gated on the profile:** price-indexed levels in place of `std::map`, which is now the
-  largest book cost and the source of the remaining allocations, then cheaper ITCH decoding.
+- **More performance work, each gated on the profile:** placing a new price level, now 44 % of the book thread's
+  time, then cheaper ITCH decoding.
 - **LOBSTER:** a second real adapter, and a check of `MarketBook` against LOBSTER's own book after every message.
 - **`MergedSource`:** a k-way merge by timestamp, for multi-venue or multi-day replay.
 - **Replay through `EventLoop`:** run the replay through `EventLoop` with a null strategy once its throughput is

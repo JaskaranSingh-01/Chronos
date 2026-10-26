@@ -61,10 +61,10 @@ replay() {
 }
 
 echo "== full day, --all, $full_runs runs (run 1 cold)"
-for i in $(seq 1 "$full_runs"); do replay "full-$i" "$full"; done
+for ((i = 1; i <= full_runs; i++)); do replay "full-$i" "$full"; done
 
 echo "== slice, --all, $slice_runs runs"
-for i in $(seq 1 "$slice_runs"); do replay "slice-$i" "$slice" --allow-truncated-tail; done
+for ((i = 1; i <= slice_runs; i++)); do replay "slice-$i" "$slice" --allow-truncated-tail; done
 
 if [ "$bench_reps" != 0 ]; then
     echo "== simulator_bench, $bench_reps repetitions"

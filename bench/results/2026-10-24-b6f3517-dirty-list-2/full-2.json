@@ -1,0 +1,12 @@
+{
+  "schema": 1,
+  "date": "2026-10-24T17:19:04Z",
+  "build": {"commit": "b6f3517fcc7f30adefd59b84689fd5750f62f9e8", "dirty": true, "type": "Release", "compiler": "Apple LLVM 17.0.0 (clang-1700.0.13.5)"},
+  "machine": {"cpu": "Apple M4", "cores": 10, "memory_bytes": 17179869184, "os": "Darwin 27.0.0"},
+  "input": {"path": "data/itch/12302019.NASDAQ_ITCH50.bin", "bytes": 8251407909, "fingerprint": "6e463072d3ccbf76"},
+  "run": {"symbols": "all", "capacity": 4194304, "book": "list", "threads": 2, "check_invariants_every": 0},
+  "result": {"events": 264469515, "messages": 268744780, "rejected": 0, "digest": "6897f945bcef75c2", "books": 8906, "books_not_empty": 0, "peak_live_orders": 1924078, "succeeded": true},
+  "time": {"wall_s": 105.092, "user_s": 168.285, "sys_s": 28.465, "cpu_s": 196.750, "events_per_s": 2516563, "ns_per_event": 397.37},
+  "memory": {"allocations": 0, "allocations_per_event": 0.0000, "heap_blocks_change": 0, "heap_bytes_change": 0, "reserved_bytes": 928514104, "windows_reserved_bytes": 0, "windows_touched_bytes": 0, "peak_rss_bytes": 2441822208, "peak_footprint_bytes": 743709344, "major_faults": 499963},
+  "latency": {"batch_events": 1024, "batches": 258271, "timer_tick_ns": 41.00, "of": "the book thread", "ns_per_event": {"p50": 367, "p90": 575, "p99": 959, "p99_9": 1663, "max": 45276}}
+}

@@ -1,0 +1,36 @@
+49,386 samples (1 ms apart) inside MarketReplay::run, from profile-sample.txt
+
+Self (top of stack), share of replay time:
+   43.9%    21,662  simulator::BasicOrderBook<(simulator::Dispatch)0>::new_level(simulator::Side, simulator::Price)
+   15.1%     7,471  simulator::BasicOrderBook<(simulator::Dispatch)0>::remove(simulator::Order&)
+    8.9%     4,406  simulator::BasicOrderBook<(simulator::Dispatch)0>::find(unsigned long long)
+    8.5%     4,221  simulator::MarketBook::apply(simulator::MarketEvent const&)
+    8.3%     4,108  simulator::BasicOrderBook<(simulator::Dispatch)0>::add(simulator::Order&)
+    2.8%     1,389  simulator::PipelineSource::next(simulator::MarketEvent&)
+    2.7%     1,321  simulator::MarketReplay::run(simulator::MarketEventSource&, simulator::MarketBooks&, simulator::ReplayOptions const&)
+    1.6%       802  simulator::LevelIndex::erase(unsigned int, simulator::Side, simulator::Price)
+    0.6%       316  simulator::OrderPool::release(simulator::Order&)
+    0.6%       285  simulator::PriceLevel::add(simulator::Order&)
+    0.6%       282  simulator::BasicOrderBook<(simulator::Dispatch)0>::room(simulator::Side, simulator::Price, simulator::Order const*) const
+    0.5%       264  simulator::MarketBook::add(simulator::MarketEvent const&)
+    0.5%       252  simulator::Order::id() const
+    0.5%       229  simulator::PriceLevel::remove(simulator::Order&)
+    0.4%       214  simulator::Order::side() const
+
+Total (self + callees), share of replay time:
+  100.0%    49,386  simulator::MarketReplay::run(simulator::MarketEventSource&, simulator::MarketBooks&, simulator::ReplayOptions const&)
+   54.8%    27,086  simulator::BasicOrderBook<(simulator::Dispatch)0>::add(simulator::Order&)
+   44.2%    21,814  simulator::BasicOrderBook<(simulator::Dispatch)0>::new_level(simulator::Side, simulator::Price)
+   42.2%    20,840  simulator::MarketBook::replace(simulator::MarketEvent const&)
+   24.0%    11,841  simulator::MarketBook::apply(simulator::MarketEvent const&)
+   23.2%    11,475  simulator::MarketBook::add(simulator::MarketEvent const&)
+   17.6%     8,678  simulator::BasicOrderBook<(simulator::Dispatch)0>::remove(simulator::Order&)
+    8.9%     4,406  simulator::BasicOrderBook<(simulator::Dispatch)0>::find(unsigned long long)
+    3.0%     1,457  simulator::PipelineSource::next(simulator::MarketEvent&)
+    2.1%     1,028  simulator::BasicOrderBook<(simulator::Dispatch)0>::drop_level(simulator::Side, simulator::PriceLevel&)
+    1.6%       802  simulator::LevelIndex::erase(unsigned int, simulator::Side, simulator::Price)
+    1.2%       595  simulator::MarketBook::reduce(simulator::MarketEvent const&)
+    0.7%       343  simulator::PriceLevel::add(simulator::Order&)
+    0.6%       316  simulator::OrderPool::release(simulator::Order&)
+    0.6%       297  simulator::OrderPool::acquire(unsigned long long, simulator::Side, simulator::Price, simulator::Quantity, long long)
+

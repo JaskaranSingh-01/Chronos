@@ -1,3 +1,158 @@
+# Engine round: zero allocations, the level backends and the pipeline (2026-10-24 to 2026-10-26)
+
+Price levels moved into a preallocated pool, found through an open-addressing index, as a list per side or a list
+with a 256-tick ladder window (`--book list|ladder`); the replay allocates nothing; and `--threads 2` decodes on a
+thread of its own, through a single-producer single-consumer ring of 65,536 events. Every number below comes from the
+JSON in `bench/results/`; `bench/summary.py <folder>...` prints the tables.
+
+## The record
+
+| | |
+|---|---|
+| Engine code | `b6f3517` plus this round's changes, uncommitted when measured, so every JSON says `"dirty": true`; snapshot tree `e573a8c46fa04b31d556b03fa8e4f5fbb570d7ae` |
+| Baseline binary | `git archive b6f3517`, built `Release` the same way |
+| Compiler, build | Apple LLVM 17.0.0 (clang-1700.0.13.5), CMake `Release` (`-O3 -DNDEBUG`), `build/bench` |
+| Machine | Apple M4 (4 performance + 6 efficiency cores), 16 GiB, Darwin 27.0.0, on AC power |
+| Input | `data/itch/12302019.NASDAQ_ITCH50.bin`, 8,251,407,909 bytes, SHA-256 `5d81c2e14a0f748b29c674b6a342796932702034b4dd341e39e9a9ec5bac610f` |
+| Capacity | `--capacity` 4,194,304, the `--all` default |
+| Cache | no purge; about 500,000 major faults in every full-day run (the day does not stay in the page cache) |
+
+The folders:
+
+| Folder | What |
+|---|---|
+| `results/2026-10-24-b6f3517-dirty-correctness/` | correctness mode, one run per configuration |
+| `results/2026-10-24-b6f3517-dirty-interleaved-{baseline,list-1,list-2,ladder-1,ladder-2}/` | performance mode: the matrix the default and the README come from |
+| `results/2026-10-24-b6f3517-dirty-interleaved-matrix.md` | its medians side by side |
+| `results/2026-10-24-b6f3517-dirty-{list-1,list-2,ladder-1,ladder-2}/` | performance mode, first attempt: `bench/run.sh` one configuration after another (see Caveats) |
+| `results/2026-10-26-b6f3517-dirty-list-2-bench/` | the default's 5 slice runs, micro-benchmarks and profile |
+| `results/2026-10-24-b6f3517-baseline/` | the baseline measured alone on the morning of 2026-10-24 (see Caveats) |
+
+The commands, from the repo root:
+
+```
+# correctness mode, each configuration
+build/bench/simulator replay $F --all --date 2019-12-30 --check-invariants 1024 --book B --threads T --json J
+
+# performance mode, interleaved: 3 rounds; each round runs the five in rotating order, each once the 1-minute
+# load average is below 4.5
+build/bench/simulator replay $F --all --date 2019-12-30 --latency --book B --threads T --json J   # the four
+$BASELINE/simulator replay $F --all --date 2019-12-30 --latency --json J                          # b6f3517
+
+# the default's slices, micro-benchmarks and profile
+FLAGS="--book list --threads 2" FULL_RUNS=0 SLICE_RUNS=5 BENCH_REPS=5 bench/run.sh list-2-bench
+```
+
+## Correctness mode
+
+`--check-invariants 1024` checks the book of every 1,024th applied event, including "not crossed in regular hours
+unless halted", and every book at the end.
+
+| Configuration | Exit | Digest | Rejected | Periodic checks passed | Allocations | Heap change |
+|---|---|---|---|---|---|---|
+| list × 1 | 0 | `6897f945bcef75c2` | 0 | 258,271 | 0 | +0 blocks +0 bytes |
+| list × 2 | 0 | `6897f945bcef75c2` | 0 | 258,271 | 0 | +0 blocks +0 bytes |
+| ladder × 1 | 0 | `6897f945bcef75c2` | 0 | 258,271 | 0 | +0 blocks +0 bytes |
+| ladder × 2 | 0 | `6897f945bcef75c2` | 0 | 258,271 | 0 | +0 blocks +0 bytes |
+
+Each two-thread log equals its one-thread log line for line, timings, the `threads` line and the windows line aside:
+`list: the same report`, `ladder: the same report`.
+
+## Performance mode
+
+Full day, `--all`, median of 3 interleaved runs:
+
+| | baseline `b6f3517` | list × 1 | list × 2 | ladder × 1 | ladder × 2 |
+|---|---|---|---|---|---|
+| wall s | 65.68 | 76.87 | 53.82 | 79.79 | 61.94 |
+| CPU s (both threads) | 56.69 | 68.65 | 95.08 | 71.59 | 110.91 |
+| events/s | 4,026,805 | 3,440,288 | 4,913,837 | 3,314,434 | 4,270,030 |
+| ns/event | 248.3 | 290.7 | 203.5 | 301.7 | 234.2 |
+| p50 / p90 / p99 / p99.9 | 215 / 383 / 639 / 3,199 | 255 / 431 / 671 / 2,559 | 191 / 271 / 431 / 735 | 271 / 447 / 671 / 2,815 | 223 / 319 / 495 / 799 |
+| allocations | 43,910,763 | 0 | 0 | 0 | 0 |
+| heap change bytes | not measured | 0 | 0 | 0 | 0 |
+
+The ranges (min-max of the 3 runs), events/s:
+
+| | min-max |
+|---|---|
+| baseline | 3,253,070-4,124,034 |
+| list × 1 | 3,070,008-3,443,032 |
+| list × 2 | 4,722,188-4,965,065 |
+| ladder × 1 | 3,259,757-3,331,257 |
+| ladder × 2 | 3,697,267-4,765,287 |
+
+Rounds 1 and 2 ran on the night of 2026-10-24. Round 3 was re-run whole on the afternoon of 2026-10-26, as the Mac slept
+through the last run of the first round 3 (14,114 s wall, discarded); its five runs, on a busier machine, are each
+configuration's slowest.
+
+## Selection (spec §5.3)
+
+On the interleaved matrix:
+
+```
+list-1 median 3440288 range 373024 gates pass
+list-2 median 4913837 range 242877 gates pass
+ladder-1 median 3314434 range 71500 gates pass
+ladder-2 median 4270030 range 1068020 gates pass
+best one-thread list-1 best two-thread list-2 margin 1473549, larger range 373024
+default list-2 median 4913837 against the baseline's 4026805: PASS
+```
+
+Two threads beat one by far more than the larger range, so the default is `--book list --threads 2`, 22.0 % faster
+than the baseline. `chronos-serve` keeps its sessions on one thread, with the list.
+
+## Memory
+
+| | baseline | list × 1 | list × 2 | ladder × 1 | ladder × 2 |
+|---|---|---|---|---|---|
+| peak footprint MB | 593 | 740 | 744 | 758 | 762 |
+| reserved MB | – | 925 | 929 | 1,059 | 1,063 |
+| peak RSS MB (with the mapped file) | 2,393 | 2,427 | 2,552 | 2,338 | 2,369 |
+
+The reserved bytes, all set up before the replay: the order pool (403 MB, as before), the order and level indices
+(134 MB each), the level pool (201 MB, touched only as levels are first used), a book slot per registry entry, and
+either the ladder's windows (134.2 MB reserved, 18.2 MB touched by the books made) or the ring (3.7 MB).
+
+## Micro-benchmarks
+
+From `results/2026-10-26-b6f3517-dirty-list-2-bench/`, median ns per operation of 5 repetitions (cv). `book:0` is the
+list, `book:1` the ladder.
+
+| benchmark | list | ladder |
+|---|---|---|
+| `BM_Add`, depth 1,000 / 1,000,000 | 21.7 / 59.6 | 22.1 / 65.2 |
+| `BM_Delete`, depth 1,000 / 1,000,000 | 15.6 / 27.2 | 15.8 / 27.2 |
+| `BM_ExecuteFull`, depth 1,000 / 1,000,000 | 18.5 / 30.3 | 18.2 / 30.1 |
+| `BM_ExecutePartial`, depth 1,000 / 1,000,000 | 7.9 / 60.5 | 7.9 / 61.1 |
+| `BM_Cancel`, depth 1,000 / 1,000,000 | 8.0 / 59.8 | 7.9 / 61.2 |
+| `BM_Replace`, depth 1,000 / 1,000,000 | 36.7 / 223.1 | 36.9 / 237.6 |
+| `BM_Churn` (levels moving around the touch) | 61.3 (23 %) | 29.6 (35 %) |
+| `BM_DispatchSelected` (chosen at run time) | 24.8 (0 %) | 42.5 (23 %) |
+| `BM_DispatchFixed` (chosen at compile time) | 25.8 (31 %) | 24.1 (1 %) |
+
+The dispatch gate holds for the default's book: selected at run time, the list is 1.0 ns faster than fixed (within
+noise). The ladder pair ran at a cv of 23 % with the load average near 8, so its difference is not a measurement.
+`BM_Ring`, an event and its position through the ring between two threads: 6.3 ns (2 %), about 159 M events/s.
+
+The profile of the book thread (`profile-top.txt`, list × 2, self time inside `MarketReplay::run`): `new_level`
+43.9 %, `remove` 15.1 %, `find` 8.9 %, `MarketBook::apply` 8.5 %, `add` 8.3 %, `PipelineSource::next` 2.8 %.
+
+## Caveats
+
+- **One thread is slower than the baseline** on the full day: list −14.6 %, ladder −17.7 %. The baseline found
+  levels in a per-book `std::map`; the list places a new level by walking from the best, and that walk is the
+  profile's largest cost. The ladder's window skips the walk near the touch (`BM_Churn` 29.6 against 61.3 ns, at a
+  cv of 23-35 %), but on this day it is slower than the list.
+- **Core placement.** A one-thread replay that lands on an efficiency core runs about half as fast. The first matrix
+  ran `bench/run.sh` one configuration after another while other processes held the performance cores: medians
+  list × 1 1,481,338, list × 2 2,611,822, ladder × 1 1,488,152 (one run at 2,883,377), ladder × 2 4,785,055 events/s.
+  It ranked ladder × 2 first, but its columns did not meet the same machine, so the interleaved matrix replaces it.
+  The baseline measured alone that morning (1,996,174 events/s, 123 s CPU) is slow for the same reason: the same
+  code ran at 4,026,805 interleaved.
+- **The digest** fingerprints the books at the end of the day, when every book is empty; the correctness runs'
+  258,271 periodic checks and the identical two-thread reports carry more of the evidence.
+
 # Benchmark results: baseline, M2.12, M2.04
 
 Measured on 2026-10-13. Every number comes from the JSON in `bench/results/`; `bench/summary.py <folder>...`
