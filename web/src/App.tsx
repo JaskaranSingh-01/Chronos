@@ -11,6 +11,7 @@ import { TopBar } from './TopBar';
 // Asks for the token a non-loopback server wants, or says why the terminal cannot connect.
 function Gate() {
   const status = useStore((s) => s.status);
+  const notice = useStore((s) => s.notice); // why the last token was refused
   const [token, setToken] = useState('');
   if (status === 'host')
     return <p className="gate">Open the terminal at 127.0.0.1 or localhost, as chronos-serve printed it.</p>;
@@ -27,6 +28,7 @@ function Gate() {
         Token <input type="password" value={token} onChange={(e) => setToken(e.target.value)} autoFocus />
       </label>
       <button>Connect</button>
+      {notice && <span className="sell">{notice}</span>}
     </form>
   );
 }

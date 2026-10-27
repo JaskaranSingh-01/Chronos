@@ -49,7 +49,7 @@ export interface Env {
   connect(url: string, on: { open(): void; message(text: string): void; close(): void }): { send(text: string): void };
   load(key: string): string | null;
   save(key: string, value: string): void;
-  host(): string;
+  socket(): string; // the WebSocket's URL: wss on an https page, which may not open a plain ws
   frame(f: () => void): void; // runs `f` before the next paint
 }
 
@@ -357,7 +357,7 @@ export function createStore(env: Env) {
   }
 
   function open() {
-    const ws = env.connect(`ws://${env.host()}/ws`, {
+    const ws = env.connect(env.socket(), {
       open() {
         if (token) ws.send(JSON.stringify({ type: 'auth', token }));
         // Before hello, so no report the server sends from the new state's watermark can overtake the replay.
@@ -395,9 +395,10 @@ export function createStore(env: Env) {
       let res = await env.fetch('/api/symbols');
       token = res.status === 401 ? (env.load(tokenKey) ?? '') : '';
       if (token) res = await api('/api/symbols');
-      if (res.status === 401 || res.status === 403)
-        return set({ ...state, status: res.status === 401 ? 'token' : 'host' });
-      set({ ...state, symbols: ((await res.json()) as { symbols: string[] }).symbols });
+      if (res.status === 403) return set({ ...state, status: 'host' });
+      if (res.status === 401) return set({ ...state, status: 'token', notice: token ? 'the token was refused' : '' });
+      const symbols = ((await res.json()) as { symbols: string[] }).symbols;
+      set({ ...state, symbols, notice: state.status === 'token' ? '' : state.notice }); // a refusal is answered
       open();
     } catch {
       set({ ...state, status: 'closed' });
@@ -472,7 +473,7 @@ export const store = createStore({
   },
   load: (key) => sessionStorage.getItem(key),
   save: (key, value) => sessionStorage.setItem(key, value),
-  host: () => location.host,
+  socket: () => `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws`,
   frame: (f) => void requestAnimationFrame(f),
 });
 

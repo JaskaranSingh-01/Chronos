@@ -33,9 +33,12 @@ export function Equity({ runs }: { runs: Run[] }) {
   useEffect(() => {
     const days = Math.max(...runs.map((r) => r.spec.days.length));
     const label = (t: Time) => timeOfRun(t as number, days);
-    // A tick where the axis turns a day names the day; the others, the time.
-    const tick = (t: Time, type: TickMarkType) =>
-      type < TickMarkType.Time ? `day ${Math.floor((t as number) / 86_400) + 1}` : timeOfRun((t as number) % 86_400, 1);
+    // A tick where the axis turns a day names the day; the others, the time, to the second only zoomed in that far.
+    const tick = (t: Time, type: TickMarkType) => {
+      if (type < TickMarkType.Time) return `day ${Math.floor((t as number) / 86_400) + 1}`;
+      const hms = timeOfRun((t as number) % 86_400, 1);
+      return type === TickMarkType.TimeWithSeconds ? hms : hms.slice(0, 5);
+    };
     const chart = createChart(box.current!, {
       autoSize: true,
       layout: {

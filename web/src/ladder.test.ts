@@ -33,9 +33,23 @@ describe('ladder', () => {
     expect(prices(ladder([[100_000, 1, 1]], [[110_000, 1, 1]], [], 4, 1))).toEqual([110_000, null, 100_000]);
   });
 
-  it('keeps a level off the grid, and steps a tick under $1', () => {
-    expect(prices(ladder([[100_050, 5, 1]], [[100_100, 5, 1]], [], 4, 2))).toEqual([100_200, 100_100, 100_050, 99_950]);
-    expect(prices(ladder([[5_000, 1, 1]], [[5_002, 1, 1]], [], 4, 2))).toEqual([5_003, 5_002, 5_001, 5_000, 4_999]);
+  it('keeps a level off the grid, and steps a cent under $1 too, never to a price of zero', () => {
+    const offGrid = ladder([[100_050, 5, 1]], [[100_100, 5, 1]], [], 4, 2);
+    expect(prices(offGrid)).toEqual([100_200, 100_100, 100_050, 100_000, 99_900]);
+    // $0.87 bid, $0.8810 and $0.8812 offered: the levels, whole cents beyond them, and the cent between
+    const subPenny = ladder(
+      [[8_700, 22, 1]],
+      [
+        [8_810, 1_823, 1],
+        [8_812, 10, 1],
+      ],
+      [],
+      4,
+      2,
+    );
+    expect(prices(subPenny)).toEqual([9_000, 8_900, 8_812, 8_810, 8_800, 8_700, 8_600]);
+    expect(subPenny.map((r) => r!.inside)).toEqual([false, false, false, false, true, false, false]);
+    expect(prices(ladder([[150, 1, 1]], [[200, 1, 1]], [], 4, 3))).toEqual([400, 300, 200, 150, 100]);
   });
 
   it('puts our resting orders on their price and side, and has no rows for an empty book', () => {

@@ -44,6 +44,9 @@
   disk) loses the lines still queued, and the session refuses commands after it.
 - **The terminal's candles and tape** count every execution message, non-printable `C` executions included, and leave
   out the cross's own print (`Q`), so the auction minutes show less volume than the tape a vendor would print.
+- **The terminal's fills and PnL curve are what the page saw.** A reload or a second tab gets the account and the
+  open orders from the server's state, but the Fills list and the curve start empty: the server would have to replay
+  the generation's fills, which pass through its report ring only once.
 - The Lab keeps up to 50,000 fills of each run in memory and on disk; a few hundred saved runs would call for loading
   results on demand.
 

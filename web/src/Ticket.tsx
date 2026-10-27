@@ -16,6 +16,7 @@ export function Ticket({ price, setPrice }: { price: string; setPrice: (price: s
   const spec = useStore((s) => s.spec);
   const symbol = useStore((s) => s.symbol);
   const blocked = useStore(selectTradeBlock);
+  const paused = useStore((s) => s.state === 'paused'); // an order waits for the replay to move
   const position = useStore((s) => s.snap?.account.position ?? 0);
   const orders = useStore(selectOrders);
   const bid = useStore((s) => s.snap?.bids[0]?.[0] ?? 0);
@@ -135,6 +136,7 @@ export function Ticket({ price, setPrice }: { price: string; setPrice: (price: s
             : order}
         </button>
         {blocked !== '' && <div className="lock">Locked: {blocked}</div>}
+        {blocked === '' && paused && <div className="muted">Paused: an order reaches the book on Step or Play.</div>}
       </div>
     </section>
   );

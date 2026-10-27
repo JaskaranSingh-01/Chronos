@@ -8,7 +8,7 @@
 | `chronos_server_tests` | 156 | the server: protocol schemas, peers and resync, sessions and generations, the command log and its reproduction, the store's builder and reader, the Lab, Watch, security |
 | `alloc_counter_test` | 3 | the counting `operator new` the replay's zero-allocation figure relies on |
 | CLI tests | 19 | `simulator` and `chronos-serve` run as processes: exit codes, usage, a store shared between them |
-| Vitest (`web/`) | 118 | the stores' reducers, candles and fill marks, the depth ladder, order checks, the Lab's model and formatting |
+| Vitest (`web/`) | 121 | the stores' reducers, candles and fill marks, the depth ladder, the PnL curve, symbol matching, order checks, the Lab's model and formatting |
 | Playwright (`web/e2e/`) | 13, plus 2 measurement specs | the terminal and the Lab in Chromium against a real `chronos-serve` |
 
 `ctest` runs 698 tests: every GoogleTest case, the CLI tests and a build-info test. Five of the 6 skips are the

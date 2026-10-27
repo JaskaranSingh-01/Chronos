@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { clock, money, px, ruleLabel, shares, signed, tone } from './format';
+import { clock, money, px, ruleLabel, shares, signed, stamp, tone } from './format';
 import { pnlCurve } from './pnl';
 import { selectOrders, store, useStore } from './store';
 
@@ -11,6 +11,7 @@ export function PnlPanel() {
   const a = useStore((s) => s.snap?.account);
   const mark = useStore((s) => (s.snap && s.snap.account.position > 0 ? s.snap.bids[0] : s.snap?.asks[0])?.[0]);
   const pnl = useStore((s) => s.pnl);
+  const multiDay = useStore((s) => s.genDays.length > 1);
   const hello = useStore((s) => s.hello);
   const digits = hello?.price_scale ?? 4;
   const cash = digits + (hello?.quantity_scale ?? 0);
@@ -22,7 +23,8 @@ export function PnlPanel() {
         <span className="grow" />
         {c ? (
           <span className="muted">
-            {clock(c.from)} → {clock(c.to)} · high <b>{signed(c.hi, cash)}</b> · low <b>{signed(c.lo, cash)}</b>
+            {stamp(c.from, multiDay)} → {stamp(c.to, multiDay)} · high <b>{signed(c.hi, cash)}</b> · low{' '}
+            <b>{signed(c.lo, cash)}</b>
           </span>
         ) : (
           <span className="muted">net PnL from the first change, as this page saw it</span>

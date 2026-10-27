@@ -20,7 +20,7 @@ NASDAQ's public sample day, 2019-12-30: 8.25 GB, 268,744,780 messages, 8,906 sym
 | **Determinism** | the same counts and combined digest, `6897f945bcef75c2`, from list and ladder books, one thread and two, and the previous engine (with every book empty at the close, it fingerprints each symbol's adds and replaces); on a 256 MiB slice, whose books are still live at its end, the same book digests from the Linux/g++ Docker image as from the macOS/clang build |
 | **Allocations** | 0 in the replay, counted by a replacement `operator new`, with the heap unchanged; CI checks the hot path |
 | **Per-event cost** | 204.7 ns mean; 191 / 447 / 863 ns at p50 / p99 / p99.9 of 1,024-event batch means (the book thread; the clock cannot time one event: see [performance](docs/performance.md#method)) |
-| **Tests** | 698 C++ tests, 118 Vitest, 13 Playwright end-to-end; CI on Linux and macOS with ASan, UBSan and TSan |
+| **Tests** | 698 C++ tests, 121 Vitest, 13 Playwright end-to-end; CI on Linux and macOS with ASan, UBSan and TSan |
 
 [docs/performance.md](docs/performance.md) has the method and every configuration's numbers, and
 [bench/RESULTS.md](bench/RESULTS.md) the record of every run.

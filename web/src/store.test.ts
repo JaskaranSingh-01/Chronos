@@ -548,7 +548,7 @@ describe('createStore', () => {
       },
       load: (key) => saved.get(key) ?? null,
       save: (key, value) => void saved.set(key, value),
-      host: () => '127.0.0.1:8080',
+      socket: () => 'ws://127.0.0.1:8080/ws',
       frame: (f) => void frames.push(f),
     };
     const histories = () => fetched.filter((path) => path.startsWith('/api/history')).length;
@@ -606,7 +606,17 @@ describe('createStore', () => {
     const none = fake({ statuses: [401] });
     const asking = createStore(none.env);
     await asking.start();
-    expect(asking.get().status).toBe('token');
+    expect([asking.get().status, asking.get().notice]).toEqual(['token', '']);
+
+    const wrong = fake({ statuses: [401, 401] });
+    wrong.saved.set('chronos-token', 'typo');
+    const refused = createStore(wrong.env);
+    await refused.start();
+    expect([refused.get().status, refused.get().notice, wrong.connects()]).toEqual([
+      'token',
+      'the token was refused',
+      0,
+    ]);
   });
 
   it('applies each message as it comes, but tells its listeners once a frame', async () => {

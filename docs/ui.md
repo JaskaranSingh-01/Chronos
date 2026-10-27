@@ -21,9 +21,9 @@ The page is a grid of square panels, every number in a monospace face:
   inside, plain tickers before preferreds and warrants; the arrows and Enter, or a click, load one. To replay a symbol
   over several days in a row, tick them in the day list: each night passes at once, and Seek then takes a day and a
   time. With the box empty, Load reloads the symbol on the days ticked.
-- **Depth ladder** (left, full height). The L3 book as a price ladder a cent a row, the spread in the middle: the book's
-  size at each price with a depth bar, and our resting orders as our shares over the shares still ahead of them in the
-  queue. Click a row to price the ticket.
+- **Depth ladder** (left, full height). The L3 book as a price ladder a cent a row (a sub-penny level under $1 is a
+  row of its own), the spread in the middle: the book's size at each price with a depth bar, and our resting orders as
+  our shares over the shares still ahead of them in the queue. Click a row to price the ticket.
 - **Chart.** 1 s candles from the market's own trades, at 1 s to 1 h timeframes, with VWAP, EMA 20 and volume; pre- and
   post-market and halts shaded; the best bid and ask, our resting orders (with the shares ahead of each) and our
   position's average price as price lines; and our fills as one arrow per candle and side, their shares summed.
@@ -33,7 +33,8 @@ The page is a grid of square panels, every number in a monospace face:
 - **Ticket.** The side, each button showing the price it would meet (the bid or the ask); post-only, IOC or market; the
   price a tick at a time and the quantity by 100 or a preset; the notional, the estimated fee or rebate and the position
   after. Orders go through the same `ExecutionSimulator` as the backtests
-  ([backtesting.md](backtesting.md#d2-the-fill-model)). While a Lab run is watched the ticket is locked and says why.
+  ([backtesting.md](backtesting.md#d2-the-fill-model)); paused, an order reaches the book on the next Step or Play.
+  While a Lab run is watched the ticket is locked and says why.
 - **Account**, and under the ticket and the tape, **open orders** (with cancel), **fills** (with the rule that filled
   each and its queue ahead at entry) and each resting order's **queue** position.
 - **Engine strip** (bottom, on both pages). The replay's events a second, the snapshots this page skipped, the commands
