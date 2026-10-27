@@ -1,10 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { emaPeriod, points, timeframes, type Frame } from './candles';
+import { emaPeriod, fillMarks, points, timeframes, type Frame } from './candles';
+import { nyOffset } from './format';
 import type { Candle } from './protocol';
 
 const open = 1_577_716_200; // 2019-12-30 09:30:00 ET, epoch seconds
 const est = -5 * 3_600;
-const frame = (seconds: number): Frame => ({ seconds, scale: 10_000, offset: est });
+const frame = (seconds: number): Frame => ({ seconds, scale: 10_000, offset: () => est });
 // A 1 s bar `second`s after the open, its prices in dollars.
 const bar = (second: number, o: number, h: number, l: number, c: number, v: number): Candle => [
   (open + second) * 1e9,
@@ -85,5 +86,38 @@ describe('points', () => {
         expect([...all.slice(0, k), ...points(day, [halt], frame(tf), all[k - 1])]).toEqual(all);
       }
     }
+  });
+});
+
+describe('fillMarks', () => {
+  const fill = (second: number, side: 'buy' | 'sell', quantity: number) => ({
+    exchange_ts: (open + second) * 1e9,
+    side,
+    quantity,
+  });
+
+  it('sums our fills into one mark per bucket and side, oldest first', () => {
+    const fills = [fill(70, 'sell', 100), fill(5, 'buy', 100), fill(30, 'buy', 50), fill(65, 'sell', 25)];
+    expect(fillMarks(fills, frame(60))).toEqual([
+      { time: open + est, side: 'buy', shares: 150 },
+      { time: open + est + 60, side: 'sell', shares: 125 },
+    ]);
+    expect(fillMarks(fills, frame(1))).toHaveLength(4);
+  });
+});
+
+describe('New York time across days', () => {
+  it('puts each day on its own offset, so a day after a daylight-saving change still opens at 09:30', () => {
+    const october = Date.UTC(2019, 9, 30, 13, 30) / 1_000; // 09:30 EDT
+    const december = Date.UTC(2019, 11, 30, 14, 30) / 1_000; // 09:30 EST
+    const f: Frame = { seconds: 60, scale: 10_000, offset: nyOffset };
+    const day = (s: number): Candle => [s * 1e9, 100_000, 100_000, 100_000, 100_000, 100];
+    expect(points([day(october), day(december)], [], f).map((p) => p.time % 86_400)).toEqual([34_200, 34_200]);
+  });
+
+  it('restarts VWAP each New York day', () => {
+    const today = bar(0, 10, 10, 10, 10, 100);
+    const tomorrow: Candle = [(open + 86_400) * 1e9, 200_000, 200_000, 200_000, 200_000, 100];
+    expect(points([today, tomorrow], [], frame(60)).map((p) => p.vwap)).toEqual([10, 20]);
   });
 });

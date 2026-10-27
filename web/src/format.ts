@@ -66,6 +66,15 @@ export const dayLabel = (day: Day) =>
   (day.itch50 ? '' : ' · not ITCH 5.0');
 
 // New York's UTC offset in seconds at `epochSeconds`; a session day never spans a DST change.
+// New York's UTC offset at `epochSeconds`, cached by the hour: daylight saving changes on the hour.
+const offsets = new Map<number, number>();
+export function nyOffset(epochSeconds: number): number {
+  const hour = Math.floor(epochSeconds / 3_600);
+  let offset = offsets.get(hour);
+  if (offset === undefined) offsets.set(hour, (offset = etOffset(hour * 3_600)));
+  return offset;
+}
+
 export function etOffset(epochSeconds: number): number {
   const at = Math.floor(epochSeconds);
   const f = Object.fromEntries(fields.formatToParts(at * 1_000).map((p) => [p.type, Number(p.value)]));

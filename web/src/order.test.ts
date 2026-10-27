@@ -91,6 +91,8 @@ describe('validate', () => {
   });
 
   it('refuses what the risk check would, against the hello limits', () => {
+    expect(validate(ticket({ price: '289.3699' }), hello, 0, [])).toBe('Whole cents at $1 or more');
+    expect(validate(ticket({ price: '0.5001' }), hello, 0, [])).toMatchObject({ price: 5_001 }); // any tick under $1
     expect(validate(ticket({ qty: '0' }), hello, 0, [])).toBe('Enter a whole number of shares');
     expect(validate(ticket({ qty: '1.5' }), hello, 0, [])).toBe('Enter a whole number of shares');
     expect(validate(ticket({ qty: '501' }), hello, 0, [])).toBe('At most 500 shares an order');

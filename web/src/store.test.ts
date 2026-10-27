@@ -11,16 +11,7 @@ import type {
   Spec,
   Trade,
 } from './protocol';
-import {
-  apply,
-  createStore,
-  initial,
-  mergeBars,
-  selectOrders,
-  selectTradeBlock,
-  withHistory,
-  type Env,
-} from './store';
+import { apply, createStore, initial, mergeBars, selectOrders, selectTradeBlock, withHistory, type Env } from './store';
 
 const T = 1_577_716_200_000_000_000; // 2019-12-30 09:30:00 ET, epoch ns
 const S = 1_000_000_000;
@@ -128,6 +119,19 @@ describe('apply', () => {
     );
     expect(reconnected.seq).toBe(5);
     expect(apply(reconnected, fill(6)).fills).toHaveLength(1);
+  });
+
+  it('samples the PnL once an exchange second, the last snapshot of a second winning, and a new generation clears it', () => {
+    const at = (seq: number, second: number, pnl: number) =>
+      snapshot({ snapshot_seq: seq, exchange_ts: T + second * S, account: { ...snapshot().account, pnl } });
+    const s = run(hello(), snapshot({ type: 'state' }), at(2, 0.5, -10), at(3, 1, -20), at(4, 1.5, -30), at(5, 2, -30));
+    expect(s.pnl).toEqual([
+      [T + 0.5 * S, -10],
+      [T + 1.5 * S, -30],
+      [T + 2 * S, -30],
+    ]);
+    expect(apply(s, at(6, 2.2, -30)).pnl).toBe(s.pnl); // unchanged in the same second: the same array
+    expect(apply(s, snapshot({ generation: 3, snapshot_seq: 1 })).pnl).toEqual([[T, 0]]);
   });
 
   it('adds no trade twice when a reconnect state repeats the last snapshot', () => {

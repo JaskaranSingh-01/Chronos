@@ -39,11 +39,14 @@ export function Equity({ runs }: { runs: Run[] }) {
     const chart = createChart(box.current!, {
       autoSize: true,
       layout: {
-        background: { type: ColorType.Solid, color: '#151c25' },
-        textColor: '#c9d1d9',
-        panes: { separatorColor: '#243041' },
+        background: { type: ColorType.Solid, color: '#0e1217' },
+        textColor: '#8792a0',
+        fontFamily: "'JetBrains Mono', 'SF Mono', Menlo, Consolas, monospace",
+        fontSize: 10,
+        panes: { separatorColor: '#1f2630' },
       },
-      grid: { vertLines: { color: '#1c2533' }, horzLines: { color: '#1c2533' } },
+      grid: { vertLines: { color: '#171d26' }, horzLines: { color: '#171d26' } },
+      rightPriceScale: { borderColor: '#1f2630' },
       localization: { timeFormatter: label },
       timeScale: {
         timeVisible: true,
@@ -65,9 +68,9 @@ export function Equity({ runs }: { runs: Run[] }) {
         lastValueVisible: false,
         priceFormat: { type: 'price', precision: 2, minMove: 0.01 },
       } as const;
-      const pnl = chart.addSeries(LineSeries, { ...line, color: '#58a6ff' });
+      const pnl = chart.addSeries(LineSeries, { ...line, color: '#5aa9ff' });
       pnl.setData(t.map((time, k) => ({ time: time as Time, value: r.equity.pnl[k] / dollars })));
-      const below = chart.addSeries(LineSeries, { ...line, color: '#ef5350' }, 1);
+      const below = chart.addSeries(LineSeries, { ...line, color: '#f0484f' }, 1);
       below.setData(drawdown(r.equity.pnl).map((d, k) => ({ time: t[k] as Time, value: d / dollars })));
     });
     chart.panes()[1]?.setHeight(90);
@@ -76,7 +79,9 @@ export function Equity({ runs }: { runs: Run[] }) {
   }, [runs]);
   return (
     <div className="panel equity">
-      <div className="title">Equity · drawdown below · event-second samples</div>
+      <div className="title">
+        Equity<span className="muted">drawdown below · event-second samples</span>
+      </div>
       <div className="plot" ref={box} />
     </div>
   );
@@ -90,7 +95,7 @@ function ResultTabs({ run, r }: { run: Run; r: Results }) {
   const cash = moneyDigits(run);
   return (
     <div className="panel lab-tabs">
-      <div className="title">
+      <div className="tabs-head">
         {tabNames
           .filter((name) => days > 1 || name !== 'Per-day PnL')
           .map((name) => (
@@ -191,7 +196,51 @@ function ResultTabs({ run, r }: { run: Run; r: Results }) {
   );
 }
 
-// The run shown: its stat cards, equity and drawdown, and tabs; a partial run says so, and one without results why.
+// The run shown's stats, as metric rows; a partial run says so.
+export function Metrics() {
+  const run = useLab((l) => l.details[l.selected]);
+  const r = run?.results;
+  return (
+    <section className="panel metrics" aria-label="Metrics">
+      <div className="title">
+        Metrics
+        <span className="grow" />
+        {r && (
+          <span className="muted">
+            {run.spec.symbol} · {run.spec.days.length === 1 ? run.spec.days[0] : `${run.spec.days.length} days`}
+          </span>
+        )}
+      </div>
+      <div className="body">
+        {r?.partial && (
+          <div className="sell">
+            Partial: {run.state}
+            {run.reason && `; ${run.reason}`}. These are the aggregates so far.
+          </div>
+        )}
+        {r && (
+          <div className="cards">
+            {cards(r, moneyDigits(run)).map(([name, value, color]) => (
+              <div key={name} className="card">
+                <span className="muted">{name}</span>
+                <b className={color}>{value}</b>
+              </div>
+            ))}
+            {r.orb &&
+              orbCards(r.orb, run.provenance.engine.price_scale).map(([name, value]) => (
+                <div key={name} className="card wide">
+                  <span className="muted">ORB · {name}</span>
+                  <b>{value}</b>
+                </div>
+              ))}
+          </div>
+        )}
+      </div>
+    </section>
+  );
+}
+
+// The run shown: its equity and drawdown, and tabs; one without results says why.
 export function RunResults() {
   const run = useLab((l) => l.details[l.selected]);
   const listed = useLab((l) => l.runs.find((r) => r.id === l.selected));
@@ -205,34 +254,10 @@ export function RunResults() {
         : listed.state === 'queued' || listed.state === 'completed'
           ? `${listed.state}…`
           : `${listed.state}: no results${listed.reason ? `; ${listed.reason}` : ''}`;
-    return <div className="panel muted">{why}</div>;
+    return <div className="body muted">{why}</div>;
   }
   return (
     <>
-      {r.partial && (
-        <div className="sell">
-          Partial: {run.state}
-          {run.reason && `; ${run.reason}`}. These are the aggregates so far.
-        </div>
-      )}
-      <div className="cards">
-        {cards(r, moneyDigits(run)).map(([name, value, color]) => (
-          <div key={name} className="card">
-            <span className="muted">{name}</span>
-            <b className={color}>{value}</b>
-          </div>
-        ))}
-      </div>
-      {r.orb && (
-        <div className="cards">
-          {orbCards(r.orb, run.provenance.engine.price_scale).map(([name, value]) => (
-            <div key={name} className="card">
-              <span className="muted">ORB · {name}</span>
-              <b>{value}</b>
-            </div>
-          ))}
-        </div>
-      )}
       <Equity runs={shown} />
       <ResultTabs key={run.id} run={run} r={r} />
     </>
@@ -249,13 +274,15 @@ export function Compare() {
   const key = ids.join();
   const shown = useMemo(() => key.split(',').flatMap((id) => details[id] ?? []), [key, details]);
   const [a, b] = shown;
-  if (!a?.results || !b?.results) return <div className="panel muted">Fetching the runs to compare…</div>;
+  if (!a?.results || !b?.results) return <div className="body muted">Fetching the runs to compare…</div>;
   const n = (run: Run) => runs.findIndex((r) => r.id === run.id) + 1;
   return (
     <>
       <div className="title">
         Compare #{n(a)} and #{n(b)}, #{n(b)} dashed
-        {!likeForLike(a.spec, b.spec) && <b className="sell"> · not like-for-like: another symbol or other days</b>}
+        {!likeForLike(a.spec, b.spec) && (
+          <span className="sell"> · not like-for-like: another symbol or other days</span>
+        )}
       </div>
       <Equity runs={shown} />
       <div className="panel lab-tabs">

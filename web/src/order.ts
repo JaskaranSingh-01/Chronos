@@ -22,6 +22,12 @@ export function parseTicks(text: string, digits: number): number {
   return ticks > 0 ? ticks : NaN;
 }
 
+// The price grid at `price` ticks, as MarketBook::tick_at: a cent at $1 or more, one tick below (Reg NMS Rule 612).
+export const tickAt = (price: number, digits: number) => {
+  const cent = 10 ** Math.max(digits - 2, 0);
+  return price >= 100 * cent ? cent : 1;
+};
+
 // The fees and limits a manual order faces: the generation's own once its state has come, a Watch's run's included.
 export const terms = (hello: Hello, spec: Spec | null): Hello =>
   spec ? { ...hello, fees: spec.fees, limits: spec.limits } : hello;
@@ -39,6 +45,7 @@ export function validate(t: Ticket, hello: Hello, position: number, orders: read
   if (t.type === 'market') return { side: t.side, order_type: 'market', qty };
   const price = parseTicks(t.price, hello.price_scale);
   if (Number.isNaN(price)) return 'Enter a price';
+  if (price % tickAt(price, hello.price_scale) !== 0) return 'Whole cents at $1 or more'; // the server rejects off_tick
   return { side: t.side, order_type: t.type, qty, price };
 }
 

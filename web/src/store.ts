@@ -36,6 +36,7 @@ export interface State {
   fills: Execution[]; // this generation's, oldest first
   tape: Trade[]; // this generation's market trades, oldest first
   bars: Candle[]; // this generation's 1 s bars, oldest first
+  pnl: [number, number][]; // the account's PnL at each exchange second this page saw a snapshot, oldest first
   barsVersion: number; // bumped when `bars` is rebuilt rather than extended
   historyTs: number; // the last history trade: snapshot trades at or before it are already in the tape
   halts: [number, number][]; // exchange-time spans the book was seen not trading
@@ -74,6 +75,7 @@ export const initial: State = {
   fills: [],
   tape: [],
   bars: [],
+  pnl: [],
   barsVersion: 0,
   historyTs: 0,
   halts: [],
@@ -138,6 +140,7 @@ function newGeneration(s: State, generation: number): State {
     fills: [],
     tape: [],
     bars: [],
+    pnl: [],
     barsVersion: s.barsVersion + 1,
     historyTs: 0,
     halts: [],
@@ -153,6 +156,15 @@ function halts(s: State, m: Snapshot): [number, number][] {
   return last && s.snap?.trading_state !== 'trading'
     ? [...s.halts.slice(0, -1), [last[0], m.exchange_ts]]
     : [...s.halts, [m.exchange_ts, m.exchange_ts]];
+}
+
+// One PnL sample a second: a snapshot in the same exchange second replaces the last.
+// ponytail: only what this page saw (the history carries no PnL); copies the curve per snapshot, ~57,600 a full day.
+function samplePnl(pnl: State['pnl'], m: Snapshot): State['pnl'] {
+  const last = pnl.at(-1);
+  const sameSecond = last !== undefined && Math.floor(last[0] / 1e9) === Math.floor(m.exchange_ts / 1e9);
+  if (sameSecond && last[1] === m.account.pnl) return pnl;
+  return [...(sameSecond ? pnl.slice(0, -1) : pnl), [m.exchange_ts, m.account.pnl]];
 }
 
 function onSnapshot(s: State, m: Snapshot): State {
@@ -172,6 +184,7 @@ function onSnapshot(s: State, m: Snapshot): State {
     seq: m.type === 'state' && (m.full_resync || s.seq === 0) ? Math.max(s.seq, m.last_report_seq) : s.seq,
     bars: fresh ? mergeBars(s.bars, m.candle ? [...m.closed_candles, m.candle] : m.closed_candles) : s.bars,
     tape: trades.length > 0 ? [...s.tape, ...trades].slice(-tapeSize) : s.tape,
+    pnl: fresh && m.symbol !== '' ? samplePnl(s.pnl, m) : s.pnl,
     halts: halts(s, m),
     notice: m.failure !== 'none' ? `replay failed: ${m.failure} ${m.source_error}` : s.notice,
   };

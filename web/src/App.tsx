@@ -1,10 +1,10 @@
-import { useState, useSyncExternalStore } from 'react';
-import { Book, Tape } from './Book';
+import { useEffect, useState, useSyncExternalStore } from 'react';
+import { DepthLadder, Tape } from './Book';
 import { Chart } from './Chart';
 import { outcomes, page, runLabel, useLab } from './lab';
 import { store, useStore } from './store';
 import { StrategyLab } from './StrategyLab';
-import { Tabs } from './Tabs';
+import { PnlPanel, Tabs } from './Tabs';
 import { Account, Ticket } from './Ticket';
 import { TopBar } from './TopBar';
 
@@ -59,7 +59,8 @@ function WatchBanner() {
       <span data-testid="watch">
         Watching run {label}
         {verdict ? <b className={outcomes[verdict.outcome][1]}> · {outcomes[verdict.outcome][0]}</b> : `: ${until}.`}
-      </span>{' '}
+      </span>
+      <span className="grow" />
       <button
         disabled={disabled}
         onClick={() => {
@@ -78,10 +79,56 @@ const onHash = (f: () => void) => {
   return () => removeEventListener('hashchange', f);
 };
 
-// The Trading Terminal, or the Strategy Lab at #lab. Each panel subscribes to its own slice, so a snapshot never
-// re-renders this tree.
+// The replay's own figures, on both pages: its rate, the snapshots this page skipped, the commands it drained, the
+// simulated latencies, and the session's symbol, generation and state.
+function EngineStrip() {
+  const snap = useStore((s) => s.snap);
+  const spec = useStore((s) => s.spec);
+  const symbol = useStore((s) => s.symbol);
+  const generation = useStore((s) => s.generation);
+  const state = useStore((s) => s.state);
+  const status = useStore((s) => s.status);
+  const viewer = useStore((s) => s.hello !== null && s.hello.role !== 'controller');
+  const us = (ns: number) => `${(ns / 1_000).toLocaleString('en-US')} µs`;
+  return (
+    <footer className="engine">
+      <span className="label">ENGINE</span>
+      {snap && (
+        <>
+          <span>
+            replay <b>{snap.metrics.events_per_second.toLocaleString('en-US')}</b> ev/s
+          </span>
+          <span>
+            dropped <b>{snap.metrics.dropped_snapshots}</b>
+          </span>
+          <span>
+            queue <b>{snap.metrics.command_queue_depth}</b>
+          </span>
+        </>
+      )}
+      {spec && (
+        <span>
+          latency order <b>{us(spec.latency.order_ns)}</b> · report <b>{us(spec.latency.report_ns)}</b>
+        </span>
+      )}
+      <span className="grow" />
+      <span className="session" data-testid="session">
+        {symbol || (generation > 1 ? '…' : 'no symbol')} · gen {generation} · {state}
+        {status !== 'open' && ` · ${status}`}
+        {viewer && ' · viewer'}
+        {snap && snap.trading_state !== 'trading' && <b className="sell"> · {snap.trading_state}</b>}
+        {snap && ` · ${snap.metrics.events_per_second} ev/s · ${snap.metrics.dropped_snapshots} dropped`}
+      </span>
+    </footer>
+  );
+}
+
+// The Trading Terminal, or the Strategy Lab at #lab: the panels on a 1 px grid. Each panel subscribes to its own slice,
+// so a snapshot never re-renders this tree.
 export function App() {
   const [price, setPrice] = useState('');
+  const symbol = useStore((s) => s.symbol);
+  useEffect(() => setPrice(''), [symbol]); // a new symbol's ticket starts unpriced
   const shown = useSyncExternalStore(onHash, () => page(location.hash));
   return (
     <div className="terminal">
@@ -92,22 +139,20 @@ export function App() {
           <TopBar />
           <ViewerBanner />
           <WatchBanner />
-          <main>
-            <section className="col">
-              <Chart />
-              <Tabs />
-            </section>
-            <section className="col">
-              <Book onPick={setPrice} />
-              <Tape />
-            </section>
-            <section className="col">
+          <main className="term">
+            <DepthLadder onPick={setPrice} />
+            <Chart />
+            <PnlPanel />
+            <Tape />
+            <div className="side">
               <Ticket price={price} setPrice={setPrice} />
               <Account />
-            </section>
+            </div>
+            <Tabs />
           </main>
         </>
       )}
+      <EngineStrip />
       <Gate />
     </div>
   );

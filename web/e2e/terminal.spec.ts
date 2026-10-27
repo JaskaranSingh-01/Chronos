@@ -30,7 +30,7 @@ async function pickAcme(page: Page) {
 async function stepTheBook(page: Page) {
   const step = page.getByRole('button', { name: 'Step ⏭' });
   await step.click();
-  await expect(page.locator('.level.buy')).toHaveText(/10\.00\s*300/);
+  await expect(page.locator('.level.buy')).toHaveText(/300\s*10\.00/); // the ladder: bid size, then price
   await step.click();
   await expect(page.locator('.level.sell')).toHaveText(/10\.01\s*300/);
   await step.click();

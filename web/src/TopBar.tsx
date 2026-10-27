@@ -1,5 +1,5 @@
 import { memo, useEffect, useRef, useState } from 'react';
-import { dateOf, dayLabel, dayTs, signed, stamp } from './format';
+import { dateOf, dayLabel, dayTs, stamp } from './format';
 import type { Day } from './protocol';
 import { selectFirstRun, store, useStore } from './store';
 
@@ -22,10 +22,11 @@ export const Symbols = memo(function Symbols({ id, symbols }: { id: string; symb
   );
 });
 
-// The header switch between the Trading Terminal and the Strategy Lab, at #lab.
+// The wordmark and the header switch between the Trading Terminal and the Strategy Lab, at #lab.
 export function Switch({ lab }: { lab: boolean }) {
   return (
-    <nav className="seg">
+    <nav className="pages">
+      <span className="brand">CHRONOS</span>
       <a href="#" className={lab ? '' : 'on'} aria-current={lab ? undefined : 'page'}>
         Terminal
       </a>
@@ -72,7 +73,7 @@ export function DayPicker({
   );
 }
 
-// Symbol and days, replay controls, the exchange clock, progress, PnL and the session's status.
+// Symbol and days, replay controls, the exchange clock and progress, seek, and the connection.
 export function TopBar() {
   const snap = useStore((s) => s.snap);
   const symbol = useStore((s) => s.symbol);
@@ -113,6 +114,7 @@ export function TopBar() {
   return (
     <header className="bar">
       <Switch lab={false} />
+      <span className="sep" />
       <form
         onSubmit={(e) => {
           e.preventDefault();
@@ -142,15 +144,20 @@ export function TopBar() {
         <DayPicker days={days} load={store.loadDays} picked={picked} pick={setPicked} disabled={viewer} />
         <button disabled={viewer || !typed.trim()}>Load</button>
       </form>
+      <span className="sep" />
       <button disabled={idle} onClick={() => store.control({ action: 'restart' })}>
         ⟲ Restart
       </button>
       {state === 'playing' ? (
-        <button disabled={idle} onClick={() => store.control({ action: 'pause' })}>
+        <button className="primary" disabled={idle} onClick={() => store.control({ action: 'pause' })}>
           ⏸ Pause
         </button>
       ) : (
-        <button disabled={idle || state === 'ended' || seeking} onClick={() => store.control({ action: 'play' })}>
+        <button
+          className="primary"
+          disabled={idle || state === 'ended' || seeking}
+          onClick={() => store.control({ action: 'play' })}
+        >
           ▶ Play
         </button>
       )}
@@ -169,6 +176,10 @@ export function TopBar() {
           </button>
         ))}
       </span>
+      <span className="num bright" data-testid="clock">
+        {at > 0 ? stamp(at, multiDay) : '—'} ET
+      </span>
+      <progress value={snap?.progress ?? 0} aria-label="Day read" />
       <form
         onSubmit={(e) => {
           e.preventDefault();
@@ -206,20 +217,13 @@ export function TopBar() {
           Cancel seek
         </button>
       )}
-      <span data-testid="clock">{at > 0 ? stamp(at, multiDay) : '—'} ET</span>
-      <progress value={snap?.progress ?? 0} />
-      <span>
-        PnL <b>{snap && hello ? signed(snap.account.pnl, hello.price_scale + hello.quantity_scale) : '—'}</b>
-      </span>
-      <span className="muted session" data-testid="session">
-        {symbol || (generation > 1 ? '…' : 'no symbol')} · gen {generation} · {state}
-        {status !== 'open' && ` · ${status}`}
-        {viewer && hello && ' · viewer'}
-        {snap && snap.trading_state !== 'trading' && <b className="sell"> · {snap.trading_state}</b>}
-        {snap && ` · ${snap.metrics.events_per_second} ev/s · ${snap.metrics.dropped_snapshots} dropped`}
-      </span>
+      <span className="sep" />
       <span className="notice" title={notice}>
         {notice}
+      </span>
+      <span className={`status ${status}`}>
+        {status === 'open' ? 'CONNECTED' : status.toUpperCase()}{' '}
+        <span className="muted">{hello ? hello.role : ''}</span>
       </span>
     </header>
   );

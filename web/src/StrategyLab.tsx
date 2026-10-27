@@ -20,7 +20,7 @@ import {
   type StrategyKind,
   type Window,
 } from './lab';
-import { Compare, RunResults } from './LabResults';
+import { Compare, Metrics, RunResults } from './LabResults';
 import { store, useStore } from './store';
 import { DayPicker, Switch, Symbols } from './TopBar';
 
@@ -69,91 +69,93 @@ function RunForm({ form, setForm, digits }: { form: Form; setForm(f: Form): void
         setRefusal(r ? { field: named, text: refusalText(r, body.symbol) } : none);
       }}
     >
-      <div className="title">New run</div>
-      <label className="kv">
-        Strategy
-        <select
-          aria-label="strategy"
-          value={form.strategy}
-          onChange={(e) =>
-            edit({ ...defaults(strategies, e.target.value as StrategyKind, digits, form.days), symbol: form.symbol })
-          }
-        >
-          {strategies.strategies.map((k) => (
-            <option key={k.kind} value={k.kind}>
-              {strategyNames[k.kind]}
-            </option>
-          ))}
-        </select>
-      </label>
-      <label className="kv">
-        Symbol
-        <input
-          aria-label="symbol"
-          aria-invalid={refusal.field === 'symbol'}
-          list="lab-symbols"
-          value={form.symbol}
-          onChange={(e) => edit({ ...form, symbol: e.target.value })}
-        />
-      </label>
-      <Symbols id="lab-symbols" symbols={symbols} />
-      <div className={`kv${refusal.field.startsWith('days') ? ' bad' : ''}`}>
-        Days
-        <DayPicker
-          days={days}
-          load={lab.loadDays}
-          picked={form.days}
-          pick={(d) => edit({ ...form, days: d })}
-          disabled={false}
-        />
+      <div className="title">New backtest</div>
+      <div className="body">
+        <label className="kv">
+          Strategy
+          <select
+            aria-label="strategy"
+            value={form.strategy}
+            onChange={(e) =>
+              edit({ ...defaults(strategies, e.target.value as StrategyKind, digits, form.days), symbol: form.symbol })
+            }
+          >
+            {strategies.strategies.map((k) => (
+              <option key={k.kind} value={k.kind}>
+                {strategyNames[k.kind]}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="kv">
+          Symbol
+          <input
+            aria-label="symbol"
+            aria-invalid={refusal.field === 'symbol'}
+            list="lab-symbols"
+            value={form.symbol}
+            onChange={(e) => edit({ ...form, symbol: e.target.value })}
+          />
+        </label>
+        <Symbols id="lab-symbols" symbols={symbols} />
+        <div className={`kv${refusal.field.startsWith('days') ? ' bad' : ''}`}>
+          Days
+          <DayPicker
+            days={days}
+            load={lab.loadDays}
+            picked={form.days}
+            pick={(d) => edit({ ...form, days: d })}
+            disabled={false}
+          />
+        </div>
+        <label className="kv">
+          Window
+          <select
+            aria-label="window"
+            value={form.window}
+            onChange={(e) => edit({ ...form, window: e.target.value as Window })}
+          >
+            {Object.entries(windowLabels).map(([id, label]) => (
+              <option key={id} value={id}>
+                {label}
+              </option>
+            ))}
+          </select>
+        </label>
+        <h3>Parameters · {strategyNames[form.strategy]}</h3>
+        {kind.params.map((p) =>
+          field(`params.${p.name}`, p.name.replaceAll('_', ' '), form.params[p.name] ?? '', (v) =>
+            edit({ ...form, params: { ...form.params, [p.name]: v } }),
+          ),
+        )}
+        <h3>Execution</h3>
+        {field('latency.order_ns', 'order latency ns', form.latency.order_ns, (order_ns) =>
+          edit({ ...form, latency: { ...form.latency, order_ns } }),
+        )}
+        {field('latency.report_ns', 'report latency ns', form.latency.report_ns, (report_ns) =>
+          edit({ ...form, latency: { ...form.latency, report_ns } }),
+        )}
+        {field('fees.maker', 'maker fee $ a share', form.fees.maker, (maker) =>
+          edit({ ...form, fees: { ...form.fees, maker } }),
+        )}
+        {field('fees.taker', 'taker fee $ a share', form.fees.taker, (taker) =>
+          edit({ ...form, fees: { ...form.fees, taker } }),
+        )}
+        <h3>Limits · empty follows the params</h3>
+        {(['max_position', 'max_order_quantity', 'max_open_orders'] as const).map((name) =>
+          field(
+            `limits.${name}`,
+            name.replaceAll('_', ' '),
+            form.limits[name],
+            (v) => edit({ ...form, limits: { ...form.limits, [name]: v } }),
+            String(kind.limits[name]),
+          ),
+        )}
+        <button className="place run" disabled={busy}>
+          ▶ Run backtest
+        </button>
+        <div className="sell">{refusal.text}</div>
       </div>
-      <label className="kv">
-        Window
-        <select
-          aria-label="window"
-          value={form.window}
-          onChange={(e) => edit({ ...form, window: e.target.value as Window })}
-        >
-          {Object.entries(windowLabels).map(([id, label]) => (
-            <option key={id} value={id}>
-              {label}
-            </option>
-          ))}
-        </select>
-      </label>
-      <div className="title">Parameters</div>
-      {kind.params.map((p) =>
-        field(`params.${p.name}`, p.name.replaceAll('_', ' '), form.params[p.name] ?? '', (v) =>
-          edit({ ...form, params: { ...form.params, [p.name]: v } }),
-        ),
-      )}
-      <div className="title">Execution</div>
-      {field('latency.order_ns', 'order latency ns', form.latency.order_ns, (order_ns) =>
-        edit({ ...form, latency: { ...form.latency, order_ns } }),
-      )}
-      {field('latency.report_ns', 'report latency ns', form.latency.report_ns, (report_ns) =>
-        edit({ ...form, latency: { ...form.latency, report_ns } }),
-      )}
-      {field('fees.maker', 'maker fee $ a share', form.fees.maker, (maker) =>
-        edit({ ...form, fees: { ...form.fees, maker } }),
-      )}
-      {field('fees.taker', 'taker fee $ a share', form.fees.taker, (taker) =>
-        edit({ ...form, fees: { ...form.fees, taker } }),
-      )}
-      <div className="title">Limits · empty follows the params</div>
-      {(['max_position', 'max_order_quantity', 'max_open_orders'] as const).map((name) =>
-        field(
-          `limits.${name}`,
-          name.replaceAll('_', ' '),
-          form.limits[name],
-          (v) => edit({ ...form, limits: { ...form.limits, [name]: v } }),
-          String(kind.limits[name]),
-        ),
-      )}
-      <button className="place run" disabled={busy}>
-        ▶ Run backtest
-      </button>
-      <div className="sell">{refusal.text}</div>
     </form>
   );
 }
@@ -171,7 +173,7 @@ async function save(id: string) {
 
 // What the run shown allows: Watch in the terminal, which only the controlling tab may; Verify; Export; its settings
 // as a new run; Cancel while it is queued or running; and Delete, confirmed here rather than by a dialog.
-function RunActions({ run, n, edit }: { run: RunListing; n: number; edit(): void }) {
+function RunActions({ run, edit }: { run: RunListing; edit(): void }) {
   const [confirming, setConfirming] = useState(false);
   const seat = useStore((s) =>
     s.status !== 'open' || !s.hello
@@ -185,8 +187,8 @@ function RunActions({ run, n, edit }: { run: RunListing; n: number; edit(): void
   const once = (f: () => void) => (e: { detail: number }) => e.detail < 2 && f();
   return (
     <div className="actions">
-      <span className="muted">#{n}</span>
       <button
+        className="primary"
         disabled={!can.watch || seat !== ''}
         onClick={() => {
           if (store.control({ action: 'watch', run_id: run.id })) location.hash = '';
@@ -286,18 +288,30 @@ function result(r: RunListing): string {
 }
 
 // Every run, newest first, numbered in the order they were listed; a click shows one, and two ticked compare.
-function Runs({ edit }: { edit(r: RunListing): void }) {
+function Runs() {
   const runs = useLab((l) => l.runs);
   const selected = useLab((l) => l.selected);
   const compare = useLab((l) => l.compare);
-  const full = useLab((l) => l.details[l.selected]); // its JSON, for the provenance
-  const shown = runs.findIndex((r) => r.id === selected);
   const ticked = runs.filter((r) => compare.includes(r.id));
   const n = (r: RunListing) => runs.indexOf(r) + 1;
   const comparing = useLab((l) => l.comparing && l.compare.length === 2);
   return (
-    <div className="panel runs">
-      <div className="title">Runs · tick two to compare</div>
+    <section className="panel runs" aria-label="Runs">
+      <div className="title">
+        Runs<span className="muted">tick two to compare</span>
+        <span className="grow" />
+        <button
+          className={comparing ? 'on' : ''}
+          disabled={!comparing && (ticked.length !== 2 || ticked.some((r) => r.pnl === null))}
+          onClick={() => lab.showCompare(!comparing)}
+        >
+          {comparing
+            ? 'Close compare'
+            : ticked.length === 2
+              ? `Compare #${n(ticked[0])} vs #${n(ticked[1])}`
+              : 'Compare'}
+        </button>
+      </div>
       <table>
         <tbody>
           <tr className="muted">
@@ -331,25 +345,34 @@ function Runs({ edit }: { edit(r: RunListing): void }) {
             .reverse()}
         </tbody>
       </table>
-      <div className="actions">
-        <button
-          disabled={!comparing && (ticked.length !== 2 || ticked.some((r) => r.pnl === null))}
-          onClick={() => lab.showCompare(!comparing)}
-        >
-          {comparing
-            ? 'Close compare'
-            : ticked.length === 2
-              ? `Compare #${n(ticked[0])} vs #${n(ticked[1])}`
-              : 'Compare'}
-        </button>
-      </div>
-      {shown >= 0 && <RunActions key={selected} run={runs[shown]} n={shown + 1} edit={() => edit(runs[shown])} />}
-      {shown >= 0 && full && <Provenance run={full} label={runLabel(runs, selected)} />}
-    </div>
+    </section>
   );
 }
 
-// The Strategy Lab: a run's settings on the left, its results in the middle, the runs on the right.
+// The run picked: what it allows, its verifications and its provenance.
+function RunPanel({ edit }: { edit(r: RunListing): void }) {
+  const runs = useLab((l) => l.runs);
+  const selected = useLab((l) => l.selected);
+  const full = useLab((l) => l.details[l.selected]); // its JSON, for the provenance
+  const shown = runs.findIndex((r) => r.id === selected);
+  const run = runs[shown];
+  return (
+    <section className="panel run" aria-label="Selected run">
+      <div className="title">
+        {run
+          ? `Run #${shown + 1} · ${strategyNames[run.spec.strategy] ?? run.spec.strategy} · ${run.spec.symbol}`
+          : 'Run'}
+        <span className="grow" />
+        {run && <b className="num">{result(run)}</b>}
+      </div>
+      {run && <RunActions key={selected} run={run} edit={() => edit(run)} />}
+      <div className="body">{run && full && <Provenance run={full} label={runLabel(runs, selected)} />}</div>
+    </section>
+  );
+}
+
+// The Strategy Lab: the new run's settings on the left; the runs over the results or a comparison in the middle; the
+// run picked's metrics over its actions and provenance on the right.
 export function StrategyLab() {
   useEffect(() => void lab.start(), []); // runs queued or deleted elsewhere show on entering
   const offline = useLab((l) => l.offline);
@@ -366,21 +389,22 @@ export function StrategyLab() {
     <>
       <header className="bar">
         <Switch lab />
+        <span className="sep" />
         <span className="notice">{offline ? 'chronos-serve does not answer: retrying' : notice}</span>
       </header>
       <main className="lab">
-        <section className="col">
-          {form && <RunForm key={copies} form={form} setForm={setForm} digits={digits} />}
+        {form ? <RunForm key={copies} form={form} setForm={setForm} digits={digits} /> : <div className="panel form" />}
+        <Runs />
+        <section className="panel results" aria-label="Results">
+          {comparing ? <Compare /> : <RunResults />}
         </section>
-        <section className="col">{comparing ? <Compare /> : <RunResults />}</section>
-        <section className="col">
-          <Runs
-            edit={(r) => {
-              setForm(fromSpec(r.spec, digits));
-              setCopies(copies + 1);
-            }}
-          />
-        </section>
+        <Metrics />
+        <RunPanel
+          edit={(r) => {
+            setForm(fromSpec(r.spec, digits));
+            setCopies(copies + 1);
+          }}
+        />
       </main>
     </>
   );
