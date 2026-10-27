@@ -1,0 +1,13 @@
+build
+data
+data_temp
+runs
+sessions
+web/node_modules
+web/dist
+web/test-results
+.cache
+.superpowers
+.remember
+.DS_Store
+*.crdownload
