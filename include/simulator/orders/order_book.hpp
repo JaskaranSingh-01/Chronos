@@ -13,7 +13,7 @@
 namespace simulator {
 
 // Where an order book's backend comes from: its storage, at run time (Selected, the engine's), or the compile-time
-// choice of List or Ladder, which only the benchmark that prices the run-time choice uses (spec §2.4).
+// choice of List or Ladder, which only the benchmark that prices the run-time choice uses.
 enum class Dispatch : std::uint8_t {
     Selected,
     List,
@@ -21,10 +21,10 @@ enum class Dispatch : std::uint8_t {
 };
 
 // One symbol's price levels over Orders it links but does not own. Each side is a list of levels, best first,
-// kept in the storage's level pool; the storage's indices, which every book shares, find an order or a level
-// (spec §2.2). With the ladder backend, each side also keeps a window of ladder_window slots a step apart,
+// kept in the storage's level pool; the storage's indices, which every book shares, find an order or a level.
+// With the ladder backend, each side also keeps a window of ladder_window slots a step apart,
 // recentred on its best whenever the best leaves the window's middle half, where a level is found by its slot
-// and placed by the nearest slot set towards the best (spec §2.3).
+// and placed by the nearest slot set towards the best.
 template <Dispatch D>
 class BasicOrderBook
 {
@@ -97,7 +97,7 @@ public:
     std::size_t level_count() const noexcept;
 
     // True for the list. For the ladder, true if every level inside its side's window is in its slot, every slot
-    // names one, and each side's best is in its window's middle half (spec §2.5). O(levels).
+    // names one, and each side's best is in its window's middle half. O(levels).
     bool windows_hold() const noexcept;
 
     // False if `id` is unknown or the order rejects the change.

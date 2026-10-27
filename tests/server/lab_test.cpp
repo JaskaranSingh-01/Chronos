@@ -202,7 +202,7 @@ TEST(LabTest, DeletesAQueuedOrIdleRunAtOnce)
     EXPECT_TRUE(std::filesystem::exists(days.runs / (kept + ".json")));  // still there, as the warning says
 }
 
-// Review gate 5: a run deleted while it runs is hidden at once and its job cancelled; when the job stops, at its next
+// A run deleted while it runs is hidden at once and its job cancelled; when the job stops, at its next
 // market event, nothing is written or published, and the run does not come back after a restart. The run queued
 // behind it completes as usual.
 TEST(LabTest, ARunDeletedWhileRunningLeavesNoFileAndNeverComesBack)
@@ -336,7 +336,7 @@ TEST(LabTest, AVerificationOnTheSameCodeAndDaysReproducesTheRun)
     EXPECT_EQ(other.verify(id, days.library), Refusal::OtherSettings);
 }
 
-// Spec §4: a verification reads each segment afresh, so a store file damaged since the run is a changed input, naming
+// A verification reads each segment afresh, so a store file damaged since the run is a changed input, naming
 // the day, with no digests. A day rebuilt with the run's own symbol changed is refused up front.
 TEST(LabTest, AVerificationOfADamagedSegmentIsInputChangedAndOfARebuiltOneRefused)
 {
@@ -358,7 +358,7 @@ TEST(LabTest, AVerificationOfADamagedSegmentIsInputChangedAndOfARebuiltOneRefuse
     EXPECT_EQ(lab.verify(id, days.library), Refusal::InputChanged);
 }
 
-// Spec §4 and §6, symbol isolation: another symbol's message changed in the day file rebuilds the day, but the run's
+// Symbol isolation: another symbol's message changed in the day file rebuilds the day, but the run's
 // segment keeps its bytes and hash, so the run still verifies as reproduced.
 TEST(LabTest, AnotherSymbolsChangedMessageLeavesARunReproducible)
 {
@@ -391,7 +391,7 @@ TEST(LabTest, AnotherSymbolsChangedMessageLeavesARunReproducible)
     EXPECT_EQ(verified(lab, id, 1)["verifications"][0]["outcome"], "reproduced");
 }
 
-// Spec §4: a run saved before the per-symbol store has no segment hashes. It stays listed and viewable, but neither a
+// A run saved before the per-symbol store has no segment hashes. It stays listed and viewable, but neither a
 // verification nor a Watch claims it against an identity it did not record.
 TEST(LabTest, ARunRecordedBeforeTheStoreIsListedButNeitherVerifiedNorWatched)
 {
@@ -420,7 +420,7 @@ TEST(LabTest, ARunRecordedBeforeTheStoreIsListedButNeitherVerifiedNorWatched)
     EXPECT_EQ(why, id + ": recorded before the per-symbol store: queue it again");
 }
 
-// Review gate 2, Verify's half: a run recorded by a build of other source, as a dirty tree at the same commit would
+// Verify's half: a run recorded by a build of other source, as a dirty tree at the same commit would
 // be, verifies as different_code, never as a failed reproduction.
 TEST(LabTest, AVerificationOnOtherCodeReportsDifferentCode)
 {

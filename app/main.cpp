@@ -279,7 +279,7 @@ struct RunMetrics
     double user_s{0};
     double sys_s{0};
     std::uint64_t allocations{0};      // operator new calls during run()
-    std::int64_t heap_blocks_change{0};  // the heap's blocks in use after run() minus before (spec §3.3)
+    std::int64_t heap_blocks_change{0};  // the heap's blocks in use after run() minus before
     std::int64_t heap_bytes_change{0};
     std::uint64_t reserved_bytes{0};   // set up before run(): the book storage, the books, the registry, the ring
     std::uint64_t windows_reserved_bytes{0};  // --book ladder: the windows' part of reserved_bytes

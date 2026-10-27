@@ -129,7 +129,7 @@ void HttpServer::Impl::routes()
     CROW_ROUTE(app, "/api/strategies")([this](const crow::request& request) {
         return api(request, [] { return json_response(200, encode_strategies()); });
     });
-    // The Lab (spec §5.6). Crow drops a connection whose body passes 64 KiB before a route runs.
+    // The Lab. Crow drops a connection whose body passes 64 KiB before a route runs.
     CROW_ROUTE(app, "/api/backtests")
         .methods(crow::HTTPMethod::Get, crow::HTTPMethod::Post)([this](const crow::request& request) {
             if (request.method == crow::HTTPMethod::Post) {
@@ -232,9 +232,9 @@ crow::response HttpServer::Impl::api(const crow::request& request, const std::fu
     return status == 0 ? serve() : crow::response{status};
 }
 
-// Serves an /api POST or DELETE that api() allows and that comes as JSON from this server's own page (spec §5.6): JSON,
-// as no cross-origin form can send it without a preflight, else 415; an Origin of http://<Host>, else 403. Without a
-// Lab, 404.
+// Serves an /api POST or DELETE that api() allows and that comes as JSON from this server's own page: JSON,
+// as no cross-origin form can send it without a preflight, else 415; an Origin websocket_allowed() accepts, else
+// 403. Without a Lab, 404.
 crow::response HttpServer::Impl::change(const crow::request& request, const std::function<crow::response()>& serve)
 {
     return api(request, [&] {

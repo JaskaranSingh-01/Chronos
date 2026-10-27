@@ -39,7 +39,7 @@ enum class ControlType : std::uint8_t {
     Watch
 };
 
-// A Watch in Terminal of a Lab run (spec §5.5): the run, and what each of its generations' verdict compares.
+// A Watch in Terminal of a Lab run: the run, and what each of its generations' verdict compares.
 struct Watched
 {
     RunId run_id{};                 // all NUL when the generation watches no run

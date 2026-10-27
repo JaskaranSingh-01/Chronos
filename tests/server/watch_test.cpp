@@ -113,7 +113,7 @@ struct Terminal
     }
 };
 
-// Spec §8, equality 2: Watch replays each Lab run, both strategies over one and two days, under a Regular and a Full
+// Equality 2: Watch replays each Lab run, both strategies over one and two days, under a Regular and a Full
 // day window, to the run's digests. One plays in steps, at a speed, paused and seeking; one restarts part-way, and its
 // new generation, the same Watch, re-hashes and gets its own verdict.
 TEST(WatchTest, EveryRunReproducesInTheTerminalAtAnyPace)
@@ -267,7 +267,7 @@ TEST(WatchTest, AWatchIsAdmittedOnlyForACompletedRunOverTheSameDays)
     EXPECT_EQ(refusal(truncated), done + ": run with another --allow-truncated-tail");
 }
 
-// Spec §4: a Watch reads each segment afresh. Friday's segment damaged in the store since the run fails its read, so
+// A Watch reads each segment afresh. Friday's segment damaged in the store since the run fails its read, so
 // the replay stops with a store error before Monday, and the verdict is input_changed, never a mismatch.
 TEST(WatchTest, AWatchOfADamagedSegmentIsInputChanged)
 {

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Checks the replay path cannot allocate (spec §3.3, part 3): no file on it calls the C allocator or a container's
+# Checks the replay path cannot allocate: no file on it calls the C allocator or a container's
 # growing operation outside a function listed below as setup, with the reason it runs before the replay.
 #
 #   scripts/check-hot-path.sh

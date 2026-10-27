@@ -39,7 +39,7 @@ private:
     std::unique_ptr<Instrument[]> instruments_;  // index = SymbolId
     std::size_t capacity_{0};
     // add() writes an instrument, then store-releases size_; size() and find() load-acquire it, so a replay's thread
-    // reads an instrument the source's thread registered (spec §4.1). atomic_ref keeps the registry movable, and before
+    // reads an instrument the source's thread registered. atomic_ref keeps the registry movable, and before
     // C++26 it takes no const object.
     mutable std::size_t size_{0};
 

@@ -303,7 +303,7 @@ TEST(StoreBuilderTest, ACrashBeforeOrAfterTheRenameReopensToAValidStore)
     EXPECT_EQ(read_back(dir, kMonday, "AAA").size(), read_back(dir, kFriday, "AAA").size() + 38);
 }
 
-// Spec §6, recovery: under RLIMIT_FSIZE a write fails mid-build. Every file is back at its committed end, the old
+// Recovery: under RLIMIT_FSIZE a write fails mid-build. Every file is back at its committed end, the old
 // index is in force and its segments read back, and no new index is left behind.
 TEST(StoreBuilderTest, AFailedWriteAbortsTheBuildAndLeavesTheCommittedStore)
 {
@@ -346,7 +346,7 @@ TEST(StoreBuilderTest, AFailedWriteAbortsTheBuildAndLeavesTheCommittedStore)
     EXPECT_EQ(store_usage(store, index).unreferenced, 0u);
 }
 
-// Spec §2.5: the day file replaced, or written in place, during a build: nothing is committed.
+// The day file replaced, or written in place, during a build: nothing is committed.
 TEST(StoreBuilderTest, ADayFileChangedWhileItIsReadIsNotCommittedButOneChangedAfterACommitIsIgnored)
 {
     const ScratchDir dir{"store-source"};
@@ -435,7 +435,7 @@ TEST(StoreBuilderTest, ACommitOfASourceNotNamedForItsDayOrOfAMalformedHashIsRefu
     EXPECT_EQ(index_of(dir).days().at(kMonday).segments.size(), 3u);
 }
 
-// Spec §2.5, dead bytes: a rebuilt day's old segments stay in their files, unreferenced; another day's build, or a
+// Dead bytes: a rebuilt day's old segments stay in their files, unreferenced; another day's build, or a
 // failed one, leaves the count as it was.
 TEST(StoreBuilderTest, ARebuiltDaysOldSegmentsAreTheUnreferencedBytes)
 {
@@ -532,7 +532,7 @@ TEST(StoreReadTest, AnIndexedLengthIsCheckedAgainstTheFramesBeforeAnythingIsSize
     EXPECT_EQ(read(aaa), "AAA on 2019-12-30: damaged zstd frames");
 }
 
-// A read racing chronos-serve's startup discard of an invalid index (spec §2.5) returns the intact segment or fails
+// A read racing chronos-serve's startup discard of an invalid index returns the intact segment or fails
 // cleanly: after the files go it fails, and the bytes rebuilt in their place read back only if they are the same.
 TEST(StoreReadTest, AReadOfAStoreRebuiltInPlaceIsTheIntactSegmentOrAnError)
 {
@@ -559,7 +559,7 @@ TEST(StoreReadTest, AReadOfAStoreRebuiltInPlaceIsTheIntactSegmentOrAnError)
     EXPECT_EQ(bytes, intact);
 }
 
-// Spec §2.4: every event type over AAA and BBB, interleaved; a System Event before any symbol's message; BBB halted by
+// Every event type over AAA and BBB, interleaved; a System Event before any symbol's message; BBB halted by
 // the sweep at the start of system hours and again mid-day; CCC listed after it; a message no R names.
 ItchBuilder busy_day(std::uint64_t start_of_system_hours = 3'000)
 {
@@ -623,7 +623,7 @@ Decoded decode(std::span<const std::byte> bytes, std::string_view ticker, bool a
     return decoded;
 }
 
-// Spec §2.4 and §6, event-stream equality: for every symbol, its segment decodes to exactly the events its day file
+// Event-stream equality: for every symbol, its segment decodes to exactly the events its day file
 // does, ending the same way: a whole day, one cut in its last message, one with frames no locate routes, and one whose
 // framing breaks mid-file.
 TEST(StoreEquivalenceTest, EverySymbolsSegmentDecodesToTheEventsOfItsDayFile)
@@ -657,7 +657,7 @@ TEST(StoreEquivalenceTest, EverySymbolsSegmentDecodesToTheEventsOfItsDayFile)
     EXPECT_EQ(decode(broken, "CCC", true).error, SourceError::InvalidLength);
 }
 
-// Spec §6, System Events: moving the start of system hours changes every segment of the day, and each decodes to the
+// System Events: moving the start of system hours changes every segment of the day, and each decodes to the
 // day's new stream, the halt sweep at the new time.
 TEST(StoreEquivalenceTest, AChangedSystemEventChangesEverySegmentAndItsStream)
 {
@@ -676,7 +676,7 @@ TEST(StoreEquivalenceTest, AChangedSystemEventChangesEverySegmentAndItsStream)
               session_midnight_ns(kMonday, us_eastern_utc_offset(kMonday)) + 3'100);
 }
 
-// Spec §6, symbol isolation: another symbol's message changed leaves this symbol's segment byte for byte.
+// Symbol isolation: another symbol's message changed leaves this symbol's segment byte for byte.
 TEST(StoreEquivalenceTest, AnotherSymbolsChangedMessageLeavesThisSegmentAsItWas)
 {
     const ScratchDir before{"store-isolation-before"};
@@ -693,7 +693,7 @@ TEST(StoreEquivalenceTest, AnotherSymbolsChangedMessageLeavesThisSegmentAsItWas)
     EXPECT_NE(segment(after, "BBB").hash, segment(before, "BBB").hash);
 }
 
-// Spec §6, digest equality on a real day (CHRONOS_ITCH_FILE, CHRONOS_ITCH_DATE as in itch_real_data_test.cpp): the
+// Digest equality on a real day (CHRONOS_ITCH_FILE, CHRONOS_ITCH_DATE as in itch_real_data_test.cpp): the
 // store is built in the temp directory, then every symbol's segment replays to the book that symbol has at the end of
 // the full-day replay of every symbol. Needs about a third of the day file's size free in TMPDIR.
 TEST(StoreRealDataTest, EverySymbolsSegmentReplaysToItsBookOfTheFullDay)

@@ -43,7 +43,7 @@ bool is_hash(std::string_view text) noexcept;
 // YYYY-MM-DD.
 std::string iso_date(std::chrono::year_month_day date);
 
-// The store's index.tsv (spec §2.1-§2.2): a `day` line per day, then a `segment` line per segment, tab-separated.
+// The store's index.tsv: a `day` line per day, then a `segment` line per segment, tab-separated.
 class StoreIndex
 {
 private:
@@ -51,7 +51,7 @@ private:
 
 public:
     // Reads <dir>/index.tsv, none being an empty store, and checks its records against the symbol files. False, with
-    // `error` naming the line or file, for any index spec §2.2 calls invalid.
+    // `error` naming the line or file, for an index that breaks any rule of its format.
     bool load(const std::filesystem::path& dir, std::string& error);
     std::string text() const;
 

@@ -406,7 +406,7 @@ chronos_cli_test(BadOptionExitsTwo 2 replay day.bin --symbol AAPL --date 2019-12
 chronos_cli_test(MissingFileExitsTwo 2 replay /nonexistent/chronos-missing.itch --symbol AAPL --date 2019-12-30)
 chronos_cli_test(FailedRunExitsOne 1 replay /dev/null --symbol AAPL --date 2019-12-30)
 
-# The allocation count is read immediately around MarketReplay::run (spec §3.3): opening the file and building the
+# The allocation count is read immediately around MarketReplay::run: opening the file and building the
 # source, the book and the report all allocate, and a run() that allocates nothing still counts 0. With --threads 2 the
 # decoder's thread and ring are made before it.
 add_test(NAME SimulatorCliTest.TheAllocationCountCoversOnlyTheReplay
@@ -417,7 +417,7 @@ add_test(NAME SimulatorCliTest.TheAllocationCountCoversOnlyTheReplay
                         done"
                  $<TARGET_FILE:simulator> ${PROJECT_BINARY_DIR}/allocation-interval.json)
 
-# A full book stops the replay and says what is full (spec §3.2): ACME's day adds two orders, and --capacity holds one.
+# A full book stops the replay and says what is full: ACME's day adds two orders, and --capacity holds one.
 add_test(NAME SimulatorCliTest.AFullOrderPoolStopsTheReplayAndSaysSo
          COMMAND sh -c "dir=$(mktemp -d) && \"$1\" \"$dir\" || exit 1
                         out=$(\"$0\" replay \"$dir/12302019.NASDAQ_ITCH50.bin\" --symbol ACME --date 2019-12-30 --capacity 1)
@@ -425,7 +425,7 @@ add_test(NAME SimulatorCliTest.AFullOrderPoolStopsTheReplayAndSaysSo
                         test $code -eq 1 && echo \"$out\" | grep -qF 'hint: the order pool (1) is full; raise --capacity'"
                  $<TARGET_FILE:simulator> $<TARGET_FILE:chronos-e2e-fixture>)
 
-# A replay allocates nothing once it starts (spec §3.3): no allocation counted, and the heap unchanged, in a replay of
+# A replay allocates nothing once it starts: no allocation counted, and the heap unchanged, in a replay of
 # every symbol of the Lab's Monday (ACME, ZETA and IDLE) and of one of them, with either backend (the ladder's windows
 # reserved), on one thread or two. ASan builds count nothing (its allocator owns the heap), so the Release, UBSan and
 # macOS jobs enforce this.
@@ -491,7 +491,7 @@ add_test(NAME ChronosServeCliTest.AStoreIsOneServersAndTheCliReplaysFromIt
                  $<TARGET_FILE:simulator> $<TARGET_FILE:chronos-e2e-fixture>)
 set_tests_properties(ChronosServeCliTest.AStoreIsOneServersAndTheCliReplaysFromIt PROPERTIES TIMEOUT 60)
 
-# Review gate 2: build_info.cmake's source digest tells two trees at one commit apart (needs git).
+# build_info.cmake's source digest tells two trees at one commit apart (needs git).
 add_test(NAME BuildInfoTest.DirtyTreesAtOneCommitGetTheirOwnSourceDigest
          COMMAND ${CMAKE_COMMAND} -DBUILD_INFO=${PROJECT_SOURCE_DIR}/cmake/build_info.cmake
                  -DWORK=${PROJECT_BINARY_DIR}/build-info-test -P ${PROJECT_SOURCE_DIR}/tests/build_info_test.cmake)

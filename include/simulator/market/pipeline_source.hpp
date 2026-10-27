@@ -10,11 +10,11 @@
 
 namespace simulator {
 
-// `source` read on a thread of its own into a ring that next() reads on the replay's (spec §4): the decoder thread
+// `source` read on a thread of its own into a ring that next() reads on the replay's: the decoder thread
 // decodes, maps locates and registers instruments, and the replay's thread applies what it reads. Its thread and ring
 // are made by the constructor, before the replay; start() lets the thread read, and stop(), however the replay ended,
 // waits until it is done with `source`. The destructor ends and joins the thread, so the heap it frees as it exits is
-// freed after the replay (spec §3.3).
+// freed after the replay.
 //
 // The end travels outside the ring, in `state_`. The producer, at the source's end or error, writes that end, then
 // store-releases Ended; next() load-acquires the state before it reads the ring, so a ring empty after Ended is

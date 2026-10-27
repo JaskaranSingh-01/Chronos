@@ -12,7 +12,7 @@
 
 namespace simulator {
 
-// (book, side, price) -> the level at that price, one table for every book (spec §2.2).
+// (book, side, price) -> the level at that price, one table for every book.
 class LevelIndex
 {
 private:

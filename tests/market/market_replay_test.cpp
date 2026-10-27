@@ -87,7 +87,7 @@ public:
     }
 };
 
-// MarketReplay::run on one thread, or on two (spec §4.3): the source read through a PipelineSource with a ring of 4,
+// MarketReplay::run on one thread, or on two: the source read through a PipelineSource with a ring of 4,
 // so its threads wait on each other often.
 template <class Books>
 auto run_on(int threads, MarketEventSource& source, Books& books, const ReplayOptions& options)
@@ -242,7 +242,7 @@ TEST_P(MarketReplayTest, SourceErrorIsFatalAndPropagated)
     EXPECT_EQ(report.applied(), 1u);
 }
 
-// A full pool or index stops the replay at the event that needed it, naming the structure (spec §3.2).
+// A full pool or index stops the replay at the event that needed it, naming the structure.
 TEST_P(MarketReplayTest, AFullStructureStopsTheReplayAndNamesIt)
 {
     const std::vector<MarketEvent> input{add(1, 1, Side::Buy, 100, 10), add(2, 2, Side::Buy, 101, 10),

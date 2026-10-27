@@ -61,7 +61,7 @@ inline void cancel_resting(const ExecutionSimulator& execution, OrderGateway& ga
 }
 
 // The strategy a session's EventLoop drives, swapped at command boundaries; keeps every report delivered to it. Under a
-// Regular window an attached strategy trades only inside each day's feed session (spec §5.2).
+// Regular window an attached strategy trades only inside each day's feed session.
 class SessionStrategy
 {
 private:

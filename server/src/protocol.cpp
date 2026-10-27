@@ -301,7 +301,7 @@ const json* section(const json& j, const char* key, std::initializer_list<std::s
     return &*it;
 }
 
-// A Lab run's RunSpec (spec §7.2); see decode_run_spec().
+// A Lab run's RunSpec; see decode_run_spec().
 bool spec_from(const json& j, RunSpec& spec, std::string& field)
 {
     if (const auto key =
@@ -415,7 +415,7 @@ json days_json(const DayList& days)
     return dates;
 }
 
-// A generation's settings in the shape a Lab run is posted in (spec §7.2); no strategy has no params.
+// A generation's settings in the shape a Lab run is posted in; no strategy has no params.
 json fees_json(const RunSpec& spec)
 {
     return {{"maker", spec.fees.maker_fee_per_share}, {"taker", spec.fees.taker_fee_per_share}};
@@ -683,7 +683,7 @@ RunResult results_from(const json& j)
     return r;
 }
 
-// Spec §5.5: true once a verification on the same code and inputs has run and every such one matched; null before.
+// True once a verification on the same code and inputs has run and every such one matched; null before.
 json reproduced(const Run& run)
 {
     json verdict = nullptr;

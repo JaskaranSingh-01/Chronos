@@ -220,7 +220,7 @@ constexpr benchmark::IterationCount kIterations = 4'096;
 
 // kIterations batches of a book of 1,000 orders that keeps its size: each event an Add, by turns near the touch and
 // far from it, or a Delete of a random resting order. The touch drifts a tick at a time and, every 50 batches, jumps
-// 500 ticks, so the ladder recentres (spec §5.1). One stream for both backends.
+// 500 ticks, so the ladder recentres. One stream for both backends.
 const std::vector<MarketEvent>& churn_stream()
 {
     static const std::vector<MarketEvent> events = [] {
@@ -287,7 +287,7 @@ void BM_Churn(benchmark::State& state)
 }
 
 // The order book of the churn, its backend chosen at run time (Dispatch::Selected, as the engine runs) or fixed at
-// compile time (spec §2.4): the two should time alike.
+// compile time: the two should time alike.
 template <Dispatch D>
 void BM_Dispatch(benchmark::State& state)
 {
@@ -437,7 +437,7 @@ void BM_PoolReleaseAcquire(benchmark::State& state)
 }
 
 // 2^20 events, each with a position as the pipeline's slots hold them, through a ring of 65,536 from a producer
-// thread to this one, both spinning: ns per event through the ring alone (spec §5.1).
+// thread to this one, both spinning: ns per event through the ring alone.
 void BM_Ring(benchmark::State& state)
 {
     struct Slot

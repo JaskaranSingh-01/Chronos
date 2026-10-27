@@ -113,7 +113,7 @@ TEST(InstrumentRegistryTest, FindOfUnknownIdIsNull)
     EXPECT_EQ(registry.find(1), nullptr);
 }
 
-// The decoder's thread adds instruments that the replay's thread reads (spec §4.1); TSan checks the order.
+// The decoder's thread adds instruments that the replay's thread reads; TSan checks the order.
 TEST(InstrumentRegistryTest, AnInstrumentAddedOnOneThreadIsReadWholeOnAnother)
 {
     constexpr std::size_t count = 1'000;

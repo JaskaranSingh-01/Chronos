@@ -40,7 +40,7 @@ std::size_t count(MarketEventSource& source)
     return events;
 }
 
-// Spec §3: a day lists the symbols its store holds a market event of, whenever they were listed; a symbol listed but
+// A day lists the symbols its store holds a market event of, whenever they were listed; a symbol listed but
 // without one has a segment, and is not listed.
 TEST(ItchInputTest, ADayListsTheSymbolsWithMarketEventsInItsStore)
 {
@@ -252,7 +252,7 @@ TEST(ItchInputTest, AnUnchangedVersionComesFromTheCacheAndAnyChangeIsHashedAgain
     EXPECT_FALSE(std::filesystem::exists(cache.string() + ".tmp"));
 }
 
-// Review gate 1, UI-2b's part: a mid-file edit that keeps the size, mtime and inode leaves the quick check as it was,
+// A mid-file edit that keeps the size, mtime and inode leaves the quick check as it was,
 // so the listing still shows the cached hash; only a full re-hash of the file sees the edit.
 TEST(ItchInputTest, AMidFileEditKeepingSizeMtimeAndInodeStillListsTheCachedHash)
 {
@@ -484,7 +484,7 @@ TEST(ItchInputTest, TheChainFactoryReplaysOneTickerPerStreamAndASessionSwitchesB
     EXPECT_EQ(name(latest(session).spec.ticker), "MSFT");
 }
 
-// Spec §3: a segment that does not read back intact stops the chain with a store error, said on stderr, never with
+// A segment that does not read back intact stops the chain with a store error, said on stderr, never with
 // bytes; with hash as read, its hash as read is "".
 TEST(ItchInputTest, ASegmentThatDoesNotReadBackStopsTheChainWithAStoreError)
 {
@@ -503,7 +503,7 @@ TEST(ItchInputTest, ASegmentThatDoesNotReadBackStopsTheChainWithAStoreError)
     EXPECT_EQ(segment_hash_as_read(*days[0], "NOPE"), "");
 }
 
-// Spec §2.2: chronos-serve never repairs an invalid index. It moves it aside as index.tsv.bad, removes the symbol
+// chronos-serve never repairs an invalid index. It moves it aside as index.tsv.bad, removes the symbol
 // files, says so on stderr, and builds every day again.
 TEST(ItchInputTest, AnInvalidStoreIndexIsMovedAsideAndEveryDayIsBuiltAgain)
 {
@@ -547,7 +547,7 @@ TEST(ItchInputTest, AVersionWhoseHashTheStoreHoldsIsNotBuiltAgain)
     EXPECT_EQ(library.usage().unreferenced, 0u);
 }
 
-// Spec §2.4: where a day's framing breaks mid-file, at a zero length, ACME's segment ends as the day file does: the same
+// Where a day's framing breaks mid-file, at a zero length, ACME's segment ends as the day file does: the same
 // events, then InvalidLength.
 TEST(ItchInputTest, ASegmentOfADayWhoseFramingBreaksEndsWithTheDayFilesEventsAndError)
 {
@@ -578,7 +578,7 @@ TEST(ItchInputTest, ASegmentOfADayWhoseFramingBreaksEndsWithTheDayFilesEventsAnd
     EXPECT_EQ(stream(broken).second, SourceError::InvalidLength);
 }
 
-// Spec §2.5 and §6, recovery: a build that fails at a write, here under RLIMIT_FSIZE, leaves its day unlisted and the
+// Recovery: a build that fails at a write, here under RLIMIT_FSIZE, leaves its day unlisted and the
 // days built before as they were; the next scan tries it again.
 TEST(ItchInputTest, ADayWhoseStoreBuildFailsIsUnlistedUntilItBuilds)
 {
@@ -604,7 +604,7 @@ TEST(ItchInputTest, ADayWhoseStoreBuildFailsIsUnlistedUntilItBuilds)
     EXPECT_EQ(library.find(2019y / 12 / 30)->segment("ACME")->offset, friday->segment("ACME")->compressed);
 }
 
-// Spec §2.5, concurrency: scans run one at a time, so of two at once the second finds the days the first built.
+// Concurrency: scans run one at a time, so of two at once the second finds the days the first built.
 TEST(ItchInputTest, ConcurrentScansBuildADayOnce)
 {
     const ScratchDir dir{"concurrent"};
@@ -620,7 +620,7 @@ TEST(ItchInputTest, ConcurrentScansBuildADayOnce)
     EXPECT_EQ(library.usage().unreferenced, 0u);
 }
 
-// Spec §2.5: one chronos-serve per store; the lock goes with its holder.
+// One chronos-serve per store; the lock goes with its holder.
 TEST(ItchInputTest, AStoreIsLockedByOneHolderAtATime)
 {
     const ScratchDir dir{"lock"};

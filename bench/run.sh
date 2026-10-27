@@ -4,7 +4,7 @@
 #   bench/run.sh [label]
 #
 # 1. Builds Release (-O3 -DNDEBUG) with -DCHRONOS_BENCH=ON into build/bench:
-#    the configuration spec §8 names for benchmarks. The profile in step 5 runs
+#    the configuration every benchmark here uses. The profile in step 5 runs
 #    the same binary that was timed; `sample` names functions from the symbol
 #    table, so RelWithDebInfo (-O2 -g, a different binary) is not needed.
 # 2. Replays the full day, --all, 3 times with --latency --json. Run 1 counts

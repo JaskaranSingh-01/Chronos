@@ -754,7 +754,7 @@ TEST(ServerTest, TheLabApiQueuesListsServesCancelsAndDeletesRuns)
     }
 }
 
-// Spec §4: a run saved before the per-symbol store stays listed and served, and Verify answers 409 before_store.
+// A run saved before the per-symbol store stays listed and served, and Verify answers 409 before_store.
 TEST(ServerTest, VerifyRefusesARunRecordedBeforeTheStore)
 {
     LabDays days{"server-before-store"};
@@ -783,7 +783,7 @@ TEST(ServerTest, VerifyRefusesARunRecordedBeforeTheStore)
               (std::pair<int, std::string>{409, R"({"error":"before_store"})"}));
 }
 
-// Spec §5.6: a Lab POST or DELETE must be JSON from this server's own page, besides what every /api request needs; a
+// A Lab POST or DELETE must be JSON from this server's own page, besides what every /api request needs; a
 // body over 64 KiB is dropped before it reaches a route.
 TEST(ServerTest, EveryLabChangeNeedsJsonFromThisServersOwnPage)
 {

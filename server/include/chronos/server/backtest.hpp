@@ -62,7 +62,7 @@ struct DayResult
     bool operator==(const DayResult&) const = default;
 };
 
-// A run's results (spec §5.3); a failed or cancelled run's are its aggregates so far.
+// A run's results; a failed or cancelled run's are its aggregates so far.
 struct RunResult
 {
     bool partial{false};  // failed or cancelled: its digests mean nothing

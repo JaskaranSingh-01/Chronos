@@ -140,7 +140,7 @@ struct Digests
 
 Digests digests(const Generation& generation) noexcept;
 
-// A Watch's or a Verify's verdict on a re-run of a Lab run, decided in this order (spec §5.5).
+// A Watch's or a Verify's verdict on a re-run of a Lab run, decided in this order.
 enum class Outcome : std::uint8_t {
     InputChanged,   // a segment as read is not the run's
     DifferentCode,  // this build's source digest differs from the run's

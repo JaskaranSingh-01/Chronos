@@ -80,7 +80,7 @@ public:
 // The days of a directory: each file named exactly MMDDYYYY.NASDAQ_ITCH50.bin with a real date, whose store is current.
 // A new file version (name, size, mtime, inode, or a changed quick check) is current if the JSON cache at `cache`
 // holds its hash and the store a day of that hash; else a pass over its bytes hashes it and builds it into the store,
-// unless the store holds a day of that hash (spec §2.5). Any thread; a pass runs outside the lock on the days.
+// unless the store holds a day of that hash. Any thread; a pass runs outside the lock on the days.
 class DayLibrary
 {
 private:
@@ -98,7 +98,7 @@ private:
 
 public:
     // The store is `store`, or <dir>/store. An index that is invalid is moved aside as index.tsv.bad and the symbol
-    // files removed, so that every day is built again; stderr says so (spec §2.2).
+    // files removed, so that every day is built again; stderr says so.
     DayLibrary(std::filesystem::path dir, std::filesystem::path cache, std::filesystem::path store = {});
 
     // Lists the directory again, reading each new version with a line on stderr; the days, oldest first. A file it

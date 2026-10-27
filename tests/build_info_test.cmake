@@ -1,6 +1,6 @@
 # cmake -DBUILD_INFO=<cmake/build_info.cmake> -DWORK=<an empty scratch directory> -P build_info_test.cmake
 #
-# Review gate 2: two clones of one commit get one source digest until one of them has an uncommitted change, or an
+# Two clones of one commit get one source digest until one of them has an uncommitted change, or an
 # untracked file, in a source directory; an ignored file and a file outside the source directories change nothing.
 # The header also records the compiler, sanitizers and platform it is given.
 

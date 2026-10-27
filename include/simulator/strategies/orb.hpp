@@ -48,7 +48,7 @@ struct OrbStats
     bool operator==(const OrbStats&) const = default;
 };
 
-// The opening range breakout (docs: specs/2026-10-27-orb-strategy-design.md). Each day: the high and low of trades
+// The opening range breakout (docs/backtesting.md). Each day: the high and low of trades
 // in [open, open + range); from then on, the first trade strictly beyond either side enters `clip` shares by an IOC
 // at the touch, once per direction; a trade strictly through the other side, or close - 5 min, closes the position
 // by IOCs at the touch until it is flat. One order in flight at a time; nothing while the book is not trading.

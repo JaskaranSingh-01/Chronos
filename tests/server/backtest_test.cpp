@@ -218,7 +218,7 @@ TEST(BacktestTest, AnOrbRunEqualsTheHeadlessBacktest)
     EXPECT_EQ(again.pnl, r.pnl);
 }
 
-// The fixture runs' digests, fixed: every compiler and build type of the CI matrix must reproduce them (spec §8).
+// The fixture runs' digests, fixed: every compiler and build type of the CI matrix must reproduce them.
 TEST(BacktestTest, TheFixtureRunsDigestsAreGolden)
 {
     Lab lab{"backtest-golden"};
@@ -398,7 +398,7 @@ TEST(BacktestTest, TheSameRunTwiceGivesTheSameResultsAndHashAsReadAddsTheDaysHas
     EXPECT_GT(first.taker_fills, 0u);
 }
 
-// Review gate 4, in backtest(): Monday's input ends at 09:30:02 with the market maker's bid half filled and its offer
+// In backtest(): Monday's input ends at 09:30:02 with the market maker's bid half filled and its offer
 // resting. The 16:00 close cancels both with no market event after them, so 50 of the 200 shares quoted filled.
 TEST(BacktestTest, TheLastDaysCloseCancelsTheQuotesWhenItsInputEndsFirst)
 {

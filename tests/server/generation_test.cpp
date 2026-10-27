@@ -227,7 +227,7 @@ struct Probe
 
 static_assert(Strategy<Probe>);
 
-// Review gate 3: a report due at the boundary minus 1 ns runs under the old day's midnight, before the Clear; one due
+// A report due at the boundary minus 1 ns runs under the old day's midnight, before the Clear; one due
 // at the boundary runs after the Clear, under the new day's.
 TEST(GenerationTest, AtADayBoundaryEarlierReportsRunUnderTheOldDayAndLaterOnesAfterTheClear)
 {
@@ -322,7 +322,7 @@ void run_to_end(Generation& g)
     finish(g);
 }
 
-// Review gate 6: under a Regular window the market maker trades only inside each day's feed session. Friday has no
+// Under a Regular window the market maker trades only inside each day's feed session. Friday has no
 // 'Q' or 'M', so it takes the flagged 09:30-16:00 fallback; Monday's 'M' closes it at 13:00. Outside the window the
 // strategy sees no market event and its gateway refuses it; each close cancels its quotes; the window moves to Monday
 // at the Clear. A Full-day run of the same spec quotes on Friday's 09:00 book.

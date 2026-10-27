@@ -17,7 +17,7 @@ struct ServerOptions
     std::filesystem::path sessions{"sessions"};  // the command logs, <session_id>.jsonl
 };
 
-// chronos-serve's HTTP and WebSocket endpoints (spec §6.2) on Crow's threads; every frame it polls each connection.
+// chronos-serve's HTTP and WebSocket endpoints on Crow's threads; every frame it polls each connection.
 class HttpServer
 {
 private:

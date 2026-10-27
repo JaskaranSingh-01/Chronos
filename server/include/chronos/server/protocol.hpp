@@ -13,7 +13,7 @@
 #include "chronos/server/lab.hpp"
 #include "chronos/server/replay_session.hpp"
 
-// The WebSocket protocol (spec §6.3) and the HTTP bodies, as JSON text. Prices are integer ticks, quantities shares,
+// The WebSocket protocol and the HTTP bodies, as JSON text. Prices are integer ticks, quantities shares,
 // times epoch nanoseconds (JavaScript reads those to about 256 ns: for display only). Every server message carries
 // the session id and a generation; levels, trades and candles are arrays to keep snapshots small:
 // level [price, quantity, orders], trade [ts, price, quantity, resting side], candle [start, open, high, low, close,
@@ -23,7 +23,7 @@ namespace simulator::server {
 
 // The protocol version hello carries; 2 adds days: a UI-1 client ignores the new keys, a UI-2 client needs them.
 inline constexpr int ws_protocol = 2;
-// The largest message a client may send (spec §6.4).
+// The largest message a client may send.
 inline constexpr std::size_t max_message_bytes = 64 * 1024;
 
 enum class ClientType : std::uint8_t {
@@ -78,19 +78,19 @@ std::string encode_days(std::chrono::year_month_day start, std::span<const DayHa
 std::string encode_history(std::string_view session_id, std::uint64_t generation, std::span<const Candle> candles,
                            std::span<const Trade> trades);
 
-// POST /api/backtests (spec §7.2): exactly its keys, in range as the CLI caps them, each optional one taking
+// POST /api/backtests: exactly its keys, in range as the CLI caps them, each optional one taking
 // default_spec()'s value, an omitted limit following the params as the CLI's does. False with `field` naming the first
 // bad one, e.g. "params.quote_size" or "days[1]"; "" for a body that is not a JSON object.
 bool decode_run_spec(std::string_view text, RunSpec& spec, std::string& field);
 // GET /api/strategies: each strategy's params and limits, their defaults and caps.
 std::string encode_strategies();
-// A run as runs/<id>.json holds it and GET /api/backtests/<id> serves it (spec §7.3).
+// A run as runs/<id>.json holds it and GET /api/backtests/<id> serves it.
 std::string encode_run(const Run& run);
 // A runs/<id>.json: false unless it is a finished run of format 1.
 bool decode_run(std::string_view text, Run& run);
 // GET /api/backtests: each run without its results, with its progress and headline; `queued` jobs wait.
 std::string encode_runs(std::span<const Run> runs, std::size_t queued);
-// A Lab request refused (spec §5.6): {"error": code}, with "field" when it names one and "days" when it lists them.
+// A Lab request refused: {"error": code}, with "field" when it names one and "days" when it lists them.
 std::string encode_lab_error(std::string_view code, std::string_view field = {},
                              std::span<const std::string> days = {});
 // A run queued: {"id": id}.

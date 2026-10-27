@@ -9,7 +9,7 @@
 
 namespace simulator {
 
-// One producer thread hands values to one consumer thread through a fixed power-of-two array (spec §4.2); nothing
+// One producer thread hands values to one consumer thread through a fixed power-of-two array; nothing
 // allocates after the constructor. A push writes its slot, then publishes it with a store-release of the write index;
 // a pop load-acquires the write index before it reads the slot, then frees the slot with a store-release of the read
 // index, which a push load-acquires before it reuses the slot. Each index sits on a cache line of its own, with its

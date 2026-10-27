@@ -13,7 +13,7 @@
 
 namespace simulator {
 
-// The structures the books of a replay share; a full one stops the replay (spec §3.2).
+// The structures the books of a replay share; a full one stops the replay.
 enum class BookStructure : std::uint8_t {
     None,
     OrderPool,
@@ -22,7 +22,7 @@ enum class BookStructure : std::uint8_t {
     LevelIndex
 };
 
-// How a book keeps its levels, chosen once per replay (spec §2.2-§2.4). List: each side a list, best first, its levels
+// How a book keeps its levels, chosen once per replay. List: each side a list, best first, its levels
 // found through the level index. Ladder: the list and index, and each side a window of ladder_window steps of a
 // cent around its best, where a level is found and placed by slot.
 enum class BookBackend : std::uint8_t {
@@ -54,7 +54,7 @@ struct BookCapacity
     std::size_t level_index{0};
 };
 
-// Everything the books of one replay share, reserved before it starts (spec §3.1). From --capacity C: C orders and an
+// Everything the books of one replay share, reserved before it starts. From --capacity C: C orders and an
 // order index of C, and C levels and a level index of C, as every live level holds a live order; and for the ladder,
 // the windows of `books` books, SymbolIds 0 to books - 1. Nothing here allocates after the constructor.
 struct BookStorage

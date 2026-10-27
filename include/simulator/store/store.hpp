@@ -24,7 +24,7 @@ struct StoreLimits
     std::size_t low{std::size_t{256} << 20};
 };
 
-// Builds one day into the store at `store` from the day file `source`, fed its frames in file order (spec §2.4-§2.5).
+// Builds one day into the store at `store` from the day file `source`, fed its frames in file order.
 // A symbol's segment holds every frame of its stock locate from its directory entry on, and every frame that reaches
 // every symbol: each System Event, each frame no locate routes, and a cut tail; each in file order, as zstd frames
 // appended to its file. Destroyed uncommitted, it aborts: each file it wrote is cut back to its committed end.

@@ -5,7 +5,7 @@
 #include <string>
 #include <string_view>
 
-// Spec §6.4: a local tool, still defensive.
+// A local tool, still defensive.
 
 namespace simulator::server {
 

@@ -108,7 +108,7 @@ TEST(StoreIndexTest, AReplacedDayDropsItsOldRecords)
     EXPECT_EQ(index.committed_end("BRK.B"), 20u);
 }
 
-// Each case breaks one rule of spec §2.2 in an otherwise valid store; load names what it found.
+// Each case breaks one rule of the index's format in an otherwise valid store; load names what it found.
 TEST(StoreIndexTest, RefusesEveryInvalidIndex)
 {
     const std::string valid = two_days().text();

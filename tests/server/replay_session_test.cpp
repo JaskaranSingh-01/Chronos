@@ -437,7 +437,7 @@ TEST(ReplaySessionTest, AChainPlayedByTheSessionEqualsSteppingItAndEndsOnTheLast
     EXPECT_NE(straight.book.digest(), MarketBook(kSymbol, 16).digest());
 }
 
-// Review gate 4, in the terminal: the market maker's quotes rest when Monday's input ends at 09:30:04, before its
+// The market maker's quotes rest when Monday's input ends at 09:30:04, before its
 // 16:00 close; once the session has played to the end, the close timer has cancelled them with no market event after.
 TEST(ReplaySessionTest, TheLastDaysCloseCancelsTheQuotesWhenItsInputEndsFirst)
 {

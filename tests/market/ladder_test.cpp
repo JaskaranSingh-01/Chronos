@@ -25,7 +25,7 @@ std::vector<LevelInfo> levels(const MarketBook& book, Side side)
 }
 
 // A list book and a ladder book given the same events: after each, the same result, the same levels and orders
-// (the digest), and every invariant on both, the ladder's windows included (spec §2.3's transition tests). The
+// (the digest), and every invariant on both, the ladder's windows included (the transition tests below). The
 // parameter is the ladder's step: 1, every price on its grid, or 100, a cent at ITCH's four decimals.
 class LadderTest : public testing::TestWithParam<std::uint64_t>
 {

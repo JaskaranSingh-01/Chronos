@@ -791,7 +791,7 @@ TEST(ItchEndToEndTest, TwoSymbolsReplayIntoTheirOwnBooks)
 }
 
 // --all on two threads: the decoder registers each symbol at its R, all through the stream, while the book thread
-// makes the books of those it has read (spec §4.1). The outcome is one thread's. CI runs it under TSan.
+// makes the books of those it has read. The outcome is one thread's. CI runs it under TSan.
 TEST(ItchEndToEndTest, EverySymbolRegisteredMidStreamReplaysOnTwoThreadsAsOnOne)
 {
     ItchBuilder itch;

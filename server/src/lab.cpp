@@ -72,7 +72,7 @@ bool same_code(const Run& run) noexcept
     return run.provenance.build.source_digest != "unknown" && run.provenance.build.source_digest == build_source_digest;
 }
 
-// A verification's record (spec §5.5): the days whose segment as read differs from the run's, then this build's source
+// A verification's record: the days whose segment as read differs from the run's, then this build's source
 // digest against the run's, then the digests.
 Verification verification(const Run& run, const RunResult& result)
 {
@@ -462,7 +462,7 @@ void Backtester::save(Run run)
     std::string error;
     try {
         error = write_file(file(id), encode_run(run));
-    } catch (...) {  // the worker's thread must not end on an exception (spec §9)
+    } catch (...) {  // the worker's thread must not end on an exception
         error = "cannot encode the run";
     }
     run.warning = error.empty() ? "" : "not saved: " + error;  // a later save that succeeds clears an earlier failure

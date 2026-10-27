@@ -45,7 +45,7 @@ struct BuildInfo
 };
 
 // A day a run replayed, as the library listed it when the run was submitted: the day file, and the symbol's segment,
-// whose hash is the day's identity in the run (spec §4); a run recorded before the per-symbol store has none.
+// whose hash is the day's identity in the run; a run recorded before the per-symbol store has none.
 struct RunDay
 {
     std::chrono::year_month_day date{};
@@ -57,7 +57,7 @@ struct RunDay
     std::uint64_t segment_size{0};
 };
 
-// What a run's results depend on, and where and when it ran (spec §7.3, §8).
+// What a run's results depend on, and where and when it ran.
 struct Provenance
 {
     BuildInfo build{};
@@ -105,12 +105,12 @@ enum class Refusal : std::uint8_t {
     NotFound,  // no such run, or one being deleted
     Conflict,      // the run is not in a state that allows it
     InputChanged,   // a day of the run is gone, or the store's segment of it is not the run's
-    OtherSettings,  // the run replayed under another --allow-truncated-tail (spec §8.9)
+    OtherSettings,  // the run replayed under another --allow-truncated-tail
     QueueFull,      // max_queued jobs wait already
     BeforeStore     // the run was recorded before the per-symbol store, without segment hashes
 };
 
-// The Lab's runs (spec §5.3-§5.5) and the one worker thread that runs their jobs, runs and verifications, oldest
+// The Lab's runs and the one worker thread that runs their jobs, runs and verifications, oldest
 // first. The worker writes a run's file, <dir>/<id>.json, through a temp file and a rename as the run finishes, and
 // again after each verification; never earlier. A run deleted while a job of it is busy is hidden at once, and
 // erased, its file with it, when the worker stops the job. The mutex covers the runs and the queue for a lookup or a
@@ -171,7 +171,7 @@ public:
     // day is not the run's; OtherSettings for a run under another --allow-truncated-tail; QueueFull if max_queued jobs
     // wait.
     Refusal verify(std::string_view id, const DayLibrary& library);
-    // A Watch in Terminal's admission (spec §5.5): fills `control`'s spec and watch from the completed run
+    // A Watch in Terminal's admission: fills `control`'s spec and watch from the completed run
     // control.watch.run_id, if each of its days is listed with the run's segment and it ran with this server's
     // allow_truncated_tail. False, with `why`, if not.
     bool watch(Control& control, const DayLibrary& library, std::string& why) const;
