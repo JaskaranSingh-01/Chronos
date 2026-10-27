@@ -22,7 +22,7 @@ import {
 } from './lab';
 import { Compare, Metrics, RunResults } from './LabResults';
 import { store, useStore } from './store';
-import { DayPicker, Switch, Symbols } from './TopBar';
+import { DayPicker, Switch, SymbolPicker } from './TopBar';
 
 const none = { field: '', text: '' };
 
@@ -87,17 +87,18 @@ function RunForm({ form, setForm, digits }: { form: Form; setForm(f: Form): void
             ))}
           </select>
         </label>
-        <label className="kv">
+        {/* Not a label: a click on a match would reach the box through it and open the list again. */}
+        <div className="kv">
           Symbol
-          <input
-            aria-label="symbol"
-            aria-invalid={refusal.field === 'symbol'}
-            list="lab-symbols"
+          <SymbolPicker
+            label="symbol"
+            symbols={symbols}
             value={form.symbol}
-            onChange={(e) => edit({ ...form, symbol: e.target.value })}
+            setValue={(symbol) => edit({ ...form, symbol })}
+            pick={(symbol) => edit({ ...form, symbol })}
+            invalid={refusal.field === 'symbol'}
           />
-        </label>
-        <Symbols id="lab-symbols" symbols={symbols} />
+        </div>
         <div className={`kv${refusal.field.startsWith('days') ? ' bad' : ''}`}>
           Days
           <DayPicker

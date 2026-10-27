@@ -20,8 +20,11 @@ const test = base.extend<{ serverArgs: string[]; url: string }>({
   },
 });
 
+// The picker lists what the box matches; the arrows and Enter take one.
 async function pickAcme(page: Page) {
-  await page.getByLabel('Symbol').fill('ACME');
+  await page.getByLabel('Symbol').fill('ac');
+  await expect(page.getByRole('option')).toHaveText(['ACME']);
+  await page.getByLabel('Symbol').press('ArrowDown');
   await page.getByLabel('Symbol').press('Enter');
   await expect(page.getByTestId('session')).toContainText('ACME · gen 2 · paused');
 }
@@ -134,6 +137,7 @@ test('a seek lands on the New York time typed', async ({ page, url }) => {
 test('two days load together and play across the night in no time at 100×', async ({ page, url }) => {
   await page.goto(url);
   await page.getByText('2019-12-30', { exact: true }).click(); // the day picker, on the starting day
+  await expect(page.getByLabel('2019-12-27')).toBeInViewport(); // not clipped by the bar
   await page.getByLabel('2019-12-27').check();
   await expect(page.locator('.days summary')).toHaveText('2 days');
   await pickAcme(page);
@@ -147,6 +151,12 @@ test('two days load together and play across the night in no time at 100×', asy
   await page.getByLabel('Seek to').fill('09:31:45');
   await page.getByRole('button', { name: 'Seek', exact: true }).click();
   await expect(page.getByTestId('clock')).toHaveText('2019-12-27 09:31:45.000 ET');
+  // With the box empty, Load reloads the symbol on the days now picked.
+  await page.locator('.days summary').click();
+  await page.getByLabel('2019-12-27').uncheck();
+  await page.getByRole('button', { name: 'Load', exact: true }).click();
+  await expect(page.getByTestId('session')).toContainText('ACME · gen 3 · paused');
+  await expect(page.getByLabel('Seek day')).toHaveCount(0);
 });
 
 test.describe('with a token', () => {

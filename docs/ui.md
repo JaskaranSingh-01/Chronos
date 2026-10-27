@@ -17,8 +17,10 @@ The page is a grid of square panels, every number in a monospace face:
 
 - **Top bar.** The symbol and its days, Load, Restart, Play or Pause, Step, the speed (1×, 10×, 100× or Max), the
   exchange clock and how much of the day is read, Seek (to a New York time, or the 09:30 open), and the connection.
-  To replay a symbol over several days in a row, tick them in the day list before loading it: each night passes at
-  once, and Seek then takes a day and a time.
+  The symbol box lists the days' symbols as you type: the one typed first, then those it starts, then those it is
+  inside, plain tickers before preferreds and warrants; the arrows and Enter, or a click, load one. To replay a symbol
+  over several days in a row, tick them in the day list: each night passes at once, and Seek then takes a day and a
+  time. With the box empty, Load reloads the symbol on the days ticked.
 - **Depth ladder** (left, full height). The L3 book as a price ladder a cent a row, the spread in the middle: the book's
   size at each price with a depth bar, and our resting orders as our shares over the shares still ahead of them in the
   queue. Click a row to price the ticket.

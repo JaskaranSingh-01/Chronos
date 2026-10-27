@@ -47,16 +47,17 @@ tr.muted td { height: 18px; font-size: 10px; font-weight: 600; letter-spacing: 0
 
 /* The page: header, banners, the panels, and the engine strip. */
 .terminal { height: 100vh; display: flex; flex-direction: column; gap: 1px; }
+/* The bar wraps rather than clip: its day and symbol lists hang below it. */
 .bar {
   flex: none;
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 8px;
-  height: 36px;
-  padding: 0 8px;
+  gap: 4px 6px;
+  min-height: 36px;
+  padding: 3px 8px;
   background: var(--panel);
   white-space: nowrap;
-  overflow: hidden;
 }
 .bar form { display: flex; align-items: center; gap: 4px; margin: 0; }
 .brand { font-size: 12px; font-weight: 600; letter-spacing: 0.08em; color: var(--bright); }
@@ -119,7 +120,7 @@ main.lab {
 .engine b { color: var(--bright); font-weight: 500; }
 .engine .label { font-family: var(--sans); font-weight: 600; letter-spacing: 0.06em; color: var(--text); }
 .session { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-.notice { margin-left: auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--sell); }
+.notice { flex: 1 1 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; text-align: right; color: var(--sell); }
 .status::before { content: ''; display: inline-block; width: 6px; height: 6px; margin-right: 6px; background: var(--muted); }
 .status.open::before { background: var(--buy); }
 .status { color: var(--text); font-weight: 600; }
@@ -185,7 +186,28 @@ nav.pages a.on { color: var(--bright); font-weight: 600; box-shadow: inset 0 -2p
 }
 .days label { display: flex; align-items: center; gap: 6px; white-space: nowrap; }
 .days input { height: auto; }
-progress { width: 64px; height: 3px; accent-color: var(--accent); }
+
+/* The symbol picker: the matches under the box, the one the arrows are on highlighted, the part typed in bold. */
+.picker { position: relative; display: inline-block; }
+.picker-list {
+  position: absolute;
+  z-index: 5;
+  top: calc(100% + 2px);
+  left: 0;
+  width: 14em;
+  background: var(--head);
+  border: 1px solid var(--line);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+  text-align: left;
+}
+.bar .picker input { width: 7.5em; }
+.form .picker-list { left: auto; right: 0; }
+.picker-list ul { margin: 0; padding: 2px 0; list-style: none; max-height: 18em; overflow-y: auto; }
+.picker-list li { padding: 2px 8px; font-family: var(--mono); color: var(--text); cursor: pointer; }
+.picker-list li b { color: var(--accent); font-weight: 600; }
+.picker-list li[aria-selected='true'] { background: var(--on); color: var(--bright); }
+.picker-list .count { display: block; padding: 3px 8px; border-top: 1px solid var(--line); font-size: 10px; color: var(--muted); }
+progress { width: 48px; height: 3px; accent-color: var(--accent); }
 
 /* The depth ladder: our size and queue, the book's size, the price, by side. */
 .ladder { grid-column: 1; grid-row: 1 / 3; }

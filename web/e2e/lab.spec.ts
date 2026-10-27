@@ -136,12 +136,12 @@ test('a symbol missing on one day is refused, naming the day; suggestions omit a
   url,
 }) => {
   await page.goto(`${url}#lab`);
-  await expect(page.locator('#lab-symbols option')).toHaveCount(2);
-  expect(await page.locator('#lab-symbols option').evaluateAll((o) => o.map((e) => e.getAttribute('value')))).toEqual([
-    'ACME',
-    'ZETA',
-  ]);
-  await page.getByLabel('symbol', { exact: true }).fill('ZETA');
+  await page.getByLabel('symbol', { exact: true }).click();
+  const matches = page.getByRole('listbox', { name: 'Matches' });
+  await expect(matches.getByRole('option')).toHaveText(['ACME', 'ZETA']);
+  await matches.getByRole('option', { name: 'ZETA' }).click();
+  await expect(page.getByLabel('symbol', { exact: true })).toHaveValue('ZETA');
+  await expect(matches).toHaveCount(0);
   await page.locator('.form .days summary').click();
   await page.getByLabel('2019-12-27').check();
   await page.locator('.form .days summary').click();
