@@ -1,0 +1,46 @@
+Chronos replay
+  file             /data/12302019.NASDAQ_ITCH50.bin (268435456 bytes)
+  symbol           AAPL
+  session          2019-12-30, UTC-05:00
+  truncated tail   allowed
+  invariant checks at the end only
+  capacity         1048576 orders
+  book             ladder
+  threads          2: one decodes, one applies
+
+Source
+  messages 7844756: 6530347 other symbols, 1305990 unused types, 8418 events; locate 13
+  truncated tail   yes (last partial message ignored)
+
+Events 8418, 03:09:14.653737350 to 09:30:10.715766934 local
+  Add              4672
+  Modify           0
+  Replace          58
+  Cancel           10
+  Delete           2998
+  Execute          494
+  Clear            0
+  Trade            185
+  Status           1
+
+Applied 8418, rejected 0
+
+Book, top 5 levels per side
+  side          price         size   orders
+  ask        289.4900          100        1
+  ask        289.4700            9        1
+  ask        289.4300          100        1
+  ask        289.4100          300        1
+  ask        289.3800          587        4
+  bid        289.3200           65        1
+  bid        289.2900          135        3
+  bid        289.2800            2        1
+  bid        289.2700          304        2
+  bid        289.2500          741        6
+  spread 0.0600, orders 1391, peak orders 1391, crossed no, locked no, trading state Trading
+
+Invariants at end: ok (0 periodic checks passed)
+Digest            7f1e922654415cf3
+Elapsed           0.18 s wall, 0.30 s CPU (user 0.15, sys 0.16); 46911 events/s, 21316.9 ns/event, 43716700 messages/s, 1495.9 MB/s
+Memory            0 allocations (0.0000 per event), heap change +0 blocks +0 bytes, 230.2 MB reserved; peak RSS 445.8 MB, peak footprint 0.0 MB, 1 major faults
+Ladder windows    0.0 MB reserved, 0.0 MB touched by the books made

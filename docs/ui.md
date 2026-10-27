@@ -10,36 +10,52 @@ are React and TradingView's lightweight-charts.
 
 ## The Trading Terminal
 
-Type a symbol such as `AAPL` in the top bar and press Enter: the replay waits, paused, before the symbol's first event.
+![The Trading Terminal watching a market maker's run on AAPL](images/terminal.png)
 
-- **Replay.** Play at 1×, 10×, 100× or Max, step one event at a time, or seek to a New York time. To replay a symbol
-  over several days in a row, tick them in the day list before loading it: each night passes at once, and Seek then
-  takes a day and a time.
+Type a symbol such as `AAPL` in the top bar and press Enter: the replay waits, paused, before the symbol's first event.
+The page is a grid of square panels, every number in a monospace face:
+
+- **Top bar.** The symbol and its days, Load, Restart, Play or Pause, Step, the speed (1×, 10×, 100× or Max), the
+  exchange clock and how much of the day is read, Seek (to a New York time, or the 09:30 open), and the connection.
+  To replay a symbol over several days in a row, tick them in the day list before loading it: each night passes at
+  once, and Seek then takes a day and a time.
+- **Depth ladder** (left, full height). The L3 book as a price ladder a cent a row, the spread in the middle: the book's
+  size at each price with a depth bar, and our resting orders as our shares over the shares still ahead of them in the
+  queue. Click a row to price the ticket.
 - **Chart.** 1 s candles from the market's own trades, at 1 s to 1 h timeframes, with VWAP, EMA 20 and volume; pre- and
-  post-market and halts shaded; our fills marked; the best bid and ask, our resting orders (with the shares ahead of
-  each) and our position's average price as price lines.
-- **L3 book.** Ten levels a side with their sizes and depth bars; our resting orders show their place in the queue.
-  Click a level to price the ticket.
-- **Ticket.** Post-only, IOC or market, with the notional and the estimated fee or rebate. Orders go through the same
-  `ExecutionSimulator` as the backtests ([backtesting.md](backtesting.md#d2-the-fill-model)).
-- **Tabs.** Positions, open orders (with cancel), fills (with the rule that filled each and its queue ahead at entry)
-  and each resting order's queue position.
-- **Tape.** The market's trades, coloured by the aggressor.
+  post-market and halts shaded; the best bid and ask, our resting orders (with the shares ahead of each) and our
+  position's average price as price lines; and our fills as one arrow per candle and side, their shares summed.
+- **Positions and PnL** (under the chart). The position with its average, mark, unrealised, realised and net PnL and
+  max drawdown, over the net PnL from its first change, one sample a second, as this page saw it.
+- **Time and sales.** The market's trades, coloured by the aggressor.
+- **Ticket.** The side, each button showing the price it would meet (the bid or the ask); post-only, IOC or market; the
+  price a tick at a time and the quantity by 100 or a preset; the notional, the estimated fee or rebate and the position
+  after. Orders go through the same `ExecutionSimulator` as the backtests
+  ([backtesting.md](backtesting.md#d2-the-fill-model)). While a Lab run is watched the ticket is locked and says why.
+- **Account**, and under the ticket and the tape, **open orders** (with cancel), **fills** (with the rule that filled
+  each and its queue ahead at entry) and each resting order's **queue** position.
+- **Engine strip** (bottom, on both pages). The replay's events a second, the snapshots this page skipped, the commands
+  the session drained, the simulated order and report latencies, and the session's symbol, generation and state.
 
 ## The Strategy Lab
 
+![The Strategy Lab comparing an ORB run with a market maker's](images/strategy-lab.png)
+
 At `http://127.0.0.1:8080/#lab`, or through the switch in the top bar:
 
-- **New run** (left): the strategy and its params, the symbol, the days (a day whose regular hours are the 09:30-16:00
-  fallback is marked), the window, latencies, fees in dollars a share, and limits. The defaults and caps are the
-  server's; a value past its cap, or one the server refuses, is marked, and a symbol a day does not list names the day.
-- **Results** (middle): total PnL, fills, fill rate, max drawdown, fees and rebates, max |position|; for the ORB its
-  entries, closing orders, no-range days, risk rejects, shares and last range. The PnL at every second with a market
-  event and its drawdown; the fills with their rule and queue ahead at entry; the fill attribution; PnL by hour and,
-  over several days, by day. A failed or cancelled run's figures are marked partial.
-- **Runs** (right): each run's state, progress or PnL. Tick two to **Compare**: their PnL overlaid, lined up by day and
-  time of day, their stats side by side, every setting that differs marked, and runs over another symbol or other days
-  flagged. For the run picked: **Watch in Terminal**, **Verify**, **Export JSON**, **Edit as new**, **Cancel** and
+- **New backtest** (left): the strategy and its params, the symbol, the days (a day whose regular hours are the
+  09:30-16:00 fallback is marked), the window, latencies, fees in dollars a share, and limits. The defaults and caps
+  are the server's; a value past its cap, or one the server refuses, is marked, and a symbol a day does not list names
+  the day.
+- **Runs** (top middle): each run's state, progress or PnL. Tick two to **Compare**.
+- **Results** (middle): the PnL at every second with a market event and its drawdown below; the fills with their rule
+  and queue ahead at entry; the fill attribution; PnL by hour and, over several days, by day. Comparing, the two runs'
+  PnL overlaid, lined up by day and time of day, their stats side by side, every setting that differs marked, and runs
+  over another symbol or other days flagged.
+- **Metrics** (top right): total PnL, fills, fill rate, max drawdown, fees and rebates, max |position|; for the ORB its
+  entries, closing orders, no-range days, risk rejects, shares and last range. A failed or cancelled run's figures are
+  marked partial.
+- **The run picked** (right): **Watch in Terminal**, **Verify**, **Export JSON**, **Edit as new**, **Cancel** and
   **Delete**, and its provenance: the build, each day's hash, session source and size, the engine, the timings, the
   digests and every verification.
 
@@ -60,6 +76,9 @@ and days.
   snapshot redraws only the last bucket and appends new ones.
 - **Reconnects** resync reports from the last seq the page applied. A new state refetches the generation's history;
   a skipped or truncated snapshot refetches only from the last closed candle.
+- **Pure layout logic.** The depth ladder's rows ([`ladder.ts`](../web/src/ladder.ts)) and the chart's buckets,
+  indicators and fill marks ([`candles.ts`](../web/src/candles.ts)) are pure functions with their own Vitest tests.
+- **Nothing from outside.** The page loads only what `chronos-serve` serves: system fonts, no CDN.
 
 ## Developing
 
@@ -104,13 +123,16 @@ store to reuse and a file for the JSON summary.
 
 On 2026-10-27, AAPL with the market maker:
 
-| Window | Before | After |
-|---|---|---|
-| watching the run at Max: socket handler's share of the main thread | 66.7 % | 1.9 % |
-| frames a second | 30.8 | 59.7 |
-| frames over 50 ms | 41 | 0 |
-| switching to the Lab while playing | one 96 ms task | none |
+| Window | Before | Once a frame | Dense Pro |
+|---|---|---|---|
+| watching the run at Max: socket handler's share of the main thread | 66.7 % | 1.9 % | 1.8 % |
+| frames a second | 30.8 | 59.7 | 60.0 |
+| frames over 50 ms | 41 | 0 | 0 |
+| worst frame | 117 ms | 50 ms | 17 ms |
+| switching to the Lab while playing | one 96 ms task | none | none |
 
 Watching the run used to tell every listener of every message, and the chart then redrew every fill marker (a CPU
 profile put 51 % of the page's time in its `setMarkers`); switching to the Lab added the symbol list's 8,906 options
-one by one to a mounted list. The store now notifies once a frame, and the list mounts whole.
+one by one to a mounted list. The store now notifies once a frame, and the list mounts whole. The Dense Pro layout
+then draws a run's fills as one marker per candle and side, which takes the worst frame to 17 ms. One frame of about
+67 ms remains when a finished run's results first draw (its equity curve, up to 57,600 samples a series).

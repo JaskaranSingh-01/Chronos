@@ -56,7 +56,7 @@ ITCH 5.0 file ─► MappedFile ─► ItchSource ── R messages ──► In
 | Guarantee | How | Checked by |
 |---|---|---|
 | History and simulation never mix (D1) | `MarketBook::apply` is the book's only mutator; strategies, the simulator and the portfolio get `const` references; our orders are shadow orders in `ExecutionSimulator` | `BacktestDeterminismTest`: a backtest leaves the history digest of a plain replay |
-| One deterministic loop (D3) | `EventLoop` merges the market stream with our own events in (timestamp, stream, sequence) order; it never reads a wall clock | two identical backtests, byte for byte; the Lab's Verify and Watch re-run a saved run to the same digests |
+| One deterministic loop (D3) | `EventLoop` merges the market stream with our own events in (timestamp, stream, sequence) order; it never reads a wall clock | two identical backtests, byte for byte; the Lab's Verify and Watch re-run a saved run to the same digests, every fill compared in order |
 | A conservative fill model (D2) | queue position from the L3 book, four fill rules and a trade-price guard | hand-worked examples in the tests; the FIFO-anomaly counter on real days |
 | Every event of a real day applies | the decoder and book reject anything inconsistent, with a reason | the full day, every symbol: 264,469,515 events, 0 rejections |
 | No allocation on the replay path | pools, open-addressing indices and the SPSC ring are sized before the replay | a counting `operator new` (0 in the full day) and `scripts/check-hot-path.sh` in CI |

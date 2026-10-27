@@ -5,10 +5,12 @@
 - **No market impact.** Our fills never remove historical liquidity, so repeated IOCs can take the same visible shares
   again. Fill rates for aggressive orders are optimistic.
 - **Order types:** IOC, post-only Day orders, and in the terminal market orders (an IOC within 1 % of the best opposite
-  price). A marketable Day order is rejected, not partly filled.
+  price, to the cent). A marketable Day order is rejected, not partly filled, and so is a price off the cent grid at
+  $1 or more (`OffTick`).
 - **The fill rules are (a), (b), (c) and (d) with the trade-price guard** ([backtesting.md](backtesting.md)). Hidden and
-  non-displayed liquidity is invisible: ITCH `P` prints never fill our orders, and neither do cross trades (`Q`).
-  Opening and closing crosses and trading halts are not modelled in fills.
+  non-displayed liquidity is invisible: ITCH `P` prints never fill our orders, and neither do cross trades (`Q`). The
+  opening and closing crosses are not modelled as auctions: executions in their seconds fill resting orders by the same
+  rules, at our limit price rather than the cross price. An order that arrives while the book is halted is rejected.
 - **Constant latencies.** The order latency also stands for the market-data delay. There are no latency
   distributions or queueing at the exchange.
 - **Fees are per share only:** maker and taker fees or rebates. SEC Section 31 and the FINRA TAF on sells are not
@@ -36,7 +38,12 @@
 
 - **One session at a time,** with one controlling tab; the Lab runs one backtest at a time with 8 waiting.
 - **A local tool.** The token guards trading, not availability; put a buffering reverse proxy in front of anything
-  public.
+  public. A client that stops reading its WebSocket has its snapshots buffered in the server, about 1 MB a second,
+  until it reads or disconnects.
+- **The command log is written behind the engine.** A command is acknowledged when admitted; a failed write (a full
+  disk) loses the lines still queued, and the session refuses commands after it.
+- **The terminal's candles and tape** count every execution message, non-printable `C` executions included, and leave
+  out the cross's own print (`Q`), so the auction minutes show less volume than the tape a vendor would print.
 - The Lab keeps up to 50,000 fills of each run in memory and on disk; a few hundred saved runs would call for loading
   results on demand.
 

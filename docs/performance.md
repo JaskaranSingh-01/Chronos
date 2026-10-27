@@ -1,7 +1,9 @@
 # Performance
 
 Chronos processes **4,885,679** market events per second: the full NASDAQ day of 2019-12-30, every symbol
-(264,469,515 events), on one machine, an Apple M4, with the default `--book ladder --threads 2`.
+(264,469,515 events), on one machine, an Apple M4, with the default `--book ladder --threads 2`: a decoder thread
+beside the book thread. On one thread it does 3,385,625, below the previous engine; the table and the profile say
+why.
 
 ## The numbers
 

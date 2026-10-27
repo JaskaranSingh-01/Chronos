@@ -7,18 +7,20 @@ every symbol of a trading day in one pass, backtests strategies against that boo
 an interactive Trading Terminal and Strategy Lab in the browser. Simulated orders never change the replayed history,
 and the same input always gives the same books, fills and PnL, byte for byte.
 
+![The Trading Terminal replaying a market maker's backtest on AAPL](docs/images/terminal.png)
+
 ## The evidence
 
 NASDAQ's public sample day, 2019-12-30: 8.25 GB, 268,744,780 messages, 8,906 symbols.
 
 | | |
 |---|---|
-| **Throughput** | **4,885,679 events/s**: the full day, every symbol, 264,469,515 events in 54 s on an Apple M4 (two threads); 22 % faster than the previous engine, measured interleaved beside it |
-| **Correctness** | 0 rejected events; every book empty after the last message; 258,271 invariant checks of every book passed |
-| **Determinism** | one combined digest, `6897f945bcef75c2`, from list and ladder books, one thread and two, and the previous engine; and the same digests from the Linux/g++ Docker image as from the macOS/clang build (checked on a 256 MiB slice) |
+| **Throughput** | **4,885,679 events/s**: the full day, every symbol, 264,469,515 events in 54 s on an Apple M4, a decoder thread beside the book thread. That is 22 % more than the previous engine, measured interleaved beside it, for 65 % more CPU; on one thread the engine does 3,385,625, 15 % below it (the profile says why) |
+| **Correctness** | 0 rejected events; every book empty after the last message; 258,271 periodic invariant checks, each of the book the event changed, then of all 8,906 books at the end |
+| **Determinism** | the same counts and combined digest, `6897f945bcef75c2`, from list and ladder books, one thread and two, and the previous engine (with every book empty at the close, it fingerprints each symbol's adds and replaces); on a 256 MiB slice, whose books are still live at its end, the same book digests from the Linux/g++ Docker image as from the macOS/clang build |
 | **Allocations** | 0 in the replay, counted by a replacement `operator new`, with the heap unchanged; CI checks the hot path |
-| **Per-event cost** | 191 / 447 / 863 ns at p50 / p99 / p99.9 (book thread, batch-derived: see [performance](docs/performance.md#method)) |
-| **Tests** | 695 C++ tests, 106 Vitest, 13 Playwright end-to-end; CI on Linux and macOS with ASan, UBSan and TSan |
+| **Per-event cost** | 204.7 ns mean; 191 / 447 / 863 ns at p50 / p99 / p99.9 of 1,024-event batch means (the book thread; the clock cannot time one event: see [performance](docs/performance.md#method)) |
+| **Tests** | 698 C++ tests, 118 Vitest, 13 Playwright end-to-end; CI on Linux and macOS with ASan, UBSan and TSan |
 
 [docs/performance.md](docs/performance.md) has the method and every configuration's numbers, and
 [bench/RESULTS.md](bench/RESULTS.md) the record of every run.
@@ -40,6 +42,8 @@ NASDAQ's public sample day, 2019-12-30: 8.25 GB, 268,744,780 messages, 8,906 sym
   chart, the L3 book with your queue position, and an order ticket that trades against the historical queue.
 - **Serves the Strategy Lab**: run backtests from the browser, compare runs, verify a run against its recorded digests,
   and watch it replay in the terminal to a reproduced-or-not verdict.
+
+![The Strategy Lab comparing an opening range breakout with a market maker on AAPL](docs/images/strategy-lab.png)
 
 ## Quick start
 
@@ -92,16 +96,17 @@ eight files to read first.
 - **One loop, no wall clock.** Market events and our own events merge in (timestamp, stream, sequence) order, and a tie
   goes to the market, so an order never jumps ahead of history stamped at the same nanosecond.
 - **A conservative fill model.** A resting order joins the back of the visible queue at its price and fills only by
-  rules a real queue would: shares ahead executed or cancelled, a trade behind or through it, a crossing order. A
-  FIFO-anomaly counter checks the model against real days, and once found a real bug in it.
+  rules a real queue would: shares ahead executed or cancelled, a trade behind or through it, a crossing order. Prices
+  must be whole cents at $1 or more, as Reg NMS Rule 612 requires, so no order jumps a queue by a fraction of a cent.
+  A FIFO-anomaly counter checks the model against real days, and once found a real bug in it.
 - **Allocation-free by construction.** Capacity is a run parameter: pools and indices are reserved up front, and a full
   one stops the run cleanly instead of growing mid-replay.
 - **Measured, not assumed.** Optimisations follow the profile, and the defaults follow a benchmark run interleaved with
   the previous engine on the same machine: one candidate was rejected, and the ladder's slots were widened from price
   units to cents once review showed its $0.0256 window held about one level a side.
 - **Reproducible from the browser.** Every session's commands are logged with the build and each input segment's hash,
-  and a Lab run can be verified or watched again to the same digests, or is reported as run on different code or
-  changed input.
+  and a Lab run can be verified or watched again to the same digests, every fill compared in order, or is reported as
+  run on different code or changed input.
 
 ## Documentation
 

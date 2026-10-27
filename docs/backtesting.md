@@ -47,6 +47,9 @@ From the comment in [`execution_simulator.hpp`](../include/simulator/sim/executi
 - **IOC**, at arrival: walk the visible opposite levels best first while they cross, and fill min(remaining, level
   quantity) at each level's price as taker. Whatever is left expires. Fills take no liquidity from the book (no market
   impact).
+- **Prices on the grid.** At $1 or more an order's price must be a whole cent, as Reg NMS Rule 612 requires, else it
+  is rejected (`OffTick`): a price a fraction of a cent inside the touch would form a level of its own, with nobody
+  ahead, and jump the queue. Below $1 any tick is allowed.
 - **Day orders are post-only.** One that would take liquidity is rejected (`WouldCross`). Otherwise it rests
   virtually: `anchor_sequence` = the book's last sequence and `ahead_quantity` = the visible quantity at its price, so
   every historical order already at that price is ahead of it.
@@ -73,6 +76,8 @@ price. With the guard, the count is 0.
 - Reports are booked at delivery, a report latency after they happened, just before the strategy sees them.
 - Longs are marked at the best bid and shorts at the best ask.
 - Money is integer: tick-shares ($0.0001) for ITCH, with `__int128` products. PnL is realised + unrealised − fees.
+- `Portfolio::fills_digest()` hashes every fill booked, in order: its time, order, side, price, quantity and
+  liquidity. The Lab's Verify and Watch compare it, so a run reproduces fill by fill, not only in its totals.
 - Fees are per share in price ticks, maker and taker apart; a negative fee is a rebate (`--maker-fee-ticks -20` is a
   $0.0020 rebate).
 - `Portfolio::reserve` checks each order before it is sent, against `RiskLimits`: no larger than the largest order

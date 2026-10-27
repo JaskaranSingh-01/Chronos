@@ -4,14 +4,14 @@
 
 | Suite | Count | What |
 |---|---|---|
-| `simulator_tests` | 510 pass, 6 skip | the engine: types, ITCH framing and decoding, sources, the book, pools and indices, the ladder, the pipeline, the event loop, the fill model, the portfolio, the strategies, the CLI's arguments |
+| `simulator_tests` | 513 pass, 6 skip | the engine: types, ITCH framing and decoding, sources, the book, pools and indices, the ladder, the pipeline, the event loop, the fill model, the portfolio, the strategies, the CLI's arguments |
 | `chronos_server_tests` | 156 | the server: protocol schemas, peers and resync, sessions and generations, the command log and its reproduction, the store's builder and reader, the Lab, Watch, security |
 | `alloc_counter_test` | 3 | the counting `operator new` the replay's zero-allocation figure relies on |
 | CLI tests | 19 | `simulator` and `chronos-serve` run as processes: exit codes, usage, a store shared between them |
-| Vitest (`web/`) | 106 | the stores' reducers, candles, order checks, the Lab's model and formatting |
+| Vitest (`web/`) | 118 | the stores' reducers, candles and fill marks, the depth ladder, order checks, the Lab's model and formatting |
 | Playwright (`web/e2e/`) | 13, plus 2 measurement specs | the terminal and the Lab in Chromium against a real `chronos-serve` |
 
-`ctest` runs 695 tests: every GoogleTest case, the CLI tests and a build-info test. Five of the 6 skips are the
+`ctest` runs 698 tests: every GoogleTest case, the CLI tests and a build-info test. Five of the 6 skips are the
 real-data tests, which need a day file; the sixth is the conformance suite's error check, which does not apply to
 `VectorSource`.
 

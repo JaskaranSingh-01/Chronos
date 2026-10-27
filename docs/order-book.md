@@ -86,9 +86,9 @@ at compile time, which only the benchmark that prices the run-time dispatch uses
 | `LevelNotIndexed` | the level index does not map a level's price to it |
 | `WindowMismatch` | a ladder slot and the level at its price disagree, or the best is off-centre |
 
-The CLI checks every book at the end of a run, and every N applied events with `--check-invariants N`; the tests check
-after every operation. The engine round's correctness runs passed 258,271 periodic checks on the full day in each
-configuration.
+The CLI checks every book at the end of a run and, with `--check-invariants N`, the book the N-th applied event
+changed, every N events; the tests check after every operation. The correctness runs passed 258,271 such periodic
+checks on the full day in each configuration, then every book at the end.
 
 ## Digests
 

@@ -1,0 +1,546 @@
+[
+  {
+    "window": "load symbol",
+    "seconds": 0.3,
+    "ws_messages_per_second": 22,
+    "ws_kb_per_second": 9.5,
+    "handler_ms_total": 1.1,
+    "handler_ms_max": 0.4,
+    "handler_share_percent": 0.4,
+    "long_tasks": 0,
+    "long_task_ms_total": 0,
+    "long_task_ms_max": 0,
+    "frames_per_second": 66.1,
+    "worst_frame_ms": 16.8,
+    "frames_over_50ms": 0,
+    "api": [
+      {
+        "path": "/api/strategies",
+        "kb": 1.5,
+        "ms": 0.7
+      },
+      {
+        "path": "/api/days",
+        "kb": 0.6,
+        "ms": 11
+      },
+      {
+        "path": "/api/history",
+        "kb": 0.4,
+        "ms": 1.4
+      },
+      {
+        "path": "/api/symbols",
+        "kb": 58.7,
+        "ms": 1.6
+      },
+      {
+        "path": "/api/symbols",
+        "kb": 58.7,
+        "ms": 1
+      },
+      {
+        "path": "/api/history",
+        "kb": 0.4,
+        "ms": 0.3
+      },
+      {
+        "path": "/api/symbols",
+        "kb": 58.7,
+        "ms": 0.7
+      }
+    ]
+  },
+  {
+    "window": "play 1×",
+    "seconds": 10.1,
+    "ws_messages_per_second": 25.2,
+    "ws_kb_per_second": 16.8,
+    "handler_ms_total": 11.2,
+    "handler_ms_max": 0.3,
+    "handler_share_percent": 0.1,
+    "long_tasks": 0,
+    "long_task_ms_total": 0,
+    "long_task_ms_max": 0,
+    "frames_per_second": 60.1,
+    "worst_frame_ms": 16.8,
+    "frames_over_50ms": 0,
+    "api": [
+      {
+        "path": "/api/history",
+        "kb": 0.4,
+        "ms": 0.7
+      },
+      {
+        "path": "/api/history",
+        "kb": 0.4,
+        "ms": 1
+      }
+    ]
+  },
+  {
+    "window": "play 10×",
+    "seconds": 10.1,
+    "ws_messages_per_second": 24.9,
+    "ws_kb_per_second": 16.7,
+    "handler_ms_total": 14.1,
+    "handler_ms_max": 0.2,
+    "handler_share_percent": 0.1,
+    "long_tasks": 0,
+    "long_task_ms_total": 0,
+    "long_task_ms_max": 0,
+    "frames_per_second": 60,
+    "worst_frame_ms": 16.8,
+    "frames_over_50ms": 0,
+    "api": []
+  },
+  {
+    "window": "play 100×",
+    "seconds": 10.1,
+    "ws_messages_per_second": 25.3,
+    "ws_kb_per_second": 17,
+    "handler_ms_total": 11.7,
+    "handler_ms_max": 0.2,
+    "handler_share_percent": 0.1,
+    "long_tasks": 0,
+    "long_task_ms_total": 0,
+    "long_task_ms_max": 0,
+    "frames_per_second": 60.1,
+    "worst_frame_ms": 16.8,
+    "frames_over_50ms": 0,
+    "api": [
+      {
+        "path": "/api/history",
+        "kb": 0.4,
+        "ms": 0.9
+      }
+    ]
+  },
+  {
+    "window": "play Max",
+    "seconds": 10.1,
+    "ws_messages_per_second": 1.1,
+    "ws_kb_per_second": 19.7,
+    "handler_ms_total": 9.9,
+    "handler_ms_max": 3.1,
+    "handler_share_percent": 0.1,
+    "long_tasks": 0,
+    "long_task_ms_total": 0,
+    "long_task_ms_max": 0,
+    "frames_per_second": 60,
+    "worst_frame_ms": 16.8,
+    "frames_over_50ms": 0,
+    "api": [
+      {
+        "path": "/api/history",
+        "kb": 68.8,
+        "ms": 0.9
+      },
+      {
+        "path": "/api/history",
+        "kb": 93.6,
+        "ms": 1
+      },
+      {
+        "path": "/api/history",
+        "kb": 104.9,
+        "ms": 1.3
+      },
+      {
+        "path": "/api/history",
+        "kb": 118.2,
+        "ms": 1.7
+      },
+      {
+        "path": "/api/history",
+        "kb": 140.4,
+        "ms": 1.8
+      },
+      {
+        "path": "/api/history",
+        "kb": 146.8,
+        "ms": 1.4
+      },
+      {
+        "path": "/api/history",
+        "kb": 141,
+        "ms": 1.5
+      },
+      {
+        "path": "/api/history",
+        "kb": 71.3,
+        "ms": 1
+      }
+    ]
+  },
+  {
+    "window": "to Lab while playing",
+    "seconds": 5.1,
+    "ws_messages_per_second": 0,
+    "ws_kb_per_second": 0,
+    "handler_ms_total": 0,
+    "handler_ms_max": 0,
+    "handler_share_percent": 0,
+    "long_tasks": 1,
+    "long_task_ms_total": 96,
+    "long_task_ms_max": 96,
+    "frames_per_second": 59.2,
+    "worst_frame_ms": 83.3,
+    "frames_over_50ms": 1,
+    "api": [
+      {
+        "path": "/api/symbols",
+        "kb": 58.7,
+        "ms": 1.7
+      },
+      {
+        "path": "/api/backtests",
+        "kb": 0.3,
+        "ms": 0.9
+      }
+    ]
+  },
+  {
+    "window": "to Terminal while playing",
+    "seconds": 5.1,
+    "ws_messages_per_second": 0,
+    "ws_kb_per_second": 0,
+    "handler_ms_total": 0,
+    "handler_ms_max": 0,
+    "handler_share_percent": 0,
+    "long_tasks": 0,
+    "long_task_ms_total": 0,
+    "long_task_ms_max": 0,
+    "frames_per_second": 60,
+    "worst_frame_ms": 16.8,
+    "frames_over_50ms": 0,
+    "api": [
+      {
+        "path": "/api/symbols",
+        "kb": 58.7,
+        "ms": 1.3
+      }
+    ]
+  },
+  {
+    "window": "run backtest",
+    "seconds": 1.5,
+    "ws_messages_per_second": 0,
+    "ws_kb_per_second": 0,
+    "handler_ms_total": 0,
+    "handler_ms_max": 0,
+    "handler_share_percent": 0,
+    "long_tasks": 0,
+    "long_task_ms_total": 0,
+    "long_task_ms_max": 0,
+    "frames_per_second": 58.1,
+    "worst_frame_ms": 66.6,
+    "frames_over_50ms": 1,
+    "api": [
+      {
+        "path": "/api/backtests",
+        "kb": 0.3,
+        "ms": 0.8
+      },
+      {
+        "path": "/api/symbols",
+        "kb": 58.7,
+        "ms": 1.3
+      },
+      {
+        "path": "/api/backtests",
+        "kb": 0.3,
+        "ms": 0.7
+      },
+      {
+        "path": "/api/backtests",
+        "kb": 1.7,
+        "ms": 1.7
+      },
+      {
+        "path": "/api/backtests/20261026T220423Z-61a44f5f25a989ba",
+        "kb": 1.6,
+        "ms": 0.6
+      },
+      {
+        "path": "/api/backtests",
+        "kb": 1.7,
+        "ms": 1.9
+      },
+      {
+        "path": "/api/backtests/20261026T220423Z-61a44f5f25a989ba",
+        "kb": 1327.8,
+        "ms": 19
+      }
+    ]
+  },
+  {
+    "window": "watch in terminal",
+    "seconds": 0.2,
+    "ws_messages_per_second": 16.7,
+    "ws_kb_per_second": 6.7,
+    "handler_ms_total": 0.4,
+    "handler_ms_max": 0.3,
+    "handler_share_percent": 0.2,
+    "long_tasks": 0,
+    "long_task_ms_total": 0,
+    "long_task_ms_max": 0,
+    "frames_per_second": 58.5,
+    "worst_frame_ms": 33.4,
+    "frames_over_50ms": 0,
+    "api": [
+      {
+        "path": "/api/symbols",
+        "kb": 58.7,
+        "ms": 1.4
+      },
+      {
+        "path": "/api/symbols",
+        "kb": 58.7,
+        "ms": 0.9
+      },
+      {
+        "path": "/api/history",
+        "kb": 0.4,
+        "ms": 0.6
+      },
+      {
+        "path": "/api/symbols",
+        "kb": 58.7,
+        "ms": 1.5
+      }
+    ]
+  },
+  {
+    "window": "play the watched run at Max",
+    "seconds": 10.1,
+    "ws_messages_per_second": 13976.7,
+    "ws_kb_per_second": 3976.8,
+    "handler_ms_total": 6740.6,
+    "handler_ms_max": 19.1,
+    "handler_share_percent": 66.7,
+    "long_tasks": 0,
+    "long_task_ms_total": 0,
+    "long_task_ms_max": 0,
+    "frames_per_second": 30.8,
+    "worst_frame_ms": 116.7,
+    "frames_over_50ms": 41,
+    "api": [
+      {
+        "path": "/api/history",
+        "kb": 9.7,
+        "ms": 0.5
+      },
+      {
+        "path": "/api/history",
+        "kb": 56.5,
+        "ms": 0.7
+      },
+      {
+        "path": "/api/history",
+        "kb": 27.7,
+        "ms": 0.8
+      },
+      {
+        "path": "/api/history",
+        "kb": 33.4,
+        "ms": 1.2
+      },
+      {
+        "path": "/api/history",
+        "kb": 36.7,
+        "ms": 0.8
+      },
+      {
+        "path": "/api/history",
+        "kb": 39.7,
+        "ms": 2.6
+      },
+      {
+        "path": "/api/history",
+        "kb": 41.4,
+        "ms": 0.9
+      },
+      {
+        "path": "/api/history",
+        "kb": 55,
+        "ms": 1.6
+      },
+      {
+        "path": "/api/history",
+        "kb": 35.7,
+        "ms": 1
+      },
+      {
+        "path": "/api/history",
+        "kb": 70.8,
+        "ms": 2.7
+      },
+      {
+        "path": "/api/history",
+        "kb": 68.9,
+        "ms": 1.2
+      },
+      {
+        "path": "/api/history",
+        "kb": 73.9,
+        "ms": 1.1
+      },
+      {
+        "path": "/api/history",
+        "kb": 89.6,
+        "ms": 1.1
+      },
+      {
+        "path": "/api/history",
+        "kb": 92.3,
+        "ms": 1
+      },
+      {
+        "path": "/api/history",
+        "kb": 69.7,
+        "ms": 1.1
+      },
+      {
+        "path": "/api/history",
+        "kb": 56.9,
+        "ms": 0.9
+      },
+      {
+        "path": "/api/history",
+        "kb": 112.8,
+        "ms": 1
+      },
+      {
+        "path": "/api/history",
+        "kb": 52.8,
+        "ms": 1
+      },
+      {
+        "path": "/api/history",
+        "kb": 91.3,
+        "ms": 1
+      },
+      {
+        "path": "/api/history",
+        "kb": 36.2,
+        "ms": 0.6
+      },
+      {
+        "path": "/api/history",
+        "kb": 0.5,
+        "ms": 0.5
+      },
+      {
+        "path": "/api/history",
+        "kb": 0.5,
+        "ms": 0.5
+      },
+      {
+        "path": "/api/history",
+        "kb": 0.5,
+        "ms": 0.6
+      },
+      {
+        "path": "/api/history",
+        "kb": 0.5,
+        "ms": 0.7
+      },
+      {
+        "path": "/api/history",
+        "kb": 0.5,
+        "ms": 0.7
+      },
+      {
+        "path": "/api/history",
+        "kb": 0.5,
+        "ms": 0.8
+      },
+      {
+        "path": "/api/history",
+        "kb": 0.5,
+        "ms": 0.5
+      },
+      {
+        "path": "/api/history",
+        "kb": 0.5,
+        "ms": 0.7
+      },
+      {
+        "path": "/api/history",
+        "kb": 0.5,
+        "ms": 0.4
+      },
+      {
+        "path": "/api/history",
+        "kb": 0.5,
+        "ms": 0.8
+      },
+      {
+        "path": "/api/history",
+        "kb": 0.5,
+        "ms": 0.4
+      },
+      {
+        "path": "/api/history",
+        "kb": 0.5,
+        "ms": 0.6
+      },
+      {
+        "path": "/api/history",
+        "kb": 0.5,
+        "ms": 0.7
+      },
+      {
+        "path": "/api/history",
+        "kb": 0.5,
+        "ms": 1.2
+      },
+      {
+        "path": "/api/history",
+        "kb": 0.5,
+        "ms": 0.6
+      },
+      {
+        "path": "/api/history",
+        "kb": 0.5,
+        "ms": 0.8
+      },
+      {
+        "path": "/api/history",
+        "kb": 0.5,
+        "ms": 0.5
+      },
+      {
+        "path": "/api/history",
+        "kb": 0.5,
+        "ms": 0.7
+      },
+      {
+        "path": "/api/history",
+        "kb": 0.5,
+        "ms": 1.2
+      },
+      {
+        "path": "/api/history",
+        "kb": 0.5,
+        "ms": 0.6
+      },
+      {
+        "path": "/api/history",
+        "kb": 0.5,
+        "ms": 0.8
+      },
+      {
+        "path": "/api/history",
+        "kb": 0.5,
+        "ms": 1.1
+      },
+      {
+        "path": "/api/history",
+        "kb": 0.5,
+        "ms": 0.6
+      }
+    ]
+  }
+]
