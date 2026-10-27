@@ -9,11 +9,12 @@ MarketBook::MarketBook(SymbolId symbol, std::size_t capacity, BookBackend backen
     : symbol_(symbol),
       owned_(std::make_unique<BookStorage>(capacity, backend, std::size_t{symbol} + 1)),  // its window at its id
       storage_(owned_.get()),
-      book_(symbol, *storage_, step)
+      book_(symbol, *storage_, step),
+      cent_(step)
 {}
 
 MarketBook::MarketBook(SymbolId symbol, BookStorage& storage, std::uint64_t step) noexcept
-    : symbol_(symbol), storage_(&storage), book_(symbol, storage, step)
+    : symbol_(symbol), storage_(&storage), book_(symbol, storage, step), cent_(step)
 {}
 
 // Every case validates before mutating, so a rejected event leaves the book unchanged.

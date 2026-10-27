@@ -49,6 +49,8 @@ ErrorCode verdict(const ExecutionReport& report) noexcept
         return ErrorCode::WouldCross;
     case RejectReason::NotTrading:
         return ErrorCode::NotTrading;
+    case RejectReason::OffTick:
+        return ErrorCode::OffTick;
     case RejectReason::None:
     case RejectReason::InvalidOrder:
         break;

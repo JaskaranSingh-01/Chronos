@@ -13,7 +13,7 @@ struct MarketMakerParams
     std::uint64_t quote_size{100};                // shares per quote
     std::int64_t max_position{500};               // |position| a fill of the next quote may not exceed
     Timestamp requote_cooldown_ns{100'000'000};   // minimum quote age before a requote
-    std::int64_t improve_ticks{0};  // ticks inside the touch; used only while the spread is wider than twice this
+    std::int64_t improve_ticks{0};  // grid ticks (a cent at $1+) inside the touch, while the spread is over twice it
 
     bool operator==(const MarketMakerParams&) const = default;
 };
@@ -67,8 +67,8 @@ private:
         if (side == Side::Buy ? position + size > params_.max_position : position - size < -params_.max_position) {
             return false;
         }
-        const std::int64_t improve =
-            ask.price.ticks - bid.price.ticks > 2 * params_.improve_ticks ? params_.improve_ticks : 0;
+        const std::int64_t step = params_.improve_ticks * ctx.book.tick_at(bid.price);
+        const std::int64_t improve = ask.price.ticks - bid.price.ticks > 2 * step ? step : 0;
         price = side == Side::Buy ? Price{bid.price.ticks + improve} : Price{ask.price.ticks - improve};
         return true;
     }

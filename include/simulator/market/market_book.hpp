@@ -82,6 +82,7 @@ private:
     std::unique_ptr<BookStorage> owned_;  // null when the storage is shared
     BookStorage* storage_;                // owned_ or the shared one
     OrderBook book_;
+    std::uint64_t cent_;  // a cent in this book's ticks: ladder_step() of its price scale
     std::uint64_t next_sequence_{1};
     std::size_t peak_order_count_{0};
     BookStructure exhausted_{BookStructure::None};
@@ -109,6 +110,14 @@ public:
     SymbolId symbol() const noexcept
     {
         return symbol_;
+    }
+
+    // The price grid an order must sit on at `price`: a cent at $1 or more, one tick below (Reg NMS Rule 612). A book
+    // made without its symbol's step, as most tests make it, allows any tick.
+    std::int64_t tick_at(Price price) const noexcept
+    {
+        const auto cent = static_cast<std::int64_t>(cent_);
+        return price.ticks >= 100 * cent ? cent : 1;
     }
 
     // Trading until a Status event says otherwise.

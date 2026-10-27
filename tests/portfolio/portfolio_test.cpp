@@ -97,6 +97,23 @@ TEST(PortfolioTest, BuyThenSellRealisesPnlNetOfMakerAndTakerFees)
     EXPECT_EQ(portfolio.max_abs_position(), 100);
 }
 
+TEST(PortfolioTest, ItsFillsDigestFollowsEachFillInOrderNotOnlyTheTotals)
+{
+    Portfolio a{kEquity, kWide, FeeSchedule{}};
+    Portfolio b{kEquity, kWide, FeeSchedule{}};
+    Portfolio swapped{kEquity, kWide, FeeSchedule{}};
+    for (Portfolio* p : {&a, &b}) {
+        trade(*p, Side::Buy, 1'000'000, 100);
+        trade(*p, Side::Buy, 1'000'100, 100);
+    }
+    trade(swapped, Side::Buy, 1'000'100, 100);
+    trade(swapped, Side::Buy, 1'000'000, 100);
+    EXPECT_EQ(a.fills_digest(), b.fills_digest());
+    EXPECT_EQ(a.cash(), swapped.cash());  // the same totals
+    EXPECT_NE(a.fills_digest(), swapped.fills_digest());
+    EXPECT_NE(Portfolio(kEquity, kWide, FeeSchedule{}).fills_digest(), a.fills_digest());
+}
+
 TEST(PortfolioTest, ShortPositionRealisesPnlOnBuyBack)
 {
     Portfolio portfolio{kEquity, kWide, FeeSchedule{}};

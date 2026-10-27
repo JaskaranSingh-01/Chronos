@@ -44,6 +44,7 @@ private:
     std::size_t open_orders_{0};
     std::uint64_t open_buy_{0};     // reserved quantity, not yet filled or released
     std::uint64_t open_sell_{0};
+    std::uint64_t fills_digest_{fnv1a_offset_basis};  // every fill booked, in order
 
     void apply_fill(const ExecutionReport& report) noexcept;
     void release(Side side, Quantity quantity, bool order_done) noexcept;
@@ -52,7 +53,7 @@ public:
     // Asserts price_scale + quantity_scale <= 12, so every price x quantity fits int64.
     Portfolio(const Instrument& instrument, RiskLimits limits, FeeSchedule fees) noexcept;
 
-    // Pre-trade check in RiskCheck order; the position limit assumes every open same-side order fills.
+    // Pre-trade check, in RiskCheck's order; the position limit assumes every open same-side order fills.
     // Only Accepted changes state: it reserves the order.
     RiskCheck reserve(Side side, Quantity quantity) noexcept;
 
@@ -83,6 +84,11 @@ public:
     {
         return max_drawdown_;
     }  // max(peak pnl - pnl) over marks
+    // FNV-1a over each fill booked: its time, order, side, price, quantity and liquidity, in order.
+    std::uint64_t fills_digest() const noexcept
+    {
+        return fills_digest_;
+    }
     std::int64_t max_abs_position() const noexcept
     {
         return max_abs_position_;

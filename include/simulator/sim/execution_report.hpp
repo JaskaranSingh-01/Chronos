@@ -47,7 +47,8 @@ enum class RejectReason : std::uint8_t {
     None,
     WouldCross,   // a post-only order would take liquidity
     InvalidOrder, // zero quantity
-    NotTrading    // the symbol is halted, paused or quotation only
+    NotTrading,   // the symbol is halted, paused or quotation only
+    OffTick       // a price off the book's grid: not a whole cent at $1 or more
 };
 
 enum class Liquidity : std::uint8_t {
@@ -88,7 +89,8 @@ struct ExecutionReport
 };
 static_assert(sizeof(ExecutionReport) == 56);
 
-// Portfolio::reserve's pre-trade verdict; checks run in this order.
+// Portfolio::reserve's pre-trade verdict. Its checks run InvalidOrder, OrderTooLarge, TooManyOpenOrders, then
+// PositionLimit.
 enum class RiskCheck : std::uint8_t {
     Accepted,
     InvalidOrder,

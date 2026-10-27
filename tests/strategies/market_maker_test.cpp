@@ -17,7 +17,7 @@ static_assert(Strategy<MarketMaker>);
 
 struct Fixture
 {
-    MarketBook book{kSymbol, 64};
+    MarketBook book;
     SimQueue queue{16};
     Portfolio portfolio;
     OrderGateway gateway{queue, portfolio, LatencyConfig{.order_latency = 10}};
@@ -25,8 +25,11 @@ struct Fixture
     MarketMaker mm;
     OrderId next_id{1};
 
-    explicit Fixture(MarketMakerParams params = {.quote_size = 100, .max_position = 200, .requote_cooldown_ns = 1'000})
-        : portfolio(kEquity,
+    // `cent`: the book's ladder step; 1, the default, puts no grid on prices.
+    explicit Fixture(MarketMakerParams params = {.quote_size = 100, .max_position = 200, .requote_cooldown_ns = 1'000},
+                     std::uint64_t cent = 1)
+        : book(kSymbol, 64, BookBackend::List, cent),
+          portfolio(kEquity,
                     RiskLimits{.max_position = 1'000, .max_order_quantity = Quantity{100}, .max_open_orders = 2},
                     FeeSchedule{}),
           mm(params)
@@ -125,6 +128,16 @@ TEST(MarketMakerTest, ImprovesOnlyWhileTheSpreadStaysOpen)
     ASSERT_EQ(sent.size(), 2u);
     EXPECT_TRUE(is_quote(sent[0], Side::Buy, kBid + 30));
     EXPECT_TRUE(is_quote(sent[1], Side::Sell, kAsk - 30));
+}
+
+TEST(MarketMakerTest, ImprovesByWholeCentsAtOneDollarOrMore)
+{
+    // A one-cent spread: one tick inside it would be off the grid, and one cent would lock the quotes, so join.
+    Fixture cents{{.quote_size = 100, .max_position = 200, .requote_cooldown_ns = 1'000, .improve_ticks = 1}, 100};
+    const std::vector<SimEvent> sent = cents.tick(5'000);
+    ASSERT_EQ(sent.size(), 2u);
+    EXPECT_TRUE(is_quote(sent[0], Side::Buy, kBid));
+    EXPECT_TRUE(is_quote(sent[1], Side::Sell, kAsk));
 }
 
 TEST(MarketMakerTest, StaysOutOfAOneSidedOrCrossedBook)

@@ -156,6 +156,27 @@ TEST_F(ExecutionSimulatorTest, RejectsZeroQuantity)
               (std::vector{rejected(1, Side::Buy, 0, RejectReason::InvalidOrder)}));
 }
 
+// A book made with ITCH's cent step: at $1 or more an order must be a whole cent, else it would jump the queue.
+TEST(ExecutionSimulatorTickTest, RejectsAPriceOffTheCentGridAtOneDollarOrMoreAndAcceptsAnyTickBelow)
+{
+    MarketBook book{kSymbol, 16, BookBackend::List, 100};
+    build_example_book(book);
+    ExecutionSimulator execution;
+    std::vector<ExecutionReport> out;
+    const auto arrive = [&](const OrderRequest& request) {
+        out.clear();
+        execution.on_order_arrive(request, kNow, book, out);
+        return out;
+    };
+    EXPECT_EQ(arrive(order(1, Side::Buy, 1'000'050, 100)),
+              (std::vector{rejected(1, Side::Buy, 100, RejectReason::OffTick)}));
+    EXPECT_EQ(arrive(order(2, Side::Sell, 999'901, 100, TimeInForce::Day)),
+              (std::vector{rejected(2, Side::Sell, 100, RejectReason::OffTick)}));
+    EXPECT_EQ(arrive(order(3, Side::Buy, 1'000'000, 150)), (std::vector{fill(3, Side::Buy, 1'000'000, 150, 0)}));
+    const std::vector<ExecutionReport> under = arrive(order(4, Side::Buy, 9'999, 100, TimeInForce::Day));  // $0.9999
+    EXPECT_EQ(under.at(0).type, ReportType::Accepted);
+}
+
 TEST_F(ExecutionSimulatorTest, AppendsToOutAndCountsTakerFills)
 {
     out_.push_back(expired(9, Side::Sell, 1));

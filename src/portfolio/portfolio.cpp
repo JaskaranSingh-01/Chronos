@@ -78,6 +78,12 @@ void Portfolio::release(Side side, Quantity quantity, bool order_done) noexcept
 
 void Portfolio::apply_fill(const ExecutionReport& report) noexcept
 {
+    for (const std::uint64_t value :
+         {static_cast<std::uint64_t>(report.exchange_time), report.order_id, std::uint64_t{report.side == Side::Buy},
+          static_cast<std::uint64_t>(report.price.ticks), report.quantity.value(),
+          static_cast<std::uint64_t>(report.liquidity)}) {
+        fnv1a_mix(fills_digest_, value);
+    }
     const auto quantity = static_cast<std::int64_t>(report.quantity.value());
     const std::int64_t fill = report.side == Side::Buy ? quantity : -quantity;
     const std::int64_t fee = report.liquidity == Liquidity::Maker ? fee_schedule_.maker_fee_per_share

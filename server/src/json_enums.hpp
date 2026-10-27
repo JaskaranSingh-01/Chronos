@@ -23,7 +23,8 @@ NLOHMANN_JSON_SERIALIZE_ENUM(RejectReason,
                              {{RejectReason::None, "none"},
                               {RejectReason::WouldCross, "would_cross"},
                               {RejectReason::InvalidOrder, "invalid_order"},
-                              {RejectReason::NotTrading, "not_trading"}})
+                              {RejectReason::NotTrading, "not_trading"},
+                              {RejectReason::OffTick, "off_tick"}})
 NLOHMANN_JSON_SERIALIZE_ENUM(Liquidity,
                              {{Liquidity::None, "none"}, {Liquidity::Maker, "maker"}, {Liquidity::Taker, "taker"}})
 NLOHMANN_JSON_SERIALIZE_ENUM(FillCause,

@@ -133,7 +133,7 @@ struct Digests
 {
     std::uint64_t book{0};       // MarketBook::digest()
     std::uint64_t execution{0};  // the execution counters and our resting orders
-    std::uint64_t portfolio{0};  // position, cash, PnL, fees, drawdown and open orders
+    std::uint64_t portfolio{0};  // every fill in order, then position, cash, PnL, fees, drawdown and open orders
 
     bool operator==(const Digests&) const = default;
 };

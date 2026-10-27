@@ -54,6 +54,8 @@ private:
 
 public:
     // push allocates only once more than `capacity` events are pending.
+    // ponytail: past it, push grows the heap inside noexcept, so a failed allocation terminates; cap the queue and
+    // refuse the order if a strategy can ever queue that many.
     explicit SimQueue(std::size_t capacity)
         : queue_(Later{}, reserved(capacity))
     {}

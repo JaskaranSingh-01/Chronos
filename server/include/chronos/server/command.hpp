@@ -24,6 +24,7 @@ enum class ErrorCode : std::uint8_t {
     WouldCross,
     NotTrading,
     InvalidOrder,
+    OffTick,  // a price off the book's grid: not a whole cent at $1 or more
     CancelRejected  // the order was no longer resting
 };
 
@@ -59,6 +60,8 @@ constexpr std::string_view to_string(ErrorCode code) noexcept
         return "not_trading";
     case ErrorCode::InvalidOrder:
         return "invalid_order";
+    case ErrorCode::OffTick:
+        return "off_tick";
     case ErrorCode::CancelRejected:
         return "cancel_rejected";
     }

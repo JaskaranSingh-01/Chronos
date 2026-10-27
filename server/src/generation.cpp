@@ -91,6 +91,7 @@ Digests digests(const Generation& generation) noexcept
                                      p.max_drawdown(), static_cast<std::int64_t>(p.open_orders())}) {
         fnv1a_mix(d.portfolio, static_cast<std::uint64_t>(value));
     }
+    fnv1a_mix(d.portfolio, p.fills_digest());  // so a run reproduces fill by fill, not only in its totals
     return d;
 }
 
@@ -109,7 +110,8 @@ Applied apply_command(Generation& generation, const Command& command) noexcept
             if (!generation.book.best(command.side == Side::Buy ? Side::Sell : Side::Buy, best)) {
                 return {.error = ErrorCode::NoLiquidity};
             }
-            const std::int64_t band = best.price.ticks * market_band_percent / 100;
+            const std::int64_t tick = generation.book.tick_at(best.price);
+            const std::int64_t band = best.price.ticks * market_band_percent / 100 / tick * tick;  // on the grid
             price = Price{command.side == Side::Buy ? best.price.ticks + band : best.price.ticks - band};
         }
         const TimeInForce tif = command.order_type == OrderType::PostOnly ? TimeInForce::Day : TimeInForce::Ioc;

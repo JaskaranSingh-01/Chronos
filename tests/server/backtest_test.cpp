@@ -227,13 +227,13 @@ TEST(BacktestTest, TheFixtureRunsDigestsAreGolden)
     const std::vector<DayHandle> days = lab.days();
     const std::span<const DayHandle> monday = std::span{days}.last(1);
     EXPECT_EQ(hex(run(acme(SessionStrategyKind::MarketMaker, kMonday), monday).digests),
-              "c7eb451b0b743f7d 6ae9bf90f1f85c85 0df0811549464c97");
+              "c7eb451b0b743f7d 6ae9bf90f1f85c85 1c4e84dc022da0ee");
     EXPECT_EQ(hex(run(acme(SessionStrategyKind::ImbalanceTaker, kMonday), monday).digests),
-              "c7eb451b0b743f7d 84d6e3d50e269aaf 031bb6d84af959c8");
+              "c7eb451b0b743f7d 84d6e3d50e269aaf 0bbc3c95e9d96772");
     EXPECT_EQ(hex(run(acme(SessionStrategyKind::MarketMaker, kFridayAndMonday), days).digests),
-              "c7eb451b0b743f7d d623951ea5a8287b 93933452927d752d");
+              "c7eb451b0b743f7d d623951ea5a8287b 7c3a3dc06d7a69d0");
     EXPECT_EQ(hex(run(acme(SessionStrategyKind::ImbalanceTaker, kFridayAndMonday), days).digests),
-              "c7eb451b0b743f7d 0a99d7d61f572c28 d71a2657f86e95ec");
+              "c7eb451b0b743f7d 0a99d7d61f572c28 6fb2f87e540e3c7c");
 }
 
 // by_day and by_hour each add up to the PnL; the curve has one sample per exchange second with a market event, the

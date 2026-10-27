@@ -97,7 +97,7 @@ TEST(GenerationTest, MarketOrdersSweepOnlyTheLevelsInsideTheirOnePercentBand)
     EXPECT_EQ(reports[2].quantity, Quantity{100});
 
     Fixture sell{
-        {add(1, 1, Side::Buy, 999'900, 100), add(2, 2, Side::Buy, 989'901, 100), add(3, 3, Side::Buy, 989'900, 100)}};
+        {add(1, 1, Side::Buy, 999'900, 100), add(2, 2, Side::Buy, 990'000, 100), add(3, 3, Side::Buy, 989'900, 100)}};
     sell.run_to_end();
     ASSERT_EQ(apply_command(sell.g, order(OrderType::Market, Side::Sell, 0, 300)).error, ErrorCode::None);
 
@@ -105,7 +105,7 @@ TEST(GenerationTest, MarketOrdersSweepOnlyTheLevelsInsideTheirOnePercentBand)
     ASSERT_EQ(sold.size(), 3u);
     EXPECT_EQ(sold[0].price, Price{999'900});
     EXPECT_EQ(sold[0].quantity, Quantity{100});
-    EXPECT_EQ(sold[1].price, Price{989'901});  // 999,900 - 1%: the band's edge
+    EXPECT_EQ(sold[1].price, Price{990'000});  // 999,900 - 1% (9,999) to the cent: the band's edge
     EXPECT_EQ(sold[1].quantity, Quantity{100});
     EXPECT_EQ(sold[2].type, ReportType::Expired);  // 989,900 is outside the band
     EXPECT_EQ(sold[2].quantity, Quantity{100});
@@ -335,9 +335,9 @@ TEST(GenerationTest, ARegularWindowTradesOnlyInsideEachDaysFeedSession)
         .trading_action(1, 3 * hour, "ACME", 'T')
         .system_event(0, 4 * hour, 'S')
         .add_order(1, 9 * hour, 1, 'B', 1'000, "ACME", 100'000)
-        .add_order(1, 9 * hour, 2, 'S', 1'000, "ACME", 100'100)
+        .add_order(1, 9 * hour, 2, 'S', 1'000, "ACME", 100'200)
         .add_order(1, 10 * hour, 3, 'B', 100, "ACME", 99'900)     // the first event inside the fallback session
-        .add_order(1, 17 * hour, 4, 'B', 100, "ACME", 100'050)    // a better bid, after the close
+        .add_order(1, 17 * hour, 4, 'B', 100, "ACME", 100'100)    // a better bid, after the close
         .executed(1, 17 * hour + kSecond, 3, 100, 1);             // a trade through our bid, after the close
     itch_test::ItchBuilder monday;
     monday.system_event(0, 3 * hour, 'O')
@@ -346,9 +346,9 @@ TEST(GenerationTest, ARegularWindowTradesOnlyInsideEachDaysFeedSession)
         .system_event(0, 4 * hour, 'S')
         .system_event(0, kNineThirty, 'Q')
         .add_order(1, kNineThirty + kSecond, 1, 'B', 1'000, "ACME", 100'000)
-        .add_order(1, kNineThirty + kSecond, 2, 'S', 1'000, "ACME", 100'100)
+        .add_order(1, kNineThirty + kSecond, 2, 'S', 1'000, "ACME", 100'200)
         .system_event(0, 13 * hour, 'M')
-        .add_order(1, 14 * hour, 3, 'B', 100, "ACME", 100'050);
+        .add_order(1, 14 * hour, 3, 'B', 100, "ACME", 100'100);
     const ScratchDir dir{"window"};
     write_file(dir.path / "12272019.NASDAQ_ITCH50.bin", friday.bytes());
     write_file(dir.path / "12302019.NASDAQ_ITCH50.bin", monday.bytes());

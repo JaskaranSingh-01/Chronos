@@ -157,6 +157,8 @@ void ExecutionSimulator::on_order_arrive(const OrderRequest& request, Timestamp 
     LevelInfo best;
     if (request.quantity.is_zero()) {
         reason = RejectReason::InvalidOrder;
+    } else if (request.price.ticks % book.tick_at(request.price) != 0) {
+        reason = RejectReason::OffTick;  // else a price a tick inside the touch would join no queue and jump it
     } else if (book.trading_state() != TradingState::Trading) {
         reason = RejectReason::NotTrading;
         ++statistics_.not_trading_rejects;
