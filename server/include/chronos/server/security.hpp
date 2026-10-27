@@ -27,8 +27,9 @@ std::string required_token(std::string_view host, std::string token);
 // a Host naming this server on the loopback interface (else 403), so a DNS-rebound page cannot reach it.
 int api_status(std::string_view host, std::string_view authorization, std::string_view token, std::uint16_t port);
 
-// True if a WebSocket upgrade may proceed: its Origin is the page this server served (http://<Host>) and, without a
-// token, that Host names this server on the loopback interface.
+// True if a WebSocket upgrade, or a Lab POST or DELETE, may proceed: its Origin is the page this server served,
+// http://<Host>, and that Host names this server on the loopback interface; with a token, any Host, its page http or
+// https (a TLS reverse proxy in front).
 bool websocket_allowed(std::string_view origin, std::string_view host, std::string_view token, std::uint16_t port);
 
 }  // namespace simulator::server

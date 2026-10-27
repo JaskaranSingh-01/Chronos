@@ -71,7 +71,13 @@ int api_status(std::string_view host, std::string_view authorization, std::strin
 
 bool websocket_allowed(std::string_view origin, std::string_view host, std::string_view token, std::uint16_t port)
 {
-    return !host.empty() && origin == "http://" + std::string{host} && (!token.empty() || loopback_host(host, port));
+    if (host.empty()) {
+        return false;
+    }
+    if (!token.empty()) {  // behind a TLS proxy the page is https
+        return origin == "http://" + std::string{host} || origin == "https://" + std::string{host};
+    }
+    return origin == "http://" + std::string{host} && loopback_host(host, port);
 }
 
 }  // namespace simulator::server

@@ -63,6 +63,8 @@ TEST(SecurityTest, AWebSocketMustComeFromThisServersOwnPage)
     EXPECT_FALSE(websocket_allowed("http://localhost:8080", "127.0.0.1:8080", "", 8080));  // not this Host's page
 
     EXPECT_TRUE(websocket_allowed("http://box.lan:8080", "box.lan:8080", "t0k3n", 8080));
+    EXPECT_TRUE(websocket_allowed("https://box.example", "box.example", "t0k3n", 8080));  // behind a TLS proxy
+    EXPECT_FALSE(websocket_allowed("https://evil.example", "box.example", "t0k3n", 8080));
     EXPECT_FALSE(websocket_allowed("http://evil.example", "box.lan:8080", "t0k3n", 8080));
 }
 
