@@ -86,8 +86,9 @@ ITCH 5.0 day ──► ItchSource ──► SPSC ring ──► MarketReplay::ru
                               chronos-serve: sessions, command log, Lab worker ──► WebSocket ──► React UI
 ```
 
-[docs/architecture.md](docs/architecture.md) covers the threads, the guarantees and where each is enforced, and the
-eight files to read first.
+[docs/architecture/](docs/architecture/README.md) is the design: the components and threads, the event and execution
+model, the invariants, the decisions, and what is still open. [docs/code-map.md](docs/code-map.md) maps it to the code
+and lists the eight files to read first.
 
 ## Design decisions
 
@@ -113,7 +114,8 @@ eight files to read first.
 | | |
 |---|---|
 | [Getting started](docs/getting-started.md) | Docker, the native build, the data, first runs |
-| [Architecture](docs/architecture.md) | the parts, the data flow, the threads, the guarantees, where to start reading |
+| [Architecture](docs/architecture/README.md) | the design: purpose and roadmap, components, events and execution, the server, performance and determinism, decisions, acceptance criteria, invariants, open questions |
+| [Code map](docs/code-map.md) | each component in the code, where each invariant is enforced, the layout, where to start reading |
 | [Market data](docs/market-data.md) | the event contract, ITCH 5.0, the per-symbol store |
 | [Order book](docs/order-book.md) | the L3 book, allocation-free storage, the list and the ladder, invariants, digests |
 | [Backtesting](docs/backtesting.md) | the event loop, the fill model, risk and fees, the strategies |

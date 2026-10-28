@@ -40,8 +40,10 @@
 - **A local tool.** The token guards trading, not availability; put a buffering reverse proxy in front of anything
   public. A client that stops reading its WebSocket has its snapshots buffered in the server, about 1 MB a second,
   until it reads or disconnects.
-- **The command log is written behind the engine.** A command is acknowledged when admitted; a failed write (a full
-  disk) loses the lines still queued, and the session refuses commands after it.
+- **The command log is written behind the engine.** A command can apply before its line is on disk; the client is
+  acknowledged once the line is written. A failed write (a full disk) or a full queue fails the log: the lines it could
+  not take or write are lost, their commands are answered `log_unavailable` though they may have applied, and the
+  session refuses commands after it.
 - **The terminal's candles and tape** count every execution message, non-printable `C` executions included, and leave
   out the cross's own print (`Q`), so the auction minutes show less volume than the tape a vendor would print.
 - **The terminal's fills and PnL curve are what the page saw.** A reload or a second tab gets the account and the

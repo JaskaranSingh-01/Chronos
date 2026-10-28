@@ -105,4 +105,4 @@ A single replay prints its own timing and memory; `--latency` adds the per-batch
 
 `web/e2e/lag.spec.ts` measures where the browser's time goes ([ui.md](ui.md#measuring-the-page)). Watching a market
 maker's run at Max brings about 14,000 WebSocket messages a second; the page keeps 60 frames a second, none over 50 ms,
-with its socket handler at 1.9 % of the main thread.
+with its socket handler at 1.8 % of the main thread.

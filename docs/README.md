@@ -3,7 +3,8 @@
 | Document | Covers |
 |---|---|
 | [getting-started.md](getting-started.md) | Docker in one command, the native build, the data, first runs |
-| [architecture.md](architecture.md) | the three parts, the data flow, the threads, the guarantees and where each is enforced, the repository layout, where to start reading |
+| [architecture/](architecture/README.md) | the design record: purpose, scope and roadmap; the components and threads; the event and execution model; market data and replay; the server and the browser; performance and determinism; the decisions; validation and acceptance criteria; the glossary; the invariants and open questions |
+| [code-map.md](code-map.md) | each component in the code, where each invariant is enforced and tested, the repository layout, where to start reading |
 | [market-data.md](market-data.md) | `MarketEvent`, the sources, ITCH 5.0 decoding, getting the data, the per-symbol store |
 | [order-book.md](order-book.md) | the L3 book: applying events, allocation-free storage, the list and the ladder, invariants, digests |
 | [backtesting.md](backtesting.md) | the deterministic event loop, the fill model, the portfolio and risk, the strategies (including the opening range breakout) |
@@ -16,7 +17,10 @@
 
 [`bench/RESULTS.md`](../bench/RESULTS.md) holds every benchmark run's record.
 
-**Reviewing the code?** Read [architecture.md](architecture.md), then its "Where to start reading" list: eight files,
-from the event type to a complete strategy.
+**Reviewing the design?** Start at [architecture/README.md](architecture/README.md): the invariants, then the reading
+order.
+
+**Reviewing the code?** Read [code-map.md](code-map.md), then its "Where to start reading" list: eight files, from the
+event type to a complete strategy.
 
 **Running it?** [getting-started.md](getting-started.md).

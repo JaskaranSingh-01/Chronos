@@ -36,7 +36,7 @@ only) may cross until trading resumes; the crossed check skips it.
 | Structure | Holds | Notes |
 |---|---|---|
 | `OrderPool` | C `Order`s | a free list over a fixed array |
-| `OrderIndex` | (book, `OrderId`) → `Order*` | open addressing, one table for every book: ITCH ids are unique only within a symbol |
+| `OrderIndex` | (book, `OrderId`) → `Order*` | open addressing, one table for every book: `MarketEvent` promises an id unique only within its symbol, so the book is part of the key |
 | `LevelPool` | C `PriceLevel`s | every live level holds a live order, so C is enough |
 | `LevelIndex` | (book, side, price) → level | open addressing, one table for every book |
 | ladder windows | 256 slots per side per book | the ladder backend only |

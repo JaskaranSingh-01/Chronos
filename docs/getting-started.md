@@ -77,4 +77,4 @@ gunzip -c data/itch/12302019.NASDAQ_ITCH50.gz > data/itch/12302019.NASDAQ_ITCH50
 ./build/simulator backtest --store data/itch/store --symbol AAPL --date 2019-12-30 --strategy orb
 ```
 
-Next: [architecture.md](architecture.md) for how the parts fit, [cli.md](cli.md) for every option.
+Next: [architecture/](architecture/README.md) for how the parts fit, [cli.md](cli.md) for every option.

@@ -36,11 +36,13 @@ Every command the session applies is appended to `sessions/<id>.jsonl` in the wo
 records the build, the symbol, and each day's hash and segment hash. A generation's log replays it exactly:
 `CommandLogTest` reads a log back and reproduces the session's digests. `GET /api/sessions/<id>/log` serves it.
 
-A command is acknowledged once it is admitted, when its lines are queued for the log's writer, not once they are on
-disk. The writer appends them in order; while its queue is more than half full, the engine holds market work for it.
-If a write fails (a full disk, say), the log is marked failed: the lines still queued are lost, and every later command
-is refused (`log_unavailable`), so the log replays the session up to the failure. `--fsync` syncs the file at each
-command's lifecycle line.
+A command is admitted once its lines are queued for the log's writer, and the engine may apply it from then on. The
+client's `ack` waits until the command's admitted line is written and flushed to the operating system; `--fsync` also
+syncs the file to the device at each command's lifecycle line. The writer appends lines in order; while its queue is
+more than half full, the engine holds market work for it. If a write fails (a full disk, say), or the queue fills, the
+log is marked failed. A failed write loses the lines still queued; a full queue, the line that did not fit and every
+one after it. A command whose admitted line was never written is answered `log_unavailable` (the engine may already
+have applied it), and every later command is refused, so the log replays the session up to the failure.
 
 ### Backpressure
 
