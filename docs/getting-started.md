@@ -42,7 +42,7 @@ first configure needs network access. At run time the engine needs only the C++ 
 ```bash
 cmake -S . -B build                  # RelWithDebInfo unless CMAKE_BUILD_TYPE is set
 cmake --build build -j
-ctest --test-dir build               # 698 tests
+ctest --test-dir build               # 723 tests
 (cd web && npm ci && npm run build)  # the UI, into web/dist
 ```
 

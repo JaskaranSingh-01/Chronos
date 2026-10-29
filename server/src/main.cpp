@@ -15,6 +15,7 @@
 #include "chronos/server/command_log.hpp"
 #include "chronos/server/http_server.hpp"
 #include "chronos/server/itch_input.hpp"
+#include "chronos/server/script_strategy.hpp"
 #include "chronos/server/security.hpp"
 #include "chronos/server/session_runner.hpp"
 #include "simulator/cli/replay_args.hpp"
@@ -31,7 +32,8 @@ constexpr std::string_view serve_usage =
     "Serves an interactive replay of the days in DIR, the files named MMDDYYYY.NASDAQ_ITCH50.bin; the UI picks the\n"
     "symbol and its days. A new file is read once, about a minute a day, into the per-symbol store, which every\n"
     "replay of a symbol reads, and its hash kept in runs/fingerprints.json. Strategy Lab runs are kept in\n"
-    "runs/<id>.json, in the working directory.\n"
+    "runs/<id>.json and the strategies written in the Lab in strategy-scripts/<name>.lua, both in the working\n"
+    "directory.\n"
     "  --date YYYY-MM-DD       the starting day (default the latest)\n"
     "  --store DIR             the per-symbol store (default DIR/store), about a third the size of its days;\n"
     "                          one chronos-serve at a time uses it\n"
@@ -208,6 +210,7 @@ int main(int argc, char** argv)
     ReplaySession session{config, chain_factory(library, config.instrument, parsed.allow_truncated_tail), &queue,
                           chain_factory(library, config.instrument, parsed.allow_truncated_tail, true)};
     Backtester lab{config, "runs"};
+    ScriptStore scripts{"strategy-scripts"};
     std::optional<SessionRunner> runner{std::in_place, session};
     Hub hub{.session = session,
             .log = &queue,
@@ -218,6 +221,7 @@ int main(int argc, char** argv)
             .config = config,
             .library = &library,
             .lab = &lab,
+            .scripts = &scripts,
             .start = start->date,
             .days = config.defaults.days};
     HttpServer server{hub,

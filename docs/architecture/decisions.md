@@ -404,3 +404,38 @@ no test of its own.
 
 **Preserve.** Nothing outside a plugin names a strategy. A plugin includes only the engine
 (`scripts/check-isolation.sh` scans `strategies/`).
+
+## D22. Strategies written in the browser are sandboxed Lua in the server
+
+**Status:** implemented (2026-10-29). Supersedes the overview's "in-browser strategy scripting" non-goal.
+
+**Context.** The user wants to write strategies in the UI as well as in C++, and to know the rules before writing or
+testing one there. A strategy from the browser runs on the server's threads, next to the engine, so it must neither
+break determinism nor take the server down.
+
+**Decision.** A browser strategy is a Lua 5.4 script, kept by the server as a file and run in a sandbox: the base,
+string, table, math and utf8 libraries only, without file loading, `load` or the collector; text only, no bytecode; a
+fixed string-hash seed, a fixed `math.random` seed and a fixed `table.sort` pivot (Lua takes all three from the
+clock); 10 million instructions and 1 GiB allocated a call and 64 MiB held, counted, not timed, and sticky, so a
+`pcall` cannot swallow the error; 30 s a call as a timed net for work neither count sees; no `xpcall`, `__gc`, patterns
+or `table.move`, which would run outside the budget; no address shown; every call into it protected, so an error
+stops the strategy with its line and fails the run. It runs as an
+`AnyStrategy` ([D21](#d21-strategies-are-plugins-behind-a-registry)), so the Lab, Watch, the command log and the
+digests treat it as any strategy. A run copies the script's source into its spec. Lua is built as C++ and linked
+into the server only: the engine library stays standard-library only ([I8](README.md#the-invariants)).
+
+**Alternatives.**
+
+- JavaScript in an embedded engine (QuickJS): a familiar language, a larger engine, the same sandboxing work.
+- Python: heavy to embed, hard to sandbox and to make repeat exactly.
+- Compiling C++ sent from the browser: the toolchain at run time, a restart per change, arbitrary native code.
+- A declarative rule builder: safe and simple, too little to write a real strategy in.
+
+**Consequences.** A script costs about 230 ns an event more than the same logic as a plugin (SPY's full day: 762 ms
+against 272 ms, medians of five interleaved runs), and a Lua port of the imbalance taker makes the plugin's exact
+fills, PnL and digests there. Saved runs carry their scripts, so a run file can be up to 48 KiB larger. A script runs
+only in the server, not the CLI. In the terminal a script's error stops it silently. The order `pairs` visits tables or functions
+used as keys still depends on addresses; the guidelines tell a script not to rely on it. A script loses Lua's
+patterns, `xpcall`, finalizers and `table.move`.
+
+**Preserve.** A run reproduces from what it saved: never run a run's strategy from the store's current copy.

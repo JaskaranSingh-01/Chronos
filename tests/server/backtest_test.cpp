@@ -13,6 +13,7 @@
 
 #include "chronos/server/backtest.hpp"
 #include "chronos/server/itch_input.hpp"
+#include "chronos/server/script_strategy.hpp"
 #include "simulator/cli/replay_args.hpp"
 #include "simulator/itch/itch_source.hpp"
 #include "simulator/strategies/imbalance_taker.hpp"
@@ -224,6 +225,43 @@ TEST(BacktestTest, AnOrbRunEqualsTheHeadlessBacktest)
     const RunResult again = run(regular, days);
     EXPECT_EQ(again.stats, r.stats);
     EXPECT_EQ(again.pnl, r.pnl);
+}
+
+// A Lua script runs in the Lab as a plugin does: its fills, its stats and its log in the results, the same again on a
+// second run; a script that errors fails the run with the reason and its line.
+TEST(BacktestTest, AScriptRunsInTheLabAndAnErrorFailsTheRunWithItsLine)
+{
+    Lab lab{"backtest-script"};
+    lab.write("12302019.NASDAQ_ITCH50.bin", lab_day(2).bytes());
+    const std::vector<DayHandle> days = lab.days();
+    RunSpec spec = acme("market_maker", kMonday, TradingWindow::FullDay);
+    spec.strategy = {.name = "script:quoter", .source = std::string{kQuoterScript}};
+    std::string bad;
+    ASSERT_TRUE(resolve_params(describe_script(kQuoterScript).params, {}, spec.strategy.params, bad));
+    spec.limits = default_limits(spec.strategy);
+    EXPECT_EQ(spec.limits.max_open_orders, 2u);  // from its limits{}
+
+    const RunResult r = run(spec, days);
+    EXPECT_FALSE(r.partial) << r.reason;
+    EXPECT_GT(r.maker_fills, 0u);
+    EXPECT_EQ(stat(r, "Fills"), static_cast<double>(r.maker_fills));
+    ASSERT_FALSE(r.log.empty());
+    EXPECT_EQ(r.log[0].substr(0, 5), "fill ");
+    EXPECT_EQ(run(spec, days).digests, r.digests);
+
+    spec.strategy.source = "function on_market(e)\n  if e.type == 'execute' then error('stop here') end\nend";
+    spec.strategy.params.clear();
+    const RunResult failed = run(spec, days);
+    EXPECT_TRUE(failed.partial);
+    EXPECT_FALSE(failed.cancelled);
+    EXPECT_EQ(failed.reason, "strategy_error: on_market: script:2: stop here");
+
+    // An error in the end-of-stream drain fails the run too.
+    spec.strategy.source = "local armed = false\nfunction on_market(e)\n  if not armed then armed = set_timer(now() + "
+                           "10^15 // 1, 1) end\nend\nfunction on_timer() error('late') end";
+    const RunResult late = run(spec, days);
+    EXPECT_TRUE(late.partial);
+    EXPECT_EQ(late.reason, "strategy_error: on_timer: script:5: late");
 }
 
 // The fixture runs' digests, fixed: every compiler and build type of the CI matrix must reproduce them.

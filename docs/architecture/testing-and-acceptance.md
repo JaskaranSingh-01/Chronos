@@ -23,7 +23,8 @@ CI jobs are in [testing.md](../testing.md).
 
 Every sanitized build aborts on the first report, so a passing sanitized test is a clean one. On the day this
 document was written (2026-10-28), at commit `9f6b138`, `ctest` ran 698 tests: 692 passed and 6 were skipped (five
-real-data tests without a day file, and one conformance check that does not apply to the in-memory source).
+real-data tests without a day file, and one conformance check that does not apply to the in-memory source). With the
+strategy plugins and scripts (2026-10-29), `ctest` ran 723: 717 passed and the same 6 were skipped.
 
 ## Acceptance criteria
 
@@ -96,6 +97,10 @@ named), **Pending** (not yet built or measured).
 | A35 | A strategy added as one file is offered by the CLI, the server and the Lab with no other change | **Pass** | `strategies/trend_taker.cpp` was added alone and runs from `--strategy`, `/api/strategies` and the Lab's form |
 | A36 | Every plugin is deterministic and leaves the history digest of a plain replay | **Pass** | `StrategyRegistryTest`, over every registered strategy |
 | A37 | Moving the strategies behind the registry changes no result | **Pass** | the same fills, PnL and books for the three strategies on AAPL and the market maker on SPY, 2019-12-30; the golden digests unchanged |
+| A38 | A strategy written in the browser makes the fills the same logic makes as a plugin | **Pass** | `ScriptStrategyTest` on a synthetic market; the Lab on SPY's full day: the same 48,643 fills, PnL and digests |
+| A39 | A script's run reproduces from its own source, after the script changes | **Pass** | `ServerTest` verifies a run after its script is edited; `WatchTest` watches a script's run to reproduced |
+| A40 | A script cannot reach files, the clock or the network, and a runaway stops at the same place each run | **Pass** | `ScriptStrategyTest`: the missing libraries, fixed seeds across states, the instruction and memory budgets |
+| A41 | Writing, checking, running and deleting a strategy works in the browser | **Pass** | the Playwright test of the Strategies page and the Lab |
 
 ## What a new change must pass
 

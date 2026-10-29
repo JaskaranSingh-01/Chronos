@@ -32,6 +32,32 @@ inline constexpr Timestamp kMs = 1'000'000;
 inline constexpr Timestamp kSecond = 1'000'000'000;
 inline constexpr Instrument kEquity{.price_scale = 4, .quantity_scale = 0};
 
+// A Lua strategy as the Lab's editor would save it: a post-only quote on each side at the touch, sent again once the
+// last one on that side is done; it logs and counts its fills.
+inline constexpr std::string_view kQuoterScript = R"lua(
+summary = "Quotes both sides at the touch"
+local size = param("size", 100, {min = 1, max = 10000, help = "shares a quote"})
+limits{max_position = 500, max_order_quantity = size, max_open_orders = 2}
+local bid_id, ask_id, fills = nil, nil, 0
+function on_market(e)
+  if not trading() then return end
+  local bid = best_bid()
+  local ask = best_ask()
+  if bid and not bid_id and position() + size <= 500 then bid_id = buy(bid, size, "post_only") end
+  if ask and not ask_id and position() - size >= -500 then ask_id = sell(ask, size, "post_only") end
+end
+function on_report(r)
+  if r.type == "fill" then
+    fills = fills + 1
+    stat("Fills", fills)
+    log("fill", r.side, r.qty, "at", r.price)
+  end
+  if r.type ~= "accepted" and r.leaves == 0 then
+    if r.id == bid_id then bid_id = nil elseif r.id == ask_id then ask_id = nil end
+  end
+end
+)lua";
+
 inline MarketEvent add(Timestamp ts, OrderId id, Side side, std::int64_t price, std::uint64_t quantity)
 {
     return MarketEvent{.timestamp = ts,

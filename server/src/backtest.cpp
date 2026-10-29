@@ -6,6 +6,7 @@
 #include <memory>
 #include <utility>
 
+#include "chronos/server/script_strategy.hpp"
 #include "simulator/cli/replay_args.hpp"
 
 namespace simulator::server {
@@ -48,6 +49,9 @@ std::string failure(const ReplayReport& replay, std::span<const DayHandle> days,
 
 RiskLimits default_limits(const StrategySpec& strategy)
 {
+    if (is_script_name(strategy.name)) {
+        return describe_script(strategy.source, &strategy.params).limits;
+    }
     const StrategyInfo* info = find_strategy(strategy.name);
     return info != nullptr ? info->limits(strategy.params) : RiskLimits{};
 }
@@ -147,13 +151,13 @@ RunResult backtest(const SessionConfig& config, const RunSpec& spec, std::span<c
         second = clear ? second : next / second_ns;
     }
     const ReplayReport& replay = g.loop.report().replay;
-    const bool stopped = !g.strategy.error().empty();  // a script's error
-    r.cancelled = !stopped && cancel.load(std::memory_order_relaxed) && replay.succeeded() &&
+    r.cancelled = g.strategy.error().empty() && cancel.load(std::memory_order_relaxed) && replay.succeeded() &&
         g.loop.peek(next) == PeekStatus::Event;
-    if (!r.cancelled && !stopped) {
+    if (!r.cancelled && g.strategy.error().empty()) {
         finish(g);
         drain();
     }
+    const bool stopped = !g.strategy.error().empty();  // a script's error, the end-of-stream drain's included
     if (second >= 0) {
         sample();
     }
@@ -183,6 +187,7 @@ RunResult backtest(const SessionConfig& config, const RunSpec& spec, std::span<c
     r.fills_by = e.fills_by;
     r.anomalies_by = e.anomalies_by;
     r.stats = g.strategy.stats();
+    r.log.assign(g.strategy.log().begin(), g.strategy.log().end());
     bytes_read.store(source.position(), std::memory_order_relaxed);
     if (hash_as_read && !r.cancelled) {
         r.hashes = source.hashes();

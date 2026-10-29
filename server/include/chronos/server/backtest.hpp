@@ -90,6 +90,7 @@ struct RunResult
     bool truncated{false};
     std::vector<std::string> hashes{};  // with hash as read: each day's segment hash as read, "" if not intact
     std::vector<Stat> stats{};          // the strategy's own counters
+    std::vector<std::string> log{};     // the lines a script logged
     std::int64_t wall_ms{0};
     std::int64_t cpu_ms{0};
 

@@ -41,9 +41,9 @@ strategies are deliberately simple ([Scope](#scope-and-non-goals)).
 
 1. **Replay and check a day.** Rebuild the book of one, several or all symbols of a day file, and report events,
    rejections, invariant checks, digests and timing.
-2. **Backtest a strategy.** Run a registered strategy over one symbol, for one day from the CLI or one or more
-   consecutive days from the server, and get fills with the rule that produced each, PnL, drawdown and fill
-   attribution.
+2. **Backtest a strategy.** Run a registered strategy, or one written in the browser, over one symbol, for one day from
+   the CLI or one or more consecutive days from the server, and get fills with the rule that produced each, PnL,
+   drawdown and fill attribution.
 3. **Trade by hand.** Replay a symbol in the browser at 1×, 10×, 100× or as fast as possible, pause, step, seek, and
    place post-only, IOC or market orders that join the historical queue.
 4. **Run and verify experiments.** Queue backtests from the browser, compare two runs, verify a saved run reproduces
@@ -67,6 +67,7 @@ questions, not missing core pieces. The statuses use the words defined in [READM
 | A deterministic event loop with latencies, a queue-position fill model, a portfolio with risk limits and fees | **Verified** (determinism); the fill model's realism is open ([Q1](README.md#open-questions-and-known-gaps)) |
 | Strategies as plugins: one file each in `strategies/`, offered by the CLI, the server and the Lab with no other change | **Verified** (every plugin run by `StrategyRegistryTest`; the same fills before and after the move) |
 | Four strategies: a market maker, an imbalance taker, an opening range breakout, the plugin guide's example | **Implemented** (toys by design) |
+| Strategies written in the browser: Lua scripts in a sandbox, checked on save, run in the Lab and Watch, reproduced from the source each run keeps | **Verified** (a Lua port of the imbalance taker makes the C++ plugin's exact fills; a run verifies after its script is edited) |
 | Multi-day runs over consecutive days of one symbol, in the server (the terminal and the Lab); the CLI runs one day | **Implemented** |
 | `chronos-serve`: an interactive session, a command log that reproduces it, an HTTP and WebSocket API | **Verified** (reproduction from the log is tested) |
 | The Trading Terminal and the Strategy Lab in the browser | **Verified** (end-to-end tests against a real server) |
@@ -89,7 +90,7 @@ questions, not missing core pieces. The statuses use the words defined in [READM
 | **Latency** | The cost per event is known in distribution, not only on average | **Partial**: percentiles of 1,024-event batch means ([Q8](README.md#open-questions-and-known-gaps)) |
 | **Memory behaviour** | No allocation while replaying; capacity fixed before the run; exhaustion stops cleanly | **Verified**: 0 allocations over the full day |
 | **Responsiveness** | The browser never blocks the engine; a slow client loses snapshots, not correctness | **Verified** by a server test with a client that stops reading; see [Q3](README.md#open-questions-and-known-gaps), [Q4](README.md#open-questions-and-known-gaps) |
-| **Testability** | Every rule is pinned by a test that fails if it changes; sanitizers run in CI | **Verified**: 698 C++ tests, 121 unit and 13 end-to-end web tests; ASan, UBSan and TSan in CI |
+| **Testability** | Every rule is pinned by a test that fails if it changes; sanitizers run in CI | **Verified**: 723 C++ tests, 126 unit and 14 end-to-end web tests; ASan, UBSan and TSan in CI |
 | **Maintainability** | Clear layer boundaries, one event contract, one book, documented decisions | Followed; [decisions.md](decisions.md) records them |
 
 ## Scope and non-goals
@@ -108,7 +109,7 @@ Out of scope, by decision:
 - **L2 (aggregated) sources;** the book needs per-order events.
 - **Several venues or several symbols in one backtest or session.** A replay may cover many symbols; a backtest or a
   session trades one.
-- **Hosting, logins, several users,** in-browser strategy scripting, derivatives and Python bindings.
+- **Hosting, logins, several users,** derivatives and Python bindings.
 - **Profitable strategies.** The shipped strategies exist to exercise the loop and the fill model.
 
 ## Milestones
@@ -142,7 +143,7 @@ A milestone is **done** when each of its completion criteria has evidence; where
 | **Trading-status events** | halted books may cross without failing the crossed check | **Done** |
 | **Engine round** | zero allocations, cache-friendly levels, a two-thread pipeline, each proven and measured | **Done** (2026-10-26); the ladder a cent apart and the ORB followed (2026-10-27) |
 | **Docker and documentation** | `docker compose up` serves the UI; the README presents measured numbers | **Done** (2026-10-27) |
-| **Strategy plugins** | a strategy added as one file runs in the CLI, the server and the Lab with no other change; results unchanged | **Done** (2026-10-29) |
+| **Strategy plugins** | a strategy added as one file runs in the CLI, the server and the Lab with no other change; results unchanged; a strategy written in the browser runs in the Lab and reproduces | **Done** (2026-10-29) |
 | **UI-3** Engine monitor and symbol browser | | **Planned** |
 
 ## What the finished project must demonstrate

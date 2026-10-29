@@ -9,7 +9,8 @@
 
 namespace simulator::server {
 
-// A first-in first-out queue of fixed capacity; not thread-safe. Allocates only in its constructor.
+// A first-in first-out queue of fixed capacity; not thread-safe. Its slots are reserved in its constructor; an item that
+// owns memory (an attach's strategy, with a script's source) still allocates when it is copied in.
 template <class T>
 class FixedQueue
 {
@@ -105,10 +106,10 @@ private:
 public:
     struct Read
     {
-        std::size_t count{0};        // records copied
+        std::size_t count{0};  // records copied
         // The oldest still held; records before it were overwritten, so a gap is max(from, 1) < first_seq.
         std::uint64_t first_seq{1};
-        std::uint64_t last_seq{0};   // the newest; 0 before the first
+        std::uint64_t last_seq{0};  // the newest; 0 before the first
     };
 
     explicit RecordRing(std::size_t capacity)

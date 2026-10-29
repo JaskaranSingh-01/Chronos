@@ -385,14 +385,19 @@ export function StrategyLab() {
   const digits = useStore((s) => s.hello?.price_scale ?? 4); // ITCH 5.0's, before hello
   const [typed, setForm] = useState<Form | null>(null);
   const [copies, setCopies] = useState(0); // each Edit as new starts the form afresh, without the last refusal
-  // The defaults over the starting day until the form is edited.
-  // The market maker if it is registered, else the first strategy.
+  // The defaults over the starting day until the form is edited, or once its strategy is gone (a script deleted): the
+  // market maker if it is registered, else the first strategy.
   const first = strategies?.strategies.find((k) => k.kind === 'market_maker') ?? strategies?.strategies[0];
-  const form = typed ?? (strategies && first && start ? defaults(strategies, first.kind, digits, [start]) : null);
+  const offered = typed !== null && strategies?.strategies.some((k) => k.kind === typed.strategy);
+  const form = offered
+    ? typed
+    : strategies && first && start
+      ? defaults(strategies, first.kind, digits, [start])
+      : null;
   return (
     <>
       <header className="bar">
-        <Switch lab />
+        <Switch page="lab" />
         <span className="sep" />
         <span className="notice">{offline ? 'chronos-serve does not answer: retrying' : notice}</span>
       </header>

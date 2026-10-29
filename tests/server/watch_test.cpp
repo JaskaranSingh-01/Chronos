@@ -12,6 +12,7 @@
 #include "chronos/server/command_log.hpp"
 #include "chronos/server/lab.hpp"
 #include "chronos/server/peer.hpp"
+#include "chronos/server/script_strategy.hpp"
 #include "test_support.hpp"
 
 namespace simulator::server::test {
@@ -54,7 +55,12 @@ struct Terminal
     // A completed Lab run of the registered `strategy` on ACME over Friday, or over Friday and Monday.
     std::string run(std::string_view strategy, bool two_days, TradingWindow window)
     {
-        RunSpec spec = default_spec(strategy_spec(strategy));
+        return run(strategy_spec(strategy), two_days, window);
+    }
+
+    std::string run(const StrategySpec& strategy, bool two_days, TradingWindow window)
+    {
+        RunSpec spec = default_spec(strategy);
         spec.ticker = ticker("ACME");
         spec.days = two_days ? DayList{.day = {2019y / 12 / 27, 2019y / 12 / 30}, .count = 2}
                              : DayList{.day = {2019y / 12 / 27}, .count = 1};
@@ -159,6 +165,26 @@ TEST(WatchTest, EveryRunReproducesInTheTerminalAtAnyPace)
             }
         }
     }
+}
+
+// A Lab run of a Lua script replays in the terminal to its digests: the run keeps the script's source, so the Watch
+// runs the very code the Lab did.
+TEST(WatchTest, AScriptsRunReproducesInTheTerminal)
+{
+    Terminal t{"watch-script"};
+    const ScriptInfo info = describe_script(kQuoterScript);
+    ASSERT_EQ(info.error, "");
+    StrategySpec script{.name = "script:quoter", .source = std::string{kQuoterScript}};
+    std::string bad;
+    ASSERT_TRUE(resolve_params(info.params, std::vector<Param>{{"size", 50}}, script.params, bad));
+    const std::string id = t.run(script, true, TradingWindow::Regular);
+    std::string text;
+    ASSERT_EQ(t.lab.get(id, text), Refusal::None);
+    EXPECT_GT(json::parse(text)["results"]["maker_fills"], 0);
+    EXPECT_EQ(json::parse(text)["spec"]["source"], kQuoterScript);
+    ASSERT_EQ(t.watch(id), "");
+    t.play_to_end();
+    EXPECT_EQ(t.verdict().outcome, Outcome::Reproduced);
 }
 
 // A detach during a Watch makes it another run: mismatch. The log's header of a Watch's generation holds the run's

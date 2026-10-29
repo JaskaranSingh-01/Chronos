@@ -96,6 +96,7 @@ export interface Results {
   fill_rate: number; // filled / (filled + cancelled + expired) shares
   digests: Digests | null; // null when partial
   stats?: StrategyStat[]; // the strategy's own; none in a run from before strategy plugins
+  log?: string[]; // a script's log() lines, at most 200; none from a run before scripts
   equity: { granularity: 'event_second'; t: number[]; pnl: number[]; position: number[] }; // t: epoch seconds
   by_hour: { hour: number[]; pnl: number[] }; // New York hour, summed over days
   by_day: { date: string; pnl: number; fills: number }[];
@@ -165,8 +166,28 @@ export interface RunListing extends Omit<Run, 'results'> {
   fills: number | null;
 }
 
+// GET /api/scripts: each strategy written in the Lab, and whether it loads.
+export interface ScriptListing {
+  name: string;
+  ok: boolean;
+  error: string; // why it does not load, with the line, e.g. "load: script:3: '=' expected near 'x'"
+}
+
+// What loading a script found (server/src/protocol.cpp script_json).
+export type ScriptCheck =
+  | { ok: true; summary: string; params: Strategies['strategies'][number]['params']; limits: Limits }
+  | { ok: false; error: string };
+
+// GET /api/scripts/<name>, and a save's answer.
+export interface Script {
+  name: string;
+  source: string;
+  check: ScriptCheck;
+}
+
 export interface LabState {
   strategies: Strategies | null; // null until chronos-serve answers
+  scripts: ScriptListing[]; // the strategies written in the Lab, by name
   start: string; // the starting day, the form's first
   days: Day[]; // every day the server found, as of the last look
   symbols: string[]; // listed on every day the form picks
@@ -183,8 +204,14 @@ export interface LabState {
 export const strategyLabel = (s: Strategies | null, kind: string) =>
   s?.strategies.find((k) => k.kind === kind)?.label ?? kind;
 
-// The page a location hash shows: the Lab at #lab, else the terminal.
-export const page = (hash: string) => (hash === '#lab' ? 'lab' : 'terminal');
+export type Page = 'terminal' | 'lab' | 'strategies';
+
+// The page a location hash shows: the Lab at #lab, the strategy editor at #strategies, else the terminal.
+export const page = (hash: string): Page =>
+  hash === '#lab' ? 'lab' : hash === '#strategies' ? 'strategies' : 'terminal';
+
+// A script's name: what a strategy's name may be, 1-40 of a-z, 0-9 and _.
+export const scriptName = (name: string) => /^[a-z0-9_]{1,40}$/.test(name);
 
 // A run's money decimals: tick-shares are 10^(price_scale + quantity_scale) a dollar.
 export const moneyDigits = (r: Pick<Run, 'provenance'>) =>
@@ -390,6 +417,7 @@ export function runLabel(runs: RunListing[], id: string): string {
 export function createLab(env: Pick<Env, 'fetch' | 'load'>) {
   let state: LabState = {
     strategies: null,
+    scripts: [],
     start: '',
     days: [],
     symbols: [],
@@ -480,7 +508,9 @@ export function createLab(env: Pick<Env, 'fetch' | 'load'>) {
         const runs = ((await res.json()) as { runs: RunListing[] }).runs;
         if (!state.strategies || !state.start) {
           const answer = await get('/api/strategies');
-          if (answer.ok) set({ ...state, strategies: (await answer.json()) as Strategies });
+          // Awaited before `state` is copied: a copy taken across an await would undo what lands meanwhile.
+          const strategies = answer.ok ? ((await answer.json()) as Strategies) : null;
+          if (strategies) set({ ...state, strategies });
           await loadDays();
         }
         set({ ...state, runs, offline: !state.strategies || !state.start });
@@ -505,6 +535,23 @@ export function createLab(env: Pick<Env, 'fetch' | 'load'>) {
       : Object.fromEntries(ids.filter((id) => wanted.includes(id)).map((id) => [id, state.details[id]]));
     set({ ...state, selected, compare, comparing: comparing && compare.length === 2, details });
     for (const id of wanted) await fetchRun(id);
+  }
+
+  // The strategy list again, so a script just saved or deleted is offered or not.
+  async function loadStrategies() {
+    const res = await get('/api/strategies');
+    const strategies = res.ok ? ((await res.json()) as Strategies) : null;
+    if (strategies) set({ ...state, strategies });
+  }
+
+  async function loadScripts() {
+    try {
+      const res = await get('/api/scripts');
+      const scripts = res.ok ? ((await res.json()) as { scripts: ScriptListing[] }).scripts : null;
+      if (scripts) set({ ...state, scripts });
+    } catch {
+      // the list stays as it was; the next save or open asks again
+    }
   }
 
   // Queues a run and shows it; null, or why chronos-serve refused it.
@@ -573,6 +620,44 @@ export function createLab(env: Pick<Env, 'fetch' | 'load'>) {
       return view(state.selected, on ? [...others, id].slice(-2) : others, state.comparing);
     },
     showCompare: (comparing: boolean) => set({ ...state, comparing }),
+    loadScripts,
+    // A saved script and what loading it finds; null if there is none, or chronos-serve does not answer.
+    async openScript(name: string): Promise<Script | null> {
+      try {
+        const res = await get(`/api/scripts/${name}`);
+        return res.ok ? ((await res.json()) as Script) : null;
+      } catch {
+        return null;
+      }
+    },
+    // Saves a script, even one that does not load, then lists the scripts and strategies again; what loading it
+    // found, or why it was not saved.
+    async saveScript(name: string, source: string): Promise<Script | string> {
+      try {
+        const res = await send('PUT', `/api/scripts/${name}`, { source });
+        const answer = (await res.json().catch(() => ({ error: String(res.status) }))) as Script & LabError;
+        await loadScripts();
+        await loadStrategies();
+        return res.ok
+          ? answer
+          : answer.error === 'too_many'
+            ? 'Not saved: 200 scripts already'
+            : `Not saved: ${answer.error}`;
+      } catch {
+        return 'Not saved: chronos-serve does not answer';
+      }
+    },
+    // Deletes a script; true once it is gone.
+    async deleteScript(name: string): Promise<boolean> {
+      try {
+        const res = await send('DELETE', `/api/scripts/${name}`);
+        await loadScripts();
+        await loadStrategies();
+        return res.ok || res.status === 404;
+      } catch {
+        return false;
+      }
+    },
   };
 }
 

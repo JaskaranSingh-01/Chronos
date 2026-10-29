@@ -28,7 +28,7 @@ struct StrategySpec
 // The strategy `spec` names, built for `setup`; null for none or a name not registered.
 std::unique_ptr<AnyStrategy> make_strategy(const StrategySpec& spec, const StrategySetup& setup);
 
-// Whether `spec` names a registered strategy and each of its params fits it.
+// Whether `spec` names a registered strategy, or a script that loads, and each of its params fits it.
 bool strategy_fits(const StrategySpec& spec);
 
 // The registered strategy `name` with its default params but for `given`; none if the name or a param is unknown or a
@@ -126,6 +126,12 @@ public:
     std::string_view error() const noexcept
     {
         return active_ != nullptr ? active_->error() : std::string_view{};
+    }
+
+    // The lines the attached strategy logged.
+    std::span<const std::string> log() const noexcept
+    {
+        return active_ != nullptr ? active_->log() : std::span<const std::string>{};
     }
 
     bool attached() const noexcept

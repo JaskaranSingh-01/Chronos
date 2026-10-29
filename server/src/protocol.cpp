@@ -226,14 +226,38 @@ bool param_value(const json& j, ParamValue& value)
     return false;
 }
 
-// The strategy and its params, as attach and a Lab run take them: a param left out keeps its default. False with
-// `field` naming "strategy", "params" or the first bad param, e.g. "params.quote_size".
-bool decode_strategy(const json& j, StrategySpec& spec, std::string& field)
+// The strategy and its params, as attach and a Lab run take them: a param left out keeps its default. A script's
+// strategy takes its "source", or the one `scripts` holds. False with `field` naming "strategy", "source", "params" or
+// the first bad param, e.g. "params.quote_size".
+bool decode_strategy(const json& j, StrategySpec& spec, std::string& field, const ScriptStore* scripts)
 {
     field = "strategy";
     const auto name = j.find("strategy");
-    const StrategyInfo* info = name != j.end() && name->is_string() ? find_strategy(name->get<std::string>()) : nullptr;
-    if (info == nullptr) {
+    if (name == j.end() || !name->is_string()) {
+        return false;
+    }
+    const std::string kind = name->get<std::string>();
+    std::vector<ParamInfo> declared;
+    std::string source;
+    if (is_script_name(kind)) {
+        if (const auto given = j.find("source"); given != j.end()) {
+            field = "source";
+            if (!given->is_string() || given->get_ref<const std::string&>().size() > max_script_bytes) {
+                return false;
+            }
+            source = given->get<std::string>();
+        } else if (scripts == nullptr || !scripts->read(std::string_view{kind}.substr(script_prefix.size()), source)) {
+            return false;
+        }
+        ScriptInfo script = describe_script(source);
+        field = "source";
+        if (!script.error.empty()) {
+            return false;
+        }
+        declared = std::move(script.params);
+    } else if (const StrategyInfo* info = find_strategy(kind); info != nullptr && !j.contains("source")) {
+        declared = info->params;
+    } else {
         return false;
     }
     // By reference: copying a client's subtree recurses as deep as the client nested it.
@@ -254,12 +278,12 @@ bool decode_strategy(const json& j, StrategySpec& spec, std::string& field)
         given.push_back({item.key(), value});
     }
     std::string bad;
-    if (!resolve_params(info->params, given, spec.params, bad)) {
+    if (!resolve_params(declared, given, spec.params, bad)) {
         field = "params." + bad;
         return false;
     }
-    spec.name = info->name;
-    spec.source.clear();
+    spec.name = kind;
+    spec.source = std::move(source);
     return true;
 }
 
@@ -267,7 +291,8 @@ bool decode_attach(const json& j, Command& c)
 {
     c.type = CommandType::Attach;
     std::string field;
-    return only(j, {"type", "session_id", "generation", "strategy", "params"}) && decode_strategy(j, c.strategy, field);
+    return only(j, {"type", "session_id", "generation", "strategy", "params", "source"}) &&
+        decode_strategy(j, c.strategy, field, nullptr);
 }
 
 // The optional object `key` of `j`, or an empty one; nullptr, naming `field`, if it is not an object or holds a key not
@@ -291,15 +316,15 @@ const json* section(const json& j, const char* key, std::initializer_list<std::s
 }
 
 // A Lab run's RunSpec; see decode_run_spec().
-bool spec_from(const json& j, RunSpec& spec, std::string& field)
+bool spec_from(const json& j, RunSpec& spec, std::string& field, const ScriptStore* scripts)
 {
     if (const auto key =
-            unknown_key(j, {"symbol", "days", "strategy", "params", "latency", "fees", "limits", "window"})) {
+            unknown_key(j, {"symbol", "days", "strategy", "params", "source", "latency", "fees", "limits", "window"})) {
         field = *key;
         return false;
     }
     StrategySpec strategy;
-    if (!decode_strategy(j, strategy, field)) {
+    if (!decode_strategy(j, strategy, field, scripts)) {
         return false;
     }
     spec = default_spec(strategy);
@@ -436,16 +461,21 @@ json params_json(const ParamList& params)
     return j;
 }
 
-json spec_json(const RunSpec& spec)
+// with_source: a script's source too, as a run's file keeps it; the listing and the session's state leave it out.
+json spec_json(const RunSpec& spec, bool with_source)
 {
-    return {{"symbol", name(spec.ticker)},
-            {"days", days_json(spec.days)},
-            {"strategy", spec.strategy.name.empty() ? "none" : spec.strategy.name},
-            {"params", params_json(spec.strategy.params)},
-            {"latency", {{"order_ns", spec.latency.order_latency}, {"report_ns", spec.latency.report_latency}}},
-            {"fees", fees_json(spec)},
-            {"limits", limits_json(spec)},
-            {"window", spec.window}};
+    json j = {{"symbol", name(spec.ticker)},
+              {"days", days_json(spec.days)},
+              {"strategy", spec.strategy.name.empty() ? "none" : spec.strategy.name},
+              {"params", params_json(spec.strategy.params)},
+              {"latency", {{"order_ns", spec.latency.order_latency}, {"report_ns", spec.latency.report_latency}}},
+              {"fees", fees_json(spec)},
+              {"limits", limits_json(spec)},
+              {"window", spec.window}};
+    if (with_source && !spec.strategy.source.empty()) {
+        j["source"] = spec.strategy.source;
+    }
+    return j;
 }
 
 // A source error, and in a generation of several days the day it failed on: the last whose midnight the clock reached.
@@ -585,6 +615,7 @@ json results_json(const RunResult& r)
         stats.push_back({{"name", stat.name}, {"value", stat.value}, {"price", stat.price}});
     }
     results["stats"] = stats;
+    results["log"] = r.log;
     return results;
 }
 
@@ -609,6 +640,9 @@ RunResult results_from(const json& j)
                 .truncated = j.at("fill_list").at("truncated").get<bool>()};
     if (!r.partial) {
         r.digests = digests_from(j.at("digests"));
+    }
+    if (const auto log = j.find("log"); log != j.end()) {  // a run before scripts has none
+        r.log = log->get<std::vector<std::string>>();
     }
     if (const auto stats = j.find("stats"); stats != j.end()) {  // a run before plugins has none
         for (const json& stat : *stats) {
@@ -690,7 +724,7 @@ json run_json(const Run& run, bool with_results)
               {"state", run.state},
               {"reason", run.reason},
               {"warning", run.warning},
-              {"spec", spec_json(run.spec)},
+              {"spec", spec_json(run.spec, with_results)},
               {"provenance",
                {{"build",
                  {{"commit", p.build.commit},
@@ -813,7 +847,7 @@ std::string encode_snapshot(std::string_view session_id, const Snapshot& s, bool
     json j = envelope(state ? "state" : "snapshot", session_id, s.generation);
     if (state) {
         j["full_resync"] = full_resync;
-        j["spec"] = spec_json(s.spec);
+        j["spec"] = spec_json(s.spec, false);
         j["run_id"] = name(s.run_id);
     }
     j["symbol"] = name(s.spec.ticker);
@@ -973,14 +1007,66 @@ std::string encode_history(std::string_view session_id, std::uint64_t generation
                  {"trades", array_of(trades, trade_json)}});
 }
 
-bool decode_run_spec(std::string_view text, RunSpec& spec, std::string& field)
+bool decode_run_spec(std::string_view text, RunSpec& spec, std::string& field, const ScriptStore* scripts)
 {
     field.clear();
     const json j = json::parse(text, nullptr, false);
-    return j.is_object() && spec_from(j, spec, field);
+    return j.is_object() && spec_from(j, spec, field, scripts);
 }
 
-std::string encode_strategies()
+// What /api/scripts and /api/strategies say of a script that loads, or why it does not.
+json script_json(const ScriptInfo& info)
+{
+    if (!info.error.empty()) {
+        return {{"ok", false}, {"error", info.error}};
+    }
+    json params = json::array();
+    for (const ParamInfo& p : info.params) {
+        params.push_back({{"name", p.name},
+                          {"default", value_json(p.default_value)},
+                          {"min", value_json(p.min)},
+                          {"max", value_json(p.max)},
+                          {"help", p.help}});
+    }
+    return {{"ok", true},
+            {"summary", info.summary},
+            {"params", params},
+            {"limits",
+             {{"max_position", info.limits.max_position},
+              {"max_order_quantity", info.limits.max_order_quantity.value()},
+              {"max_open_orders", info.limits.max_open_orders}}}};
+}
+
+std::string encode_scripts(const ScriptStore& scripts)
+{
+    json list = json::array();
+    for (const std::string& name : scripts.names()) {
+        std::string source;
+        if (scripts.read(name, source)) {
+            const ScriptInfo info = describe_script(source);
+            list.push_back({{"name", name}, {"ok", info.error.empty()}, {"error", info.error}});
+        }
+    }
+    return text({{"scripts", list}});
+}
+
+std::string encode_script(std::string_view name, std::string_view source)
+{
+    return text({{"name", name}, {"source", source}, {"check", script_json(describe_script(source))}});
+}
+
+bool decode_script(std::string_view text, std::string& source)
+{
+    const json j = json::parse(text, nullptr, false);
+    if (!j.is_object() || !only(j, {"source"}) || !j.contains("source") || !j.at("source").is_string() ||
+        j.at("source").get_ref<const std::string&>().size() > max_script_bytes) {
+        return false;
+    }
+    source = j.at("source").get<std::string>();
+    return true;
+}
+
+std::string encode_strategies(const ScriptStore* scripts)
 {
     json strategies = json::array();
     for (const StrategyInfo& info : registered_strategies()) {
@@ -997,6 +1083,21 @@ std::string encode_strategies()
                               {"summary", info.summary},
                               {"params", params},
                               {"limits", limits_json(default_spec(strategy_spec(info.name)))}});
+    }
+    for (const std::string& name : scripts != nullptr ? scripts->names() : std::vector<std::string>{}) {
+        std::string source;
+        if (!scripts->read(name, source)) {
+            continue;
+        }
+        const json script = script_json(describe_script(source));
+        if (script.at("ok").get<bool>()) {  // one that does not load is not offered
+            strategies.push_back({{"kind", std::string{script_prefix} + name},
+                                  {"label", name + " (script)"},
+                                  {"summary", script.at("summary")},
+                                  {"params", script.at("params")},
+                                  {"limits", script.at("limits")},
+                                  {"script", true}});
+        }
     }
     const RunSpec defaults = default_spec(StrategySpec{});
     return text({{"strategies", strategies},
@@ -1029,7 +1130,7 @@ bool decode_run(std::string_view text, Run& run)
     Run r;
     std::string field;
     try {
-        if (!j.is_object() || j.at("format") != 1 || !spec_from(j.at("spec"), r.spec, field)) {
+        if (!j.is_object() || j.at("format") != 1 || !spec_from(j.at("spec"), r.spec, field, nullptr)) {
             return false;
         }
         r.id = j.at("id").get<std::string>();

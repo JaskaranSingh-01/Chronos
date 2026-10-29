@@ -233,7 +233,8 @@ struct Served
     SessionRunner runner;
 
     Served(ReplaySession& session, ServerOptions options, std::string token = {}, const LogQueue* log = nullptr,
-           const LogWriter* writer = nullptr, DayLibrary* library = nullptr, Backtester* lab = nullptr)
+           const LogWriter* writer = nullptr, DayLibrary* library = nullptr, Backtester* lab = nullptr,
+           ScriptStore* scripts = nullptr)
         : hub{.session = session,
               .log = log,
               .writer = writer,
@@ -242,6 +243,7 @@ struct Served
               .config = config(),
               .library = library,
               .lab = lab,
+              .scripts = scripts,
               .start = 2019y / 12 / 30},
           server{hub, std::move(options)},
           runner{session}
@@ -781,6 +783,63 @@ TEST(ServerTest, VerifyRefusesARunRecordedBeforeTheStore)
     EXPECT_EQ(served.get("/api/backtests/" + id).first, 200);
     EXPECT_EQ(served.send("POST", "/api/backtests/" + id + "/verify"),
               (std::pair<int, std::string>{409, R"({"error":"before_store"})"}));
+}
+
+// A strategy written in the Lab: saved (even one that does not load, with why), listed, offered as a strategy once it
+// loads, run by name with the source the store holds, its log in the results, and deleted.
+TEST(ServerTest, TheScriptApiSavesChecksListsRunsAndDeletesAScript)
+{
+    LabDays days{"server-scripts"};
+    Backtester lab{config(), days.dir.path / "runs"};
+    ScriptStore scripts{days.dir.path / "strategy-scripts"};
+    const std::vector<MarketEvent> events = spaced_bids(10);
+    ReplaySession session{config(), over(events)};
+    Served served{session, options(), {}, nullptr, nullptr, &days.library, &lab, &scripts};
+    const auto put = [&](const std::string& name, std::string_view source) {
+        return served.send("PUT", "/api/scripts/" + name, json{{"source", source}}.dump());
+    };
+
+    EXPECT_EQ(served.get("/api/scripts").second, R"({"scripts":[]})");
+    const auto [broken, check] = put("quoter", "x = = 1");
+    EXPECT_EQ(broken, 200);  // saved: work in progress
+    EXPECT_EQ(json::parse(check)["check"]["error"], "load: script:1: unexpected symbol near '='");
+    EXPECT_EQ(json::parse(served.get("/api/strategies").second)["strategies"].size(),
+              registered_strategies().size());  // not offered until it loads
+    const auto [saved, body] = put("quoter", kQuoterScript);
+    ASSERT_EQ(saved, 200);
+    EXPECT_EQ(json::parse(body)["check"]["ok"], true);
+    EXPECT_EQ(json::parse(served.get("/api/scripts/quoter").second)["source"], kQuoterScript);
+    EXPECT_EQ(json::parse(served.get("/api/strategies").second)["strategies"].back()["kind"], "script:quoter");
+    EXPECT_EQ(served.get("/api/scripts/none").first, 404);
+    EXPECT_EQ(put("Bad-Name", kQuoterScript).first, 404);
+    EXPECT_EQ(served.send("PUT", "/api/scripts/quoter", R"({"text":"x"})").first, 400);
+
+    const auto [queued, created] =
+        served.send("POST", "/api/backtests", R"({"symbol":"ACME","days":["2019-12-27"],"strategy":"script:quoter"})");
+    ASSERT_EQ(queued, 202) << created;
+    const std::string id = json::parse(created)["id"];
+    ASSERT_TRUE(eventually([&] {
+        const auto [code, text] = served.get("/api/backtests/" + id);
+        return code == 200 && json::parse(text)["state"] == "completed";
+    }));
+    const json run = json::parse(served.get("/api/backtests/" + id).second);
+    EXPECT_EQ(run["spec"]["source"], kQuoterScript);
+    EXPECT_GT(run["results"]["maker_fills"], 0);
+    EXPECT_FALSE(run["results"]["log"].empty());
+    EXPECT_EQ(run["results"]["stats"][0]["name"], "Fills");
+    EXPECT_FALSE(json::parse(served.get("/api/backtests").second)["runs"][0]["spec"].contains("source"));
+
+    // An edited script leaves the run's own source to verify against.
+    ASSERT_EQ(put("quoter", "function on_timer() end").first, 200);
+    ASSERT_EQ(served.send("POST", "/api/backtests/" + id + "/verify").first, 202);
+    ASSERT_TRUE(
+        eventually([&] { return json::parse(served.get("/api/backtests/" + id).second)["reproduced"] == true; }));
+
+    EXPECT_EQ(served.send("DELETE", "/api/scripts/quoter").first, 204);
+    EXPECT_EQ(served.send("DELETE", "/api/scripts/quoter").first, 404);
+    EXPECT_EQ(
+        served.send("POST", "/api/backtests", R"({"symbol":"ACME","days":["2019-12-27"],"strategy":"script:quoter"})"),
+        (std::pair<int, std::string>{400, R"({"error":"bad_request","field":"strategy"})"}));
 }
 
 // A Lab POST or DELETE must be JSON from this server's own page, besides what every /api request needs; a

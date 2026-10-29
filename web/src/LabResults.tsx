@@ -17,7 +17,7 @@ import {
   type Run,
 } from './lab';
 
-const tabNames = ['Fills', 'Fill attribution', 'PnL by hour', 'Per-day PnL'] as const;
+const tabNames = ['Fills', 'Fill attribution', 'PnL by hour', 'Per-day PnL', 'Log'] as const;
 const phaseNames: Record<string, string> = {
   pre_open: 'pre-open',
   opening_cross: 'open cross',
@@ -101,7 +101,7 @@ function ResultTabs({ run, r }: { run: Run; r: Results }) {
     <div className="panel lab-tabs">
       <div className="tabs-head">
         {tabNames
-          .filter((name) => days > 1 || name !== 'Per-day PnL')
+          .filter((name) => (days > 1 || name !== 'Per-day PnL') && (r.log?.length || name !== 'Log'))
           .map((name) => (
             <button key={name} className={tab === name ? 'on' : ''} onClick={() => setTab(name)}>
               {name}
@@ -191,6 +191,15 @@ function ResultTabs({ run, r }: { run: Run; r: Results }) {
                 <td>{day.date}</td>
                 <td className={tone(day.pnl)}>{signed(day.pnl, cash)}</td>
                 <td>{day.fills}</td>
+              </tr>
+            ))}
+          </tbody>
+        )}
+        {tab === 'Log' && (
+          <tbody>
+            {(r.log ?? []).map((line, i) => (
+              <tr key={i}>
+                <td className="log">{line}</td>
               </tr>
             ))}
           </tbody>

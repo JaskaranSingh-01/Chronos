@@ -1,5 +1,6 @@
 import { useEffect, useId, useMemo, useRef, useState, type Ref } from 'react';
 import { dateOf, dayLabel, dayTs, stamp } from './format';
+import type { Page } from './lab';
 import type { Day } from './protocol';
 import { selectFirstRun, store, useStore } from './store';
 import { matches } from './symbols';
@@ -131,16 +132,18 @@ export function SymbolPicker({
 }
 
 // The wordmark and the header switch between the Trading Terminal and the Strategy Lab, at #lab.
-export function Switch({ lab }: { lab: boolean }) {
+export function Switch({ page }: { page: Page }) {
+  const link = (to: Page, href: string, label: string) => (
+    <a href={href} className={page === to ? 'on' : ''} aria-current={page === to ? 'page' : undefined}>
+      {label}
+    </a>
+  );
   return (
     <nav className="pages">
       <span className="brand">CHRONOS</span>
-      <a href="#" className={lab ? '' : 'on'} aria-current={lab ? undefined : 'page'}>
-        Terminal
-      </a>
-      <a href="#lab" className={lab ? 'on' : ''} aria-current={lab ? 'page' : undefined}>
-        Strategy Lab
-      </a>
+      {link('terminal', '#', 'Terminal')}
+      {link('lab', '#lab', 'Strategy Lab')}
+      {link('strategies', '#strategies', 'Strategies')}
     </nav>
   );
 }
@@ -247,7 +250,7 @@ export function TopBar() {
   const at = seeking && seekAt > 0 ? seekAt : (snap?.exchange_ts ?? 0);
   return (
     <header className="bar">
-      <Switch lab={false} />
+      <Switch page="terminal" />
       <span className="sep" />
       <form
         onSubmit={(e) => {

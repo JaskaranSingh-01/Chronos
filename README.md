@@ -20,7 +20,7 @@ NASDAQ's public sample day, 2019-12-30: 8.25 GB, 268,744,780 messages, 8,906 sym
 | **Determinism** | the same counts and combined digest, `6897f945bcef75c2`, from list and ladder books, one thread and two, and the previous engine (with every book empty at the close, it fingerprints each symbol's adds and replaces); on a 256 MiB slice, whose books are still live at its end, the same book digests from the Linux/g++ Docker image as from the macOS/clang build |
 | **Allocations** | 0 in the replay, counted by a replacement `operator new`, with the heap unchanged; CI checks the hot path |
 | **Per-event cost** | 204.7 ns mean; 191 / 447 / 863 ns at p50 / p99 / p99.9 of 1,024-event batch means (the book thread; the clock cannot time one event: see [performance](docs/performance.md#method)) |
-| **Tests** | 698 C++ tests, 121 Vitest, 13 Playwright end-to-end; CI on Linux and macOS with ASan, UBSan and TSan |
+| **Tests** | 723 C++ tests, 126 Vitest, 14 Playwright end-to-end; CI on Linux and macOS with ASan, UBSan and TSan |
 
 [docs/performance.md](docs/performance.md) has the method and every configuration's numbers, and
 [bench/RESULTS.md](bench/RESULTS.md) the record of every run.
@@ -40,6 +40,10 @@ NASDAQ's public sample day, 2019-12-30: 8.25 GB, 268,744,780 messages, 8,906 sym
 - **Takes strategies as plugins**: a strategy is one file in [`strategies/`](strategies/) that registers itself, and the
   CLI, the server and the Lab's form pick it up with no other change ([docs/strategies.md](docs/strategies.md)). Four
   ship: a market maker, an imbalance taker, an opening range breakout and the guide's example.
+- **Or writes them in the browser**: the Strategies page edits Lua scripts that run in a sandbox (no clock or files,
+  bounded instructions and memory, fixed seeds), checks each on save, and offers it in the Lab. A run keeps the source
+  it ran, so it verifies and replays in the terminal to the same digests; a Lua port of the imbalance taker makes the
+  C++ plugin's exact fills on SPY's full day.
 - **Serves the Trading Terminal**: replay any symbol at 1× to Max, step, seek, across several days; a TradingView-style
   chart, the L3 book with your queue position, and an order ticket that trades against the historical queue.
 - **Serves the Strategy Lab**: run backtests from the browser, compare runs, verify a run against its recorded digests,
@@ -121,10 +125,10 @@ and lists the eight files to read first.
 | [Market data](docs/market-data.md) | the event contract, ITCH 5.0, the per-symbol store |
 | [Order book](docs/order-book.md) | the L3 book, allocation-free storage, the list and the ladder, invariants, digests |
 | [Backtesting](docs/backtesting.md) | the event loop, the fill model, risk and fees, the strategies |
-| [Writing a strategy](docs/strategies.md) | a strategy as a plugin: the template, its params, limits and stats, testing it |
+| [Writing a strategy](docs/strategies.md) | as a C++ plugin or a Lua script in the browser: the rules, the template, the API, the sandbox, testing |
 | [Performance](docs/performance.md) | the numbers, the profile, the method |
 | [Server](docs/server.md) | sessions, the command log, the Strategy Lab, the HTTP and WebSocket protocol, security |
-| [UI](docs/ui.md) | the Trading Terminal and the Strategy Lab, and how the page stays at 60 frames a second |
+| [UI](docs/ui.md) | the Trading Terminal, the Strategy Lab and the Strategies page, and how the page stays at 60 frames a second |
 | [CLI](docs/cli.md) | every option, exit codes, `--json` |
 | [Testing](docs/testing.md) | the suites, how correctness is checked, sanitizers, CI |
 | [Limitations and roadmap](docs/limitations.md) | what the model assumes, and what comes next |

@@ -19,13 +19,13 @@ constexpr Instrument kEquity{.price_scale = 4, .quantity_scale = 0};
 // Every registered strategy, run the way the CLI and the Lab run it: through the registry, behind AnyStrategy.
 struct Outcome
 {
-    LoopReport loop;
+    LoopReport loop{};
     std::uint64_t book_digest{0};
     std::uint64_t fills_digest{0};
     std::int64_t pnl{0};
     std::int64_t position{0};
-    ExecutionStatistics execution;
-    std::vector<Stat> stats;
+    ExecutionStatistics execution{};
+    std::vector<Stat> stats{};
 
     bool operator==(const Outcome&) const = default;
 };

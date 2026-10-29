@@ -84,6 +84,35 @@ main.lab {
   grid-template-columns: 280px minmax(0, 1fr) 400px;
   grid-template-rows: 216px minmax(0, 1fr);
 }
+main.strategies { grid-template-columns: 220px minmax(0, 1fr) 440px; grid-template-rows: minmax(0, 1fr); }
+.scripts { list-style: none; margin: 0 0 8px; padding: 0; }
+.scripts li { display: flex; align-items: center; gap: 8px; }
+.scripts button { flex: 1; text-align: left; border: none; background: transparent; padding: 3px 4px; font-family: var(--mono); }
+.scripts button.on { color: var(--bright); box-shadow: inset 2px 0 0 var(--accent); }
+.new { display: flex; gap: 4px; }
+.new input { flex: 1; min-width: 0; }
+.editor textarea {
+  flex: 1;
+  min-height: 0;
+  margin: 0;
+  padding: 6px 8px;
+  border: none;
+  resize: none;
+  background: var(--panel);
+  color: var(--text);
+  font: 12px/17px var(--mono);
+  tab-size: 2;
+  white-space: pre;
+}
+.notice.ok { color: var(--muted); }
+.title button.primary { background: var(--accent); color: #07121f; }
+.check { flex: none; margin: 0; padding: 4px 8px; border-top: 1px solid var(--line); white-space: pre-wrap; font-family: var(--mono); }
+.guide h3 { margin: 8px 0 4px; color: var(--bright); font-size: 11px; }
+.guide ol { margin: 0; padding-left: 18px; }
+.guide li { margin-bottom: 6px; }
+.guide table { border-collapse: collapse; width: 100%; }
+.guide td { padding: 3px 4px; height: auto; border-top: 1px solid var(--line); vertical-align: top; white-space: normal; font-family: var(--sans); }
+.guide code { font-family: var(--mono); color: var(--bright); }
 .panel { background: var(--panel); display: flex; flex-direction: column; min-width: 0; min-height: 0; overflow: hidden; }
 .title {
   flex: none;

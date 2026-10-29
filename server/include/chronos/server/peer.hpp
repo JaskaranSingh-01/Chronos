@@ -16,6 +16,7 @@
 namespace simulator::server {
 
 struct Hub;
+class ScriptStore;
 
 // One WebSocket connection's side of the protocol, without the socket: text in, text out.
 class Peer
@@ -77,6 +78,7 @@ struct Hub
     SessionConfig config{};  // what hello tells a client: its scales, fees and limits
     DayLibrary* library{nullptr};          // the days a load may name; nullptr: none
     Backtester* lab{nullptr};              // the Lab's runs; nullptr: none
+    ScriptStore* scripts{nullptr};         // the scripts written in the Lab; nullptr: none
     std::chrono::year_month_day start{};  // the starting day
     DayList days{};                       // the days of the last load admitted: a load that names none replays them
     const Peer* controller{nullptr};      // the one connection that may control and trade

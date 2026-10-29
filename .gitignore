@@ -7,6 +7,7 @@ compile_commands.json
 /data/
 /sessions/
 /runs/
+/strategy-scripts/
 /web/node_modules/
 /web/dist/
 /web/test-results/

@@ -21,7 +21,7 @@ using ParamValue = std::variant<std::int64_t, double>;
 // One param a strategy declares; default_value's type is the param's. A real param's max may be +inf: no cap.
 struct ParamInfo
 {
-    std::string name;  // as --param and the API spell it, e.g. "quote_size"
+    std::string name{};  // as --param and the API spell it, e.g. "quote_size"
     ParamValue default_value{};
     ParamValue min{};
     ParamValue max{};
@@ -32,7 +32,7 @@ struct ParamInfo
 
 struct Param
 {
-    std::string name;
+    std::string name{};
     ParamValue value{};
 
     bool operator==(const Param&) const = default;
@@ -44,7 +44,7 @@ using ParamList = std::vector<Param>;
 // One of a strategy's own counters, shown after a run; a price is in ticks.
 struct Stat
 {
-    std::string name;
+    std::string name{};
     double value{0};
     bool price{false};
 
@@ -80,6 +80,11 @@ public:
     {
         return {};
     }
+    // The lines it logged (a script's log()), kept for the run's results.
+    virtual std::span<const std::string> log() const noexcept
+    {
+        return {};
+    }
 };
 
 static_assert(Strategy<AnyStrategy>);
@@ -87,14 +92,14 @@ static_assert(Strategy<AnyStrategy>);
 // A registered strategy, as the CLI, the server and the Lab see it.
 struct StrategyInfo
 {
-    std::string name;  // 1-40 of [a-z0-9_], as --strategy and the API spell it
-    std::string label;  // as the Lab shows it
-    std::string summary;
-    std::vector<ParamInfo> params;  // in the order a form shows them
-    std::function<RiskLimits(const ParamList&)> limits;  // the risk limits a run takes unless told otherwise
+    std::string name{};  // 1-40 of [a-z0-9_], as --strategy and the API spell it
+    std::string label{};  // as the Lab shows it
+    std::string summary{};
+    std::vector<ParamInfo> params{};  // in the order a form shows them
+    std::function<RiskLimits(const ParamList&)> limits{};  // the risk limits a run takes unless told otherwise
     // The param that makes a run pointless under `limits` (an order size over the position limit), or "".
-    std::function<std::string(const ParamList&, const RiskLimits&)> check;
-    std::function<std::unique_ptr<AnyStrategy>(const ParamList&, const StrategySetup&)> make;
+    std::function<std::string(const ParamList&, const RiskLimits&)> check{};
+    std::function<std::unique_ptr<AnyStrategy>(const ParamList&, const StrategySetup&)> make{};
 };
 
 // Adds `info` to the registry, at start-up; a bad or taken name, or a missing limits or make, aborts the program.
@@ -168,12 +173,12 @@ public:
 template <class P>
 struct PluginParam
 {
-    std::string_view name;
-    ParamValue min;
-    ParamValue max;
-    std::string_view help;
-    std::function<ParamValue(const P&)> get;
-    std::function<void(P&, const ParamValue&)> set;
+    std::string_view name{};
+    ParamValue min{};
+    ParamValue max{};
+    std::string_view help{};
+    std::function<ParamValue(const P&)> get{};
+    std::function<void(P&, const ParamValue&)> set{};
 };
 
 // Declares P::*member as a param, its bounds in its own type: param("clip", &MyParams::clip, 1, 1'000'000).
@@ -207,9 +212,9 @@ PluginParam<P> param(std::string_view name, T P::* member, std::type_identity_t<
 template <class S, class P>
 struct StrategyPlugin
 {
-    std::string_view name;
-    std::string_view label;
-    std::string_view summary;
+    std::string_view name{};
+    std::string_view label{};
+    std::string_view summary{};
     std::vector<PluginParam<P>> params{};
     RiskLimits (*limits)(const P&) = nullptr;  // required: the gateway checks every order against them
     // Builds it; unset, S(params, setup) if S takes both, else S(params).

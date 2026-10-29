@@ -14,6 +14,7 @@ import {
   outcomes,
   page,
   refusalText,
+  scriptName,
   runLabel,
   specDiff,
   timeOfRun,
@@ -27,6 +28,7 @@ import {
   type Verification,
 } from './lab';
 import type { Day, Spec } from './protocol';
+import { checkText, errorLine, tooLarge } from './Strategies';
 
 const spec: Spec = {
   symbol: 'ACME',
@@ -669,5 +671,81 @@ describe('createLab', () => {
       'POST /api/backtests/a/verify Bearer t0k3n',
       'GET /api/backtests/a Bearer t0k3n',
     ]);
+  });
+
+  it('saves, opens and deletes a script, then lists the scripts and strategies again', async () => {
+    const { s, env } = server();
+    const saved = {
+      name: 'quoter',
+      source: 'function on_timer() end',
+      check: {
+        ok: true,
+        summary: '',
+        params: [],
+        limits: { max_position: 1, max_order_quantity: 1, max_open_orders: 1 },
+      },
+    };
+    s.answer = (method, path) => {
+      if (path === '/api/scripts') return Response.json({ scripts: [{ name: 'quoter', ok: true, error: '' }] });
+      if (path === '/api/scripts/quoter' && method === 'PUT') return Response.json(saved);
+      if (path === '/api/scripts/quoter' && method === 'GET') return Response.json(saved);
+      if (path === '/api/scripts/quoter' && method === 'DELETE') return new Response(null, { status: 204 });
+      if (path === '/api/scripts/many' && method === 'PUT')
+        return Response.json({ error: 'too_many' }, { status: 409 });
+      return undefined;
+    };
+    const lab = createLab(env);
+    expect(await lab.saveScript('quoter', 'function on_timer() end')).toEqual(saved);
+    expect(s.sent.at(-1)).toEqual({ type: 'application/json', body: { source: 'function on_timer() end' } });
+    expect(lab.get().scripts).toEqual([{ name: 'quoter', ok: true, error: '' }]);
+    expect(lab.get().strategies).toEqual(strategies); // listed again, so the Lab's form offers the script
+    expect(await lab.openScript('quoter')).toEqual(saved);
+    expect(await lab.openScript('gone')).toBeNull();
+    expect(await lab.saveScript('many', 'x')).toBe('Not saved: 200 scripts already');
+    expect(await lab.deleteScript('quoter')).toBe(true);
+    expect(s.fetched.filter((f) => f.startsWith('PUT') || f.startsWith('DELETE'))).toEqual([
+      'PUT /api/scripts/quoter',
+      'PUT /api/scripts/many',
+      'DELETE /api/scripts/quoter',
+    ]);
+    s.down = true;
+    expect(await lab.saveScript('quoter', '')).toBe('Not saved: chronos-serve does not answer');
+  });
+});
+
+describe('the strategy editor', () => {
+  it('opens at #strategies and takes a name a strategy may have', () => {
+    expect([page('#strategies'), page('#lab'), page('')]).toEqual(['strategies', 'lab', 'terminal']);
+    expect([
+      scriptName('my_mm_2'),
+      scriptName('My'),
+      scriptName(''),
+      scriptName('a-b'),
+      scriptName('x'.repeat(41)),
+    ]).toEqual([true, false, false, false, false]);
+  });
+
+  it('refuses a script too large to send before it is sent', () => {
+    expect(tooLarge('x'.repeat(48 * 1024))).toBe('');
+    expect(tooLarge('x'.repeat(48 * 1024 + 1))).toBe('Not saved: over 48 KiB');
+    expect(tooLarge('"'.repeat(40 * 1024))).toBe(
+      'Not saved: over 64 KiB as JSON, where quotes, backslashes and tabs count twice',
+    );
+  });
+
+  it('says what loading a script found, and the line of its error', () => {
+    expect(errorLine('on_market: script:12: attempt to index a nil value')).toBe(12);
+    expect(errorLine('load: the script defines none of on_market, on_report and on_timer')).toBe(0);
+    expect(checkText({ ok: false, error: "load: script:3: '=' expected near 'x'" })).toBe(
+      "load: script:3: '=' expected near 'x'",
+    );
+    expect(
+      checkText({
+        ok: true,
+        summary: '',
+        params: [{ name: 'size', default: 100, min: 1, max: 10_000, help: '' }],
+        limits: { max_position: 500, max_order_quantity: 100, max_open_orders: 2 },
+      }),
+    ).toBe('Loads. Params: size 100. Limits: 500 position, 100 an order, 2 open.');
   });
 });

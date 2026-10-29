@@ -214,6 +214,30 @@ target_include_directories(crow_headers SYSTEM INTERFACE ${crow_SOURCE_DIR}/incl
 # CROW_DISABLE_STATIC_DIR: no implicit /static/ route serving the working directory.
 target_compile_definitions(crow_headers INTERFACE ASIO_STANDALONE ASIO_NO_DEPRECATED CROW_DISABLE_STATIC_DIR)
 
+# Lua 5.4 (MIT), pinned, for the strategies written in the Strategy Lab (server/src/script_strategy.cpp): the core and
+# only the libraries the sandbox opens, compiled as C++ so a script's error unwinds through C++ frames as an exception;
+# lstate.c and ltablib.c through cmake/lua_*.cpp, without the clock's seeds of the string hash and table.sort's pivot.
+# Download only: Lua has no CMake files.
+FetchContent_Declare(
+    lua
+    URL https://www.lua.org/ftp/lua-5.4.7.tar.gz
+    URL_HASH SHA256=9fbf5e28ef86c69858f6d3d34eccc32e911c1a28b4120ff3e84aaa70cfbf1e30
+)
+FetchContent_MakeAvailable(lua)
+
+set(lua_sources)
+foreach(file lapi lcode lctype ldebug ldo ldump lfunc lgc llex lmem lobject lopcodes lparser lstring ltable ltm
+             lundump lvm lzio lauxlib lbaselib lmathlib lstrlib lutf8lib)
+    list(APPEND lua_sources ${lua_SOURCE_DIR}/src/${file}.c)
+endforeach()
+set_source_files_properties(${lua_sources} PROPERTIES LANGUAGE CXX)
+add_library(lua_sandbox STATIC ${lua_sources} cmake/lua_lstate.cpp cmake/lua_ltablib.cpp)
+target_include_directories(lua_sandbox SYSTEM PUBLIC ${lua_SOURCE_DIR}/src)
+# clang reads a .c file as C unless told it is C++.
+if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+    set_source_files_properties(${lua_sources} PROPERTIES COMPILE_OPTIONS "-xc++")
+endif()
+
 add_library(chronos_server
 
     server/src/backtest.cpp
@@ -227,6 +251,7 @@ add_library(chronos_server
     server/src/protocol.cpp
     server/src/replay_session.cpp
     server/src/security.cpp
+    server/src/script_strategy.cpp
     server/src/session_runner.cpp
     server/src/session_strategy.cpp
 )
@@ -244,7 +269,7 @@ target_link_libraries(chronos_server
         Threads::Threads
 )
 
-target_link_libraries(chronos_server PRIVATE nlohmann_json::nlohmann_json crow_headers)
+target_link_libraries(chronos_server PRIVATE nlohmann_json::nlohmann_json crow_headers lua_sandbox)
 target_include_directories(chronos_server SYSTEM PRIVATE ${xxhash_SOURCE_DIR})
 
 # The command log's header records the commit (generated/build_info.hpp).
@@ -363,6 +388,7 @@ add_executable(chronos_server_tests
     tests/server/replay_session_test.cpp
     tests/server/restart_test.cpp
     tests/server/security_test.cpp
+    tests/server/script_strategy_test.cpp
     tests/server/server_test.cpp
     tests/server/session_runner_test.cpp
     tests/server/snapshot_test.cpp

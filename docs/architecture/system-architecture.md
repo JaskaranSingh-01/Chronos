@@ -44,6 +44,7 @@ flowchart TB
         SESS[Replay session:<br/>engine thread]
         LOG[Command log writer]
         LAB[Strategy Lab worker<br/>and run store]
+        SCR[Script store and<br/>Lua sandbox]
         IO[HTTP and WebSocket I/O]
     end
     UI[Browser: Trading Terminal,<br/>Strategy Lab]
@@ -73,6 +74,8 @@ flowchart TB
     BOOK -. read only .-> PF
     SESS --> LOOP
     LAB --> LOOP
+    SCR -->|script strategies| LAB
+    SCR -->|script strategies| SESS
     SESS --> LOG
     IO <--> SESS
     IO <--> LAB
@@ -120,6 +123,7 @@ Solid arrows carry events or orders; dotted arrows are read-only views of the hi
 | **Replay session**         | Runs one interactive session on the engine thread: one generation (a symbol and its days) at a time, paced against the wall clock, with controls and commands applied at defined boundaries; publishes snapshots and records                      | **Verified**                                          |
 | **Command log writer**     | Appends every command and its lifecycle to the session's log file on a thread of its own, so the session can be reproduced                                                                                                                        | **Verified** (a log reproduces its session's digests) |
 | **Strategy Lab**           | Runs backtests and verifications on a worker thread, one at a time, with a bounded queue; saves each run with its provenance; cancels and deletes runs                                                                                            | **Verified**                                          |
+| **Script strategies**      | Keeps the Lua scripts written on the Strategies page, loads each in a sandbox (no files or clock, fixed seeds, bounded instructions and memory) to list its params, and runs it as a strategy for the Lab and Watch; a run keeps its source                       | **Verified**                                          |
 | **HTTP and WebSocket I/O** | Serves the built UI and the API, checks every client message against its schema, admits commands and controls into the session, sends each connection the latest snapshot and the records it has not seen; enforces the local-tool security rules | **Verified**                                          |
 
 [web-terminal.md](web-terminal.md) describes the session, its channels and its threads.

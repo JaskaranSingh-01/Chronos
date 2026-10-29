@@ -113,6 +113,7 @@ strategy's trading window, each day's session hours by default.
 | Manual orders through the shared gateway | **Verified** |
 | Attaching and detaching a registered strategy over the protocol | **Implemented**; the page has no control for it |
 | Replaying a Lab run's strategy in the terminal (Watch) to a reproduced-or-not verdict | **Verified** |
+| A strategy written in the browser as a Lua script, run in the Lab and watched in the terminal ([D22](decisions.md#d22-strategies-written-in-the-browser-are-sandboxed-lua-in-the-server)) | **Verified**; an error in the terminal is not shown there |
 
 ## Exchange time and wall-clock time
 

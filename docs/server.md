@@ -67,6 +67,10 @@ registered strategy over one symbol and one or more days, at full speed.
   share), `limits` and `window`. The window is `"regular"` by default, so a strategy trades only inside each day's feed
   session, from its own 'Q' to its 'M' System Event (09:30-16:00 when a file lacks them); `"full_day"` trades the whole
   file. A one-day, full-day run with the defaults gives `simulator backtest`'s PnL, fills and fill attribution.
+- **Strategies written in the browser**: Lua scripts saved from the Strategies page, `strategy-scripts/<name>.lua` in
+  the working directory, run in a sandbox ([strategies.md](strategies.md#a-strategy-written-in-the-browser)). A run of
+  `script:<name>` copies the script's source into its spec, so Verify and Watch run the copy, whatever happened to the
+  script since; its results add the script's log lines. A script that errors fails the run, naming the line.
 - **Strategies**: every plugin in `strategies/` ([strategies.md](strategies.md)), by name: `imbalance`,
   `market_maker`, `orb` and `trend_taker` ship. `GET /api/strategies` lists each with its label, summary, params
   (default, min, max, help) and default limits. The market maker's `improve_ticks` counts ticks of the price grid, a
@@ -94,7 +98,11 @@ registered strategy over one symbol and one or more days, at full speed.
 | `GET /api/symbols[?days=D1,D2]` | the symbols with a market event on every day given (default the starting day) |
 | `GET /api/history?session_id=&generation=&from_ts=` | a generation's 1 s candles and trades from `from_ts` on |
 | `GET /api/sessions/<id>/log` | a session's command log |
-| `GET /api/strategies` | the strategies, their params, defaults and caps, the windows, `max_days` and `max_queued` |
+| `GET /api/strategies` | the strategies, their labels, params, defaults and caps, then each saved script that loads; the windows, `max_days` and `max_queued` |
+| `GET /api/scripts` | the strategies written in the Lab: each one's name, whether it loads, and why not |
+| `GET /api/scripts/<name>` | a script's source and what loading it finds: its summary, params and limits, or its error |
+| `PUT /api/scripts/<name>` | saves `{"source"}` (48 KiB at most), even one that does not load, and answers as `GET` does; 409 past 200 scripts |
+| `DELETE /api/scripts/<name>` | deletes a script; runs keep their copies of it |
 | `POST /api/backtests` | queues a run; 202 `{"id"}`, 400 `{"error","field"}` or `symbol_missing` with its `days`, 429 when 8 wait |
 | `GET /api/backtests` | every run, without its results: state, progress, PnL and fills |
 | `GET /api/backtests/<id>` | the whole run: spec, provenance, results |
@@ -131,7 +139,7 @@ arrays, to keep snapshots small: level `[price, quantity, orders]`, trade `[ts, 
 | `control` | `action`: `play`, `pause`, `restart`, `cancel_seek`, `step` (`n`), `speed` (`speed`, 0 = Max), `seek` (`ts`), `symbol` (`symbol`, `days`), `watch` (`run_id`) |
 | `order` | `client_id`, `side`, `order_type` (`post_only`, `ioc`, `market`), `price` (not for `market`), `qty` |
 | `cancel` | `order_id` |
-| `attach` | `strategy` (a registered name) and its `params`: runs it in the session |
+| `attach` | `strategy` (a registered name, or `script:<name>` with its `source`) and its `params`: runs it in the session |
 | `detach` | stops the attached strategy |
 
 Every client message is checked against its schema: exactly its keys, each of its type and in range, at most 64 KiB.

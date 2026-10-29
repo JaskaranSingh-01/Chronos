@@ -127,8 +127,44 @@ void HttpServer::Impl::routes()
         });
     });
     CROW_ROUTE(app, "/api/strategies")([this](const crow::request& request) {
-        return api(request, [] { return json_response(200, encode_strategies()); });
+        return api(request, [this] { return json_response(200, encode_strategies(hub.scripts)); });
     });
+    // The strategies written in the Lab, each a Lua script saved by name (docs/strategies.md).
+    CROW_ROUTE(app, "/api/scripts")([this](const crow::request& request) {
+        return api(request, [this] {
+            return hub.scripts != nullptr ? json_response(200, encode_scripts(*hub.scripts)) : crow::response{404};
+        });
+    });
+    CROW_ROUTE(app, "/api/scripts/<string>")
+        .methods(crow::HTTPMethod::Get, crow::HTTPMethod::Put,
+                 crow::HTTPMethod::Delete)([this](const crow::request& request, const std::string& name) {
+            if (request.method == crow::HTTPMethod::Get) {
+                return api(request, [&] {
+                    std::string source;
+                    if (hub.scripts == nullptr || !hub.scripts->read(name, source)) {
+                        return crow::response{404};
+                    }
+                    return json_response(200, encode_script(name, source));
+                });
+            }
+            return change(request, [&] {
+                if (hub.scripts == nullptr || !valid_strategy_name(name)) {
+                    return crow::response{404};
+                }
+                if (request.method == crow::HTTPMethod::Delete) {
+                    return crow::response{hub.scripts->remove(name) ? 204 : 404};
+                }
+                std::string source;
+                std::string error;
+                if (!decode_script(request.body, source)) {
+                    return json_response(400, encode_lab_error("bad_request", "source"));
+                }
+                if (!hub.scripts->write(name, source, error)) {  // saved even if it does not load: work in progress
+                    return json_response(error == "too_many" ? 409 : 500, encode_lab_error(error));
+                }
+                return json_response(200, encode_script(name, source));
+            });
+        });
     // The Lab. Crow drops a connection whose body passes 64 KiB before a route runs.
     CROW_ROUTE(app, "/api/backtests")
         .methods(crow::HTTPMethod::Get, crow::HTTPMethod::Post)([this](const crow::request& request) {
@@ -255,7 +291,7 @@ crow::response HttpServer::Impl::submit(const crow::request& request)
 {
     RunSpec spec;
     std::string field;
-    if (!decode_run_spec(request.body, spec, field)) {
+    if (!decode_run_spec(request.body, spec, field, hub.scripts)) {
         return json_response(400, encode_lab_error("bad_request", field));
     }
     std::vector<DayHandle> days;

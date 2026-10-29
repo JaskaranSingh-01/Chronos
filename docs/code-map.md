@@ -25,13 +25,14 @@ The components are those of [system-architecture.md](architecture/system-archite
 | Execution simulator | `ExecutionSimulator`, `ExecutionReport` ([`sim/`](../include/simulator/sim/)) |
 | Portfolio | `Portfolio`, `RiskLimits`, `FeeSchedule` ([`portfolio/`](../include/simulator/portfolio/)) |
 | Strategy boundary | the `Strategy` concept, `StrategyContext`, `NullStrategy` ([`engine/strategy.hpp`](../include/simulator/engine/strategy.hpp)); `MarketMaker`, `ImbalanceTaker`, `Orb` ([`strategies/`](../include/simulator/strategies/)) |
+| Script strategies | `ScriptStrategy` (the sandbox and the Lua API), `describe_script`, `make_script_strategy` and `ScriptStore` ([`script_strategy.hpp`](../server/include/chronos/server/script_strategy.hpp)); Lua's fixed hash seed in [`cmake/lua_lstate.cpp`](../cmake/lua_lstate.cpp) |
 | Strategy registry | `StrategyInfo`, `ParamInfo`, `AnyStrategy`, `register_plugin` and `resolve_params` ([`engine/strategy_registry.hpp`](../include/simulator/engine/strategy_registry.hpp)); one plugin file per strategy in [`strategies/`](../strategies/); `make_strategy` and `strategy_spec` in the server's [`session_strategy.hpp`](../server/include/chronos/server/session_strategy.hpp) |
 | Day library | `DayLibrary` ([`itch_input.hpp`](../server/include/chronos/server/itch_input.hpp)) |
 | Replay session | `ReplaySession` ([`replay_session.hpp`](../server/include/chronos/server/replay_session.hpp)), run by `SessionRunner`; one `Generation` at a time; `SessionStrategy`; the channels `FixedQueue`, `LatestSlot` and `RecordRing` ([`channels.hpp`](../server/include/chronos/server/channels.hpp)) |
 | Command log writer | `LogQueue`, `LogWriter` ([`command_log.hpp`](../server/include/chronos/server/command_log.hpp)) |
 | Strategy Lab | `Backtester` ([`lab.hpp`](../server/include/chronos/server/lab.hpp)), `backtest()` ([`backtest.hpp`](../server/include/chronos/server/backtest.hpp)) |
 | HTTP and WebSocket I/O | `HttpServer`, `Peer` and `Hub`, the protocol's encoders and decoders, the security checks ([`server/include/chronos/server/`](../server/include/chronos/server/)) |
-| Browser UI | [`web/src/`](../web/src/): `store.ts` (the terminal's state), `lab.ts` (the Lab's), one component per panel |
+| Browser UI | [`web/src/`](../web/src/): `store.ts` (the terminal's state), `lab.ts` (the Lab's and the scripts'), one component per panel, `Strategies.tsx` for the script editor |
 
 ## Where each invariant is enforced
 

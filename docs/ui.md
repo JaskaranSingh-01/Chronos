@@ -1,4 +1,4 @@
-# The Trading Terminal and the Strategy Lab
+# The Trading Terminal, the Strategy Lab and the Strategies page
 
 A React 19 and TypeScript single-page app in [`web/`](../web/), served by `chronos-serve`. Its only runtime dependencies
 are React and TradingView's lightweight-charts.
@@ -49,10 +49,12 @@ At `http://127.0.0.1:8080/#lab`, or through the switch in the top bar:
 - **New backtest** (left): the strategy and its params, the symbol, the days (a day whose regular hours are the
   09:30-16:00 fallback is marked), the window, latencies, fees in dollars a share, and limits. The defaults and caps
   are the server's; a value past its cap, or one the server refuses, is marked, and a symbol a day does not list names
-  the day.
+  the day. Strategies written in the browser are listed with the plugins, as "<name> (script)", their summary under
+  the parameters.
 - **Runs** (top middle): each run's state, progress or PnL. Tick two to **Compare**.
 - **Results** (middle): the PnL at every second with a market event and its drawdown below; the fills with their rule
-  and queue ahead at entry; the fill attribution; PnL by hour and, over several days, by day. Comparing, the two runs'
+  and queue ahead at entry; the fill attribution; PnL by hour and, over several days, by day; for a script that logged,
+  its log. Comparing, the two runs'
   PnL overlaid, lined up by day and time of day, their stats side by side, every setting that differs marked, and runs
   over another symbol or other days flagged.
 - **Metrics** (top right): total PnL, fills, fill rate, max drawdown, fees and rebates, max |position|, then the
@@ -65,6 +67,18 @@ At `http://127.0.0.1:8080/#lab`, or through the switch in the top bar:
 **Watch in Terminal** replays the run in the terminal, paced, at any speed, with the run's own fees and limits on the
 ticket, and says when the replay ends whether it reproduced. **Stop watching** loads the plain replay of the same symbol
 and days.
+
+## The Strategies page
+
+At `http://127.0.0.1:8080/#strategies`: strategies written in the browser as Lua scripts
+([strategies.md](strategies.md#a-strategy-written-in-the-browser)).
+
+- **Strategies** (left): every saved script, marked ok or error, and a name box to start a new one from a template that
+  runs.
+- **Editor** (middle): the script, with Save (Cmd/Ctrl+S) and Delete (asked twice). Tab indents. Save keeps the script
+  even if it does not load, then shows under the editor its params and limits, or its error and the line. A script
+  that loads is offered in the Strategy Lab's list as "<name> (script)".
+- **Guidelines** (right): what to know before writing or testing a strategy, and every call a script can make.
 
 ## How the page is built
 

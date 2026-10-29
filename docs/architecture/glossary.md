@@ -66,6 +66,9 @@ thing is the execution simulator, which decides only simulated fills.
 **Strategy plugin.** A file in `strategies/` that registers one strategy: its name, params, default risk limits and
 stats. Built into every executable; nothing else names a strategy.
 
+**Script** (or **strategy script**). A strategy written in the browser: Lua source saved by the server and run in a
+sandbox; its strategy name is `script:` and its own name. A run keeps a copy of its source.
+
 **Strategy registry.** The one list of strategies, sorted by name, from which the CLI, the server and the Lab learn
 each strategy's params and build it.
 

@@ -18,6 +18,10 @@
 - **One symbol per backtest.** `replay` takes one symbol, a list or all of them; `backtest` and the Lab take one, over
   one or more days.
 - **The strategies are toys,** written to exercise the fill model and the loop, not to make money.
+- **Strategies written in the browser** run only in the server (the Lab and Watch), not the CLI; cost about 230 ns an
+  event more than a C++ plugin; and may not use the clock, files, Lua's patterns, finalizers, or more than 10 million
+  instructions, 1 GiB allocated or 30 s a call. In the terminal, a script that errors stops trading without saying
+  why. A plugin needs a rebuild and a server restart.
 
 ## What the engine assumes
 

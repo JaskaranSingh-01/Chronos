@@ -2,6 +2,7 @@
 
 #include <chrono>
 #include <cstdint>
+#include <filesystem>
 #include <limits>
 #include <memory>
 #include <optional>
@@ -586,6 +587,81 @@ std::string bad_field(const std::string& text)
     std::string field = "unset";
     EXPECT_FALSE(decode_run_spec(text, spec, field)) << text;
     return field;
+}
+
+// A script's run takes its source from the body or the store; its params are what the source declares.
+TEST(ProtocolTest, DecodesAScriptsRunWithItsSourceFromTheBodyOrTheStore)
+{
+    const std::string source = json(std::string{kQuoterScript}).dump();
+    const RunSpec given = run_spec(R"({"symbol":"ACME","days":["2019-12-30"],"strategy":"script:quoter",)"
+                                   R"("params":{"size":40},"source":)" +
+                                   source + "}");
+    EXPECT_EQ(given.strategy.name, "script:quoter");
+    EXPECT_EQ(given.strategy.source, kQuoterScript);
+    EXPECT_EQ(given.strategy.params, (ParamList{{"size", std::int64_t{40}}}));
+    EXPECT_EQ(given.limits.max_order_quantity, Quantity{40});  // its limits{}, from its params
+    EXPECT_EQ(given.limits.max_open_orders, 2u);
+
+    const std::filesystem::path dir = std::filesystem::temp_directory_path() / "chronos-protocol-scripts";
+    std::filesystem::remove_all(dir);
+    ScriptStore store{dir};
+    std::string error;
+    ASSERT_TRUE(store.write("quoter", kQuoterScript, error));
+    ASSERT_TRUE(store.write("broken", "x = = 1", error));
+    RunSpec stored;
+    std::string field;
+    ASSERT_TRUE(
+        decode_run_spec(R"({"symbol":"ACME","days":["2019-12-30"],"strategy":"script:quoter"})", stored, field, &store))
+        << field;
+    EXPECT_EQ(stored.strategy.source, kQuoterScript);
+    EXPECT_EQ(stored.strategy.params, (ParamList{{"size", std::int64_t{100}}}));
+
+    const auto refused_spec = [&](const std::string& body) {
+        RunSpec spec;
+        std::string named;
+        EXPECT_FALSE(decode_run_spec(body, spec, named, &store)) << body;
+        return named;
+    };
+    const std::string head = R"({"symbol":"ACME","days":["2019-12-30"],)";
+    EXPECT_EQ(refused_spec(head + R"("strategy":"script:none"})"), "strategy");
+    EXPECT_EQ(refused_spec(head + R"("strategy":"script:broken"})"), "source");
+    EXPECT_EQ(refused_spec(head + R"("strategy":"script:quoter","params":{"size":0}})"), "params.size");
+    EXPECT_EQ(refused_spec(head + R"("strategy":"script:quoter","params":{"other":1}})"), "params.other");
+    EXPECT_EQ(refused_spec(head + R"("strategy":"script:quoter","source":5})"), "source");
+    EXPECT_EQ(refused_spec(head + R"("strategy":"orb","source":"function on_timer() end"})"), "strategy");
+
+    // /api/strategies offers each script that loads, after the registered strategies.
+    const json strategies = json::parse(encode_strategies(&store))["strategies"];
+    ASSERT_EQ(strategies.size(), registered_strategies().size() + 1);
+    const json& quoter = strategies.back();
+    EXPECT_EQ(quoter["kind"], "script:quoter");
+    EXPECT_EQ(quoter["label"], "quoter (script)");
+    EXPECT_EQ(quoter["summary"], "Quotes both sides at the touch");
+    EXPECT_EQ(quoter["params"][0],
+              json::parse(R"({"name":"size","default":100,"min":1,"max":10000,"help":"shares a quote"})"));
+    EXPECT_EQ(quoter["limits"]["max_open_orders"], 2);
+
+    const json listed = json::parse(encode_scripts(store))["scripts"];
+    EXPECT_EQ(listed[0]["name"], "broken");
+    EXPECT_EQ(listed[0]["ok"], false);
+    EXPECT_EQ(listed[0]["error"], "load: script:1: unexpected symbol near '='");
+    EXPECT_EQ(listed[1]["ok"], true);
+    const json one = json::parse(encode_script("quoter", kQuoterScript));
+    EXPECT_EQ(one["source"], kQuoterScript);
+    EXPECT_EQ(one["check"]["ok"], true);
+    EXPECT_EQ(one["check"]["params"].size(), 1u);
+    std::string read;
+    EXPECT_TRUE(decode_script(R"({"source":"function on_timer() end"})", read));
+    EXPECT_EQ(read, "function on_timer() end");
+    EXPECT_FALSE(decode_script(R"({"source":5})", read));
+    EXPECT_FALSE(decode_script(R"({"source":"x","name":"y"})", read));
+    EXPECT_FALSE(decode_script(R"({"source":")" + std::string(max_script_bytes + 1, 'x') + R"("})", read));
+    std::filesystem::remove_all(dir);
+
+    // Over the WebSocket a script attaches only with its source.
+    EXPECT_TRUE(refused(client_message("attach", R"(,"strategy":"script:quoter")")));
+    const ClientMessage attach = decoded(client_message("attach", R"(,"strategy":"script:quoter","source":)" + source));
+    EXPECT_EQ(attach.command.strategy.source, kQuoterScript);
 }
 
 // An ORB whose clip is above the position or order limit could never enter: refused, naming its clip, as the CLI

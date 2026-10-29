@@ -412,7 +412,9 @@ export function createStore(env: Env) {
   async function loadDays() {
     try {
       const res = await api('/api/days');
-      if (res.ok) set({ ...state, days: ((await res.json()) as { days: Day[] }).days });
+      // Awaited before `state` is copied: a copy taken across an await would undo what lands meanwhile.
+      const days = res.ok ? ((await res.json()) as { days: Day[] }).days : null;
+      if (days) set({ ...state, days });
     } catch {
       // the list stays as it was; the next look asks again
     }

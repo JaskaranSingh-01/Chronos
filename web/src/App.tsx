@@ -3,6 +3,7 @@ import { DepthLadder, Tape } from './Book';
 import { Chart } from './Chart';
 import { outcomes, page, runLabel, useLab } from './lab';
 import { store, useStore } from './store';
+import { Strategies } from './Strategies';
 import { StrategyLab } from './StrategyLab';
 import { PnlPanel, Tabs } from './Tabs';
 import { Account, Ticket } from './Ticket';
@@ -125,7 +126,7 @@ function EngineStrip() {
   );
 }
 
-// The Trading Terminal, or the Strategy Lab at #lab: the panels on a 1 px grid. Each panel subscribes to its own slice,
+// The Trading Terminal, the Strategy Lab at #lab, or the strategy editor at #strategies: the panels on a 1 px grid. Each panel subscribes to its own slice,
 // so a snapshot never re-renders this tree.
 export function App() {
   const [price, setPrice] = useState('');
@@ -136,6 +137,8 @@ export function App() {
     <div className="terminal">
       {shown === 'lab' ? (
         <StrategyLab />
+      ) : shown === 'strategies' ? (
+        <Strategies />
       ) : (
         <>
           <TopBar />

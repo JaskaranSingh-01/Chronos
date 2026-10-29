@@ -12,6 +12,7 @@
 #include "chronos/server/itch_input.hpp"
 #include "chronos/server/lab.hpp"
 #include "chronos/server/replay_session.hpp"
+#include "chronos/server/script_strategy.hpp"
 
 // The WebSocket protocol and the HTTP bodies, as JSON text. Prices are integer ticks, quantities shares,
 // times epoch nanoseconds (JavaScript reads those to about 256 ns: for display only). Every server message carries
@@ -79,11 +80,19 @@ std::string encode_history(std::string_view session_id, std::uint64_t generation
                            std::span<const Trade> trades);
 
 // POST /api/backtests: exactly its keys, in range as the CLI caps them, each optional one taking
-// default_spec()'s value, an omitted limit following the params as the CLI's does. False with `field` naming the first
-// bad one, e.g. "params.quote_size" or "days[1]"; "" for a body that is not a JSON object.
-bool decode_run_spec(std::string_view text, RunSpec& spec, std::string& field);
-// GET /api/strategies: each strategy's params and limits, their defaults and caps.
-std::string encode_strategies();
+// default_spec()'s value, an omitted limit following the params as the CLI's does. A script's strategy
+// ("script:<name>") takes its "source", or else the one `scripts` holds under that name. False with `field` naming the
+// first bad one, e.g. "params.quote_size" or "days[1]"; "" for a body that is not a JSON object.
+bool decode_run_spec(std::string_view text, RunSpec& spec, std::string& field, const ScriptStore* scripts = nullptr);
+// GET /api/strategies: each registered strategy's params and limits, their defaults and caps; then each script of
+// `scripts` that loads.
+std::string encode_strategies(const ScriptStore* scripts = nullptr);
+// GET /api/scripts: each saved script's name, and whether it loads.
+std::string encode_scripts(const ScriptStore& scripts);
+// GET /api/scripts/<name>, and PUT's answer: its source, and what loading it found.
+std::string encode_script(std::string_view name, std::string_view source);
+// PUT /api/scripts/<name>'s body, {"source": text}; false if it is not one, or the text is over max_script_bytes.
+bool decode_script(std::string_view text, std::string& source);
 // A run as runs/<id>.json holds it and GET /api/backtests/<id> serves it.
 std::string encode_run(const Run& run);
 // A runs/<id>.json: false unless it is a finished run of format 1.
