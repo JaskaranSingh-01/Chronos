@@ -10,7 +10,7 @@ import {
   refusalText,
   runLabel,
   specRows,
-  strategyNames,
+  strategyLabel,
   toBody,
   useLab,
   windowLabels,
@@ -82,7 +82,7 @@ function RunForm({ form, setForm, digits }: { form: Form; setForm(f: Form): void
           >
             {strategies.strategies.map((k) => (
               <option key={k.kind} value={k.kind}>
-                {strategyNames[k.kind]}
+                {k.label}
               </option>
             ))}
           </select>
@@ -123,7 +123,8 @@ function RunForm({ form, setForm, digits }: { form: Form; setForm(f: Form): void
             ))}
           </select>
         </label>
-        <h3>Parameters · {strategyNames[form.strategy]}</h3>
+        <h3>Parameters · {strategyLabel(strategies, form.strategy)}</h3>
+        {kind.summary && <p className="muted">{kind.summary}</p>}
         {kind.params.map((p) =>
           field(`params.${p.name}`, p.name.replaceAll('_', ' '), form.params[p.name] ?? '', (v) =>
             edit({ ...form, params: { ...form.params, [p.name]: v } }),
@@ -291,6 +292,7 @@ function result(r: RunListing): string {
 // Every run, newest first, numbered in the order they were listed; a click shows one, and two ticked compare.
 function Runs() {
   const runs = useLab((l) => l.runs);
+  const strategies = useLab((l) => l.strategies);
   const selected = useLab((l) => l.selected);
   const compare = useLab((l) => l.compare);
   const ticked = runs.filter((r) => compare.includes(r.id));
@@ -337,7 +339,7 @@ function Runs() {
                 <td>
                   <button aria-label={`show #${i + 1}`}>{i + 1}</button>
                 </td>
-                <td>{strategyNames[r.spec.strategy] ?? r.spec.strategy}</td>
+                <td>{strategyLabel(strategies, r.spec.strategy)}</td>
                 <td>{r.spec.symbol}</td>
                 <td>{r.spec.days.length}</td>
                 <td>{result(r)}</td>
@@ -353,6 +355,7 @@ function Runs() {
 // The run picked: what it allows, its verifications and its provenance.
 function RunPanel({ edit }: { edit(r: RunListing): void }) {
   const runs = useLab((l) => l.runs);
+  const strategies = useLab((l) => l.strategies);
   const selected = useLab((l) => l.selected);
   const full = useLab((l) => l.details[l.selected]); // its JSON, for the provenance
   const shown = runs.findIndex((r) => r.id === selected);
@@ -360,9 +363,7 @@ function RunPanel({ edit }: { edit(r: RunListing): void }) {
   return (
     <section className="panel run" aria-label="Selected run">
       <div className="title">
-        {run
-          ? `Run #${shown + 1} · ${strategyNames[run.spec.strategy] ?? run.spec.strategy} · ${run.spec.symbol}`
-          : 'Run'}
+        {run ? `Run #${shown + 1} · ${strategyLabel(strategies, run.spec.strategy)} · ${run.spec.symbol}` : 'Run'}
         <span className="grow" />
         {run && <b className="num">{result(run)}</b>}
       </div>
@@ -385,7 +386,9 @@ export function StrategyLab() {
   const [typed, setForm] = useState<Form | null>(null);
   const [copies, setCopies] = useState(0); // each Edit as new starts the form afresh, without the last refusal
   // The defaults over the starting day until the form is edited.
-  const form = typed ?? (strategies && start ? defaults(strategies, 'market_maker', digits, [start]) : null);
+  // The market maker if it is registered, else the first strategy.
+  const first = strategies?.strategies.find((k) => k.kind === 'market_maker') ?? strategies?.strategies[0];
+  const form = typed ?? (strategies && first && start ? defaults(strategies, first.kind, digits, [start]) : null);
   return (
     <>
       <header className="bar">

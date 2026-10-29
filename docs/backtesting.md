@@ -5,7 +5,7 @@ each event and sends orders; `ExecutionSimulator` fills them as a queue-position
 touching the historical book.
 
 ```bash
-./build/simulator backtest data/itch/12302019.NASDAQ_ITCH50.bin --symbol SPY --date 2019-12-30 --strategy mm
+./build/simulator backtest data/itch/12302019.NASDAQ_ITCH50.bin --symbol SPY --date 2019-12-30 --strategy market_maker
 ./build/simulator backtest --store data/itch/store --symbol AAPL --date 2019-12-30 --strategy orb
 ```
 
@@ -86,26 +86,34 @@ price. With the guard, the count is 0.
 
 ## The strategies
 
-All three are toys, written to exercise the fill model and the loop, not to make money. Each implements the `Strategy`
-concept in [`engine/strategy.hpp`](../include/simulator/engine/strategy.hpp): `on_market`, `on_report` and
-`on_timer`, with a `StrategyContext` holding the const book, the const portfolio, the order gateway and the event's
-trade.
+Each strategy is a plugin: a file in [`strategies/`](../strategies/) that registers it, with its params, its default
+risk limits and its stats ([strategies.md](strategies.md) is the guide to writing one). The strategy itself implements
+the `Strategy` concept in [`engine/strategy.hpp`](../include/simulator/engine/strategy.hpp): `on_market`, `on_report`
+and `on_timer`, with a `StrategyContext` holding the const book, the const portfolio, the order gateway and the event's
+trade. The CLI runs any of them by name with `--strategy`, and sets a param with `--param NAME=VALUE`.
 
-| Strategy | `--strategy` | Does |
+All four are toys, written to exercise the fill model and the loop, not to make money.
+
+| `--strategy` | Params (defaults) | Does |
 |---|---|---|
-| `ImbalanceTaker` | `imbalance` (default) | an IOC of `--clip` shares when one top-of-book size is at least `--threshold` times the other, then waits `--cooldown-ms` |
-| `MarketMaker` | `mm` | post-only quotes of `--quote-size` shares at the best bid and ask, each living at least `--requote-ms` before it moves |
-| `Orb` | `orb` | the opening range breakout below |
+| `imbalance` (the default) | `threshold` 3, `clip` 100, `max_position` 500, `cooldown_ns` 100 ms | an IOC of `clip` shares when one top-of-book size is at least `threshold` times the other, then waits `cooldown_ns` |
+| `market_maker` | `quote_size` 100, `max_position` 500, `requote_cooldown_ns` 100 ms, `improve_ticks` 0 | post-only quotes of `quote_size` shares at the best bid and ask, each living at least `requote_cooldown_ns` before it moves |
+| `orb` | `range_minutes` 15, `clip` 100 | the opening range breakout below |
+| `trend_taker` | `clip` 100, `run_length` 3, `hold_ns` 1 s | the guide's example: an IOC buy after `run_length` rising trades, sold after `hold_ns` |
+
+A strategy's default risk limits follow its params: the largest order is its `quote_size` or `clip`, the position limit
+its own `max_position` (500 for the ORB, one `clip` for the trend taker), and one IOC or two quotes may be open at once.
+`--max-position`, `--max-order-quantity` and `--max-open-orders` override them.
 
 ### Opening range breakout (`Orb`)
 
 - **The range** is the high and low of every execution's price in the half-open interval [09:30, 09:30 +
-  `--range-minutes`), from `StrategyContext::trade`, so executions of hidden size count too.
-- **Entries.** On the first trade strictly above the high, an IOC buy at the ask for `--clip` shares; strictly below the
+  `range_minutes`), from `StrategyContext::trade`, so executions of hidden size count too.
+- **Entries.** On the first trade strictly above the high, an IOC buy at the ask for `clip` shares; strictly below the
   low, an IOC sell at the bid. One entry per direction a day; a direction is spent once the gateway accepts its entry.
   No reversal: a trade that stops a long does not also enter short.
 - **Stop and flatten.** A trade strictly through the other side of the range closes the position; a timer at 15:55
-  closes whatever is left. Closing orders are IOCs of at most `--clip` shares, sent again on each market event until
+  closes whatever is left. Closing orders are IOCs of at most `clip` shares, sent again on each market event until
   the position is flat. A day starts by closing any position carried into it.
 - **One order in flight**, and only while the book is trading and has a touch on the side it needs.
 - **Stats**: entries, stops, flattens, closing orders, risk rejects, days that never formed a range, and the shares
@@ -115,12 +123,19 @@ On AAPL's full day, read from the store in under a second:
 
 ```text
 Strategy
-  entries          1 long, 1 short
-  closing          1 stops, 1 flattens, 3 orders
-  risk rejects     0
-  no-range days    0
-  last range       286.4400 to 289.7200
-  shares           500 requested, 200 bought, 200 sold, 100 expired
+  Long entries     1
+  Short entries    1
+  Stops            1
+  Flattens         1
+  Closing orders   3
+  Risk rejects     0
+  No-range days    0
+  Shares requested 500
+  Bought           200
+  Sold             200
+  Expired          100
+  Range low        286.4400
+  Range high       289.7200
 ```
 
 It went long on the breakout, was stopped out, went short on a later trade, and was flattened at 15:55 after one

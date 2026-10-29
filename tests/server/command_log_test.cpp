@@ -146,8 +146,9 @@ void script(ReplaySession& session, int t)
         session.submit(
             Command{.generation = 1,
                     .type = CommandType::Attach,
-                    .strategy = {.kind = SessionStrategyKind::MarketMaker,
-                                 .market_maker = {.quote_size = 10, .max_position = 1'000, .requote_cooldown_ns = 0}}},
+                    .strategy = strategy_spec(
+                        "market_maker",
+                        std::vector<Param>{{"quote_size", 10}, {"max_position", 1'000}, {"requote_cooldown_ns", 0}})},
             t);
         break;
     case 60:  // a manual order while the strategy is attached: refused at apply, not_ready
@@ -160,13 +161,14 @@ void script(ReplaySession& session, int t)
         order(OrderType::Market, Side::Sell, Price{}, 30);
         break;
     case 165:  // still attached when the session restarts
-        session.submit(
-            Command{.generation = 1,
-                    .type = CommandType::Attach,
-                    .strategy =
-                        {.kind = SessionStrategyKind::ImbalanceTaker,
-                         .imbalance = {.threshold = 1.5, .clip = 10, .max_position = 1'000, .cooldown_ns = 1'000'000}}},
-            t);
+        session.submit(Command{.generation = 1,
+                               .type = CommandType::Attach,
+                               .strategy = strategy_spec("imbalance",
+                                                         std::vector<Param>{{"threshold", 1.5},
+                                                                            {"clip", 10},
+                                                                            {"max_position", 1'000},
+                                                                            {"cooldown_ns", 1'000'000}})},
+                       t);
         break;
     case 170:
         session.control(kFullSpeed);
@@ -241,7 +243,8 @@ TEST(CommandLogTest, ReplayingTheLogReproducesTheBookExecutionAndPortfolio)
     EXPECT_EQ(outcome(fresh.book, fresh.execution, fresh.portfolio, fresh.loop.report()), first);
 
     ASSERT_TRUE(read_log(path, 2, logged, error)) << error;
-    EXPECT_EQ(logged.spec.strategy.kind, SessionStrategyKind::ImbalanceTaker);
+    EXPECT_EQ(logged.spec.strategy.name, "imbalance");
+    EXPECT_EQ(*find_param(logged.spec.strategy.params, "threshold"), ParamValue{1.5});
     EXPECT_EQ(logged.applied.size(), applied_second);
     ASSERT_TRUE(logged.end.has_value());  // close()'s trailer
     Generation again{cfg, logged.spec, over(events)(logged.spec.ticker, logged.spec.days)};
@@ -255,7 +258,7 @@ TEST(CommandLogTest, AnOrbAttachIsLoggedWithItsParamsAndReproduced)
     const std::vector<MarketEvent> events = random_stream(3'000);
     const SessionConfig cfg = config({.order_latency = 1'500'000, .report_latency = 500'000});
     const Scratch scratch{"reproduce-orb"};
-    const OrbParams params{.range_minutes = 2, .clip = 20};
+    const StrategySpec orb = strategy_spec("orb", std::vector<Param>{{"range_minutes", 2}, {"clip", 20}});
     Outcome played;
     {
         LogQueue queue;
@@ -264,10 +267,7 @@ TEST(CommandLogTest, AnOrbAttachIsLoggedWithItsParamsAndReproduced)
         session.control(kPlay);
         for (int t = 0; session.state() != SessionState::Ended; ++t) {
             if (t == 40) {
-                session.submit(Command{.generation = 1,
-                                       .type = CommandType::Attach,
-                                       .strategy = {.kind = SessionStrategyKind::Orb, .orb = params}},
-                               t);
+                session.submit(Command{.generation = 1, .type = CommandType::Attach, .strategy = orb}, t);
             } else if (t == 170) {
                 session.control(kFullSpeed);
             }
@@ -283,8 +283,7 @@ TEST(CommandLogTest, AnOrbAttachIsLoggedWithItsParamsAndReproduced)
     std::string error;
     ASSERT_TRUE(read_log(scratch.path, 1, logged, error)) << error;
     ASSERT_EQ(logged.applied.size(), 1u);
-    EXPECT_EQ(logged.applied[0].command.strategy.kind, SessionStrategyKind::Orb);
-    EXPECT_EQ(logged.applied[0].command.strategy.orb, params);
+    EXPECT_EQ(logged.applied[0].command.strategy, orb);
     Generation fresh{cfg, logged.spec, over(events)(logged.spec.ticker, logged.spec.days)};
     ASSERT_TRUE(reproduce(fresh, logged));
     EXPECT_EQ(outcome(fresh.book, fresh.execution, fresh.portfolio, fresh.loop.report()), played);
@@ -310,11 +309,10 @@ TEST(CommandLogTest, ATwoDayLogNamesEachDayAndReproducesUntilASegmentChanges)
         LogQueue queue;
         const LogWriter writer{queue, scratch.path, cfg, &library, false};
         ReplaySession session{cfg, factory, &queue};
-        session.submit(
-            Command{.generation = 1,
-                    .type = CommandType::Attach,
-                    .strategy = {.kind = SessionStrategyKind::MarketMaker, .market_maker = {.quote_size = 10}}},
-            0);
+        session.submit(Command{.generation = 1,
+                               .type = CommandType::Attach,
+                               .strategy = strategy_spec("market_maker", std::vector<Param>{{"quote_size", 10}})},
+                       0);
         session.control(kFullSpeed);
         session.control(kPlay);
         for (Timestamp wall = kWall; session.state() != SessionState::Ended; wall += kMs) {
@@ -325,7 +323,7 @@ TEST(CommandLogTest, ATwoDayLogNamesEachDayAndReproducesUntilASegmentChanges)
         wait_until_written(queue);
     }
     const nlohmann::json header = nlohmann::json::parse(read_lines(scratch.path).at(0));
-    EXPECT_EQ(header["protocol"], 3);
+    EXPECT_EQ(header["protocol"], 4);
     EXPECT_EQ(header["source_digest"].get<std::string>().size(), 64u);
     EXPECT_EQ(header["window"], "full_day");
     EXPECT_EQ(header["run_id"], "");
@@ -348,7 +346,7 @@ TEST(CommandLogTest, ATwoDayLogNamesEachDayAndReproducesUntilASegmentChanges)
     std::string error;
     ASSERT_TRUE(read_log(scratch.path, 1, logged, error)) << error;
     EXPECT_EQ(logged.spec.days, cfg.defaults.days);
-    EXPECT_EQ(logged.spec.strategy.kind, SessionStrategyKind::None);  // the attach is a logged command
+    EXPECT_EQ(logged.spec.strategy.name, "");  // the attach is a logged command
     Generation again{cfg, logged.spec, factory(logged.spec.ticker, logged.spec.days)};
     ASSERT_TRUE(reproduce(again, logged, days));
     EXPECT_EQ(digests(again), end.digests);
@@ -394,7 +392,7 @@ TEST(CommandLogTest, TheLogHasAHeaderPerGenerationAndOneFlushedLinePerRecord)
     };
     EXPECT_TRUE(has(0, "\"type\":\"header\""));
     EXPECT_TRUE(has(0, "\"generation\":1"));
-    EXPECT_TRUE(has(0, "\"protocol\":3"));
+    EXPECT_TRUE(has(0, "\"protocol\":4"));
     EXPECT_TRUE(has(0, "\"session_id\":\"test\""));
     EXPECT_TRUE(has(0, "\"order_ns\":100000"));
     EXPECT_TRUE(has(0, "\"max_order_quantity\":500"));
@@ -634,8 +632,9 @@ TEST(CommandLogTest, AMarketMakerAtFullSpeedNeverOverrunsTheLog)
     session.submit(
         Command{.generation = 1,
                 .type = CommandType::Attach,
-                .strategy = {.kind = SessionStrategyKind::MarketMaker,
-                             .market_maker = {.quote_size = 10, .max_position = 1'000, .requote_cooldown_ns = 0}}},
+                .strategy = strategy_spec(
+                    "market_maker",
+                    std::vector<Param>{{"quote_size", 10}, {"max_position", 1'000}, {"requote_cooldown_ns", 0}})},
         0);
     session.tick(kWall);  // attached before the first event
     {
@@ -736,12 +735,15 @@ TEST(CommandLogTest, ReadLogRefusesATruncatedLine)
     EXPECT_EQ(refusal(path, 2), "no header for generation 2");
     write_log(path, {good[0], good[0], good[1]});
     EXPECT_EQ(refusal(path), "line 2: a second header for generation 1");
-    write_log(path, {tampered(0, "\"protocol\":3", "\"protocol\":2"), good[1]});
+    write_log(path, {tampered(0, "\"protocol\":4", "\"protocol\":2"), good[1]});
     EXPECT_EQ(refusal(path), "line 1: log protocol 2 predates the per-symbol store");
-    write_log(path, {tampered(0, "\"protocol\":3", "\"protocol\":4"), good[1]});
     const std::string commit = nlohmann::json::parse(good[0])["commit"];
-    EXPECT_EQ(refusal(path),
-              "line 1: log protocol 4, written by commit " + commit + ": reproduce it with that commit's build");
+    for (const int other : {3, 5}) {  // before strategy plugins, and a later build's
+        write_log(path, {tampered(0, "\"protocol\":4", "\"protocol\":" + std::to_string(other)), good[1]});
+        EXPECT_EQ(refusal(path),
+                  "line 1: log protocol " + std::to_string(other) + ", written by commit " + commit +
+                      ": reproduce it with that commit's build");
+    }
 
     // Two trailers for one generation, the second with a later seq.
     std::vector<std::string> closed = sample_log(config(), true);  // the trailer is last; line n has seq n

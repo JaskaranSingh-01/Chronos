@@ -51,10 +51,10 @@ struct Terminal
         library.scan();
     }
 
-    // A completed Lab run of `kind` on ACME over Friday, or over Friday and Monday.
-    std::string run(SessionStrategyKind kind, bool two_days, TradingWindow window)
+    // A completed Lab run of the registered `strategy` on ACME over Friday, or over Friday and Monday.
+    std::string run(std::string_view strategy, bool two_days, TradingWindow window)
     {
-        RunSpec spec = default_spec(kind);
+        RunSpec spec = default_spec(strategy_spec(strategy));
         spec.ticker = ticker("ACME");
         spec.days = two_days ? DayList{.day = {2019y / 12 / 27, 2019y / 12 / 30}, .count = 2}
                              : DayList{.day = {2019y / 12 / 27}, .count = 1};
@@ -120,7 +120,7 @@ TEST(WatchTest, EveryRunReproducesInTheTerminalAtAnyPace)
 {
     Terminal t{"watch-runs"};
     int n = 0;
-    for (const SessionStrategyKind kind : {SessionStrategyKind::MarketMaker, SessionStrategyKind::ImbalanceTaker}) {
+    for (const std::string_view kind : {"market_maker", "imbalance"}) {
         for (const bool two_days : {false, true}) {
             for (const TradingWindow window : {TradingWindow::Regular, TradingWindow::FullDay}) {
                 SCOPED_TRACE(n);
@@ -166,7 +166,7 @@ TEST(WatchTest, EveryRunReproducesInTheTerminalAtAnyPace)
 TEST(WatchTest, ADetachGivesMismatchAndTheWatchsLogReproducesTheRun)
 {
     Terminal t{"watch-detach"};
-    const std::string id = t.run(SessionStrategyKind::MarketMaker, true, TradingWindow::Regular);
+    const std::string id = t.run("market_maker", true, TradingWindow::Regular);
     ASSERT_EQ(t.watch(id), "");
     const std::uint64_t watched = t.session.generation();
     t.play_to_end();
@@ -194,7 +194,7 @@ TEST(WatchTest, ADetachGivesMismatchAndTheWatchsLogReproducesTheRun)
         }
     }
     EXPECT_EQ(logged.spec.days, (DayList{.day = {2019y / 12 / 27, 2019y / 12 / 30}, .count = 2}));
-    EXPECT_EQ(logged.spec.strategy, default_spec(SessionStrategyKind::MarketMaker).strategy);
+    EXPECT_EQ(logged.spec.strategy, strategy_spec("market_maker"));
     std::vector<DayHandle> days{t.library.find(2019y / 12 / 27), t.library.find(2019y / 12 / 30)};
     Generation again{lab_config(), logged.spec,
                      chain_factory(t.library, kEquity, false)(logged.spec.ticker, logged.spec.days)};
@@ -211,13 +211,13 @@ TEST(WatchTest, ADetachGivesMismatchAndTheWatchsLogReproducesTheRun)
 TEST(WatchTest, ASymbolLoadedAfterAWatchHasTheTerminalsOwnSettings)
 {
     Terminal t{"watch-then-symbol"};
-    ASSERT_EQ(t.watch(t.run(SessionStrategyKind::MarketMaker, false, TradingWindow::Regular)), "");
+    ASSERT_EQ(t.watch(t.run("market_maker", false, TradingWindow::Regular)), "");
     t.session.control(Control{.type = ControlType::Symbol,
                               .spec = {.ticker = ticker("ACME"), .days = {.day = {2019y / 12 / 30}, .count = 1}}});
     t.tick();
     const Snapshot now = latest(t.session);
     EXPECT_EQ(name(now.run_id), "");
-    EXPECT_EQ(now.spec.strategy.kind, SessionStrategyKind::None);
+    EXPECT_EQ(now.spec.strategy.name, "");
     EXPECT_EQ(now.spec.window, lab_config().defaults.window);
     EXPECT_EQ(now.spec.limits.max_order_quantity, lab_config().defaults.limits.max_order_quantity);
 }
@@ -227,7 +227,7 @@ TEST(WatchTest, ASymbolLoadedAfterAWatchHasTheTerminalsOwnSettings)
 TEST(WatchTest, AWatchIsAdmittedOnlyForACompletedRunOverTheSameDays)
 {
     Terminal t{"watch-admission"};
-    const std::string done = t.run(SessionStrategyKind::ImbalanceTaker, false, TradingWindow::Regular);
+    const std::string done = t.run("imbalance", false, TradingWindow::Regular);
     const std::uint64_t generation = t.session.generation();
     EXPECT_EQ(t.watch("20261018T101500Z-0000000000000000"), "20261018T101500Z-0000000000000000: no such run");
     std::vector<std::string> out;
@@ -272,7 +272,7 @@ TEST(WatchTest, AWatchIsAdmittedOnlyForACompletedRunOverTheSameDays)
 TEST(WatchTest, AWatchOfADamagedSegmentIsInputChanged)
 {
     Terminal t{"watch-damaged"};
-    const std::string id = t.run(SessionStrategyKind::MarketMaker, true, TradingWindow::Regular);
+    const std::string id = t.run("market_maker", true, TradingWindow::Regular);
     const Segment friday = *t.library.find(2019y / 12 / 27)->segment("ACME");
     flip(t.dir.path / "data" / "store" / "ACME.itch.zst", friday.offset + friday.compressed - 1);  // its checksum
 

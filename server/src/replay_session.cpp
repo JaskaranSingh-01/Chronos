@@ -13,16 +13,15 @@
 namespace simulator::server {
 namespace {
 
-// What admission can check without the book: a limit order has a positive price; an attach names a strategy,
-// and its imbalance threshold is finite and at least 1 (logged for every kind; a non-finite one is not JSON).
+// What admission can check without the book: a limit order has a positive price; an attach names a strategy and
+// each of its params fits it (they are logged, and a non-finite one is not JSON).
 bool valid(const Command& command) noexcept
 {
     switch (command.type) {
     case CommandType::Order:
         return command.order_type == OrderType::Market || command.price.ticks > 0;
     case CommandType::Attach:
-        return command.strategy.kind != SessionStrategyKind::None &&
-            std::isfinite(command.strategy.imbalance.threshold) && command.strategy.imbalance.threshold >= 1.0;
+        return strategy_fits(command.strategy);
     case CommandType::Cancel:
     case CommandType::Detach:
         return true;

@@ -12,6 +12,15 @@
 
 namespace simulator {
 
+// One day's regular session in event time, [open, close).
+struct DaySession
+{
+    Timestamp open{0};
+    Timestamp close{0};
+
+    bool operator==(const DaySession&) const = default;
+};
+
 // What a strategy callback may touch: a read-only book and portfolio, and the gateway for every action.
 struct StrategyContext
 {

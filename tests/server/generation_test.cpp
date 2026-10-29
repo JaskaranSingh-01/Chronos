@@ -154,7 +154,7 @@ TEST(GenerationTest, EveryRiskCheckAndAMissingOppositePriceRefuseWithTheirOwnCod
 TEST(GenerationTest, AnAttachedStrategyQuotesAndRefusesManualOrdersUntilDetached)
 {
     Fixture f{ladder()};
-    const StrategySpec mm{.kind = SessionStrategyKind::MarketMaker, .market_maker = {.quote_size = 10}};
+    const StrategySpec mm = strategy_spec("market_maker", std::vector<Param>{{"quote_size", 10}});
     ASSERT_EQ(apply_command(f.g, Command{.type = CommandType::Attach, .strategy = mm}).error, ErrorCode::None);
     EXPECT_TRUE(f.g.strategy.attached());
     f.run_to_end();  // quotes both sides once the ask arrives at 2
@@ -273,10 +273,9 @@ TEST(GenerationTest, ThePortfolioAndTheStrategyCarryOvernight)
         server::step(g.loop);
     }
     ASSERT_EQ(apply_command(g, order(OrderType::Ioc, Side::Buy, 100'100, 100)).error, ErrorCode::None);
-    ASSERT_EQ(apply_command(
-                  g,
-                  Command{.type = CommandType::Attach,
-                          .strategy = {.kind = SessionStrategyKind::MarketMaker, .market_maker = {.quote_size = 10}}})
+    ASSERT_EQ(apply_command(g,
+                            Command{.type = CommandType::Attach,
+                                    .strategy = strategy_spec("market_maker", std::vector<Param>{{"quote_size", 10}})})
                   .error,
               ErrorCode::None);
     while (g.loop.peek(ts) == PeekStatus::Event && g.loop.pending()->type != MarketEventType::Clear) {
@@ -359,7 +358,7 @@ TEST(GenerationTest, ARegularWindowTradesOnlyInsideEachDaysFeedSession)
     spec.ticker = ticker("ACME");
     spec.days = {.day = {2019y / 12 / 27, 2019y / 12 / 30}, .count = 2};
     spec.window = TradingWindow::Regular;
-    spec.strategy = {.kind = SessionStrategyKind::MarketMaker, .market_maker = {.quote_size = 10}};
+    spec.strategy = strategy_spec("market_maker", std::vector<Param>{{"quote_size", 10}});
     const SourceFactory chain = chain_factory(library, kEquity, false);
 
     Generation g{config(), spec, chain(spec.ticker, spec.days)};
@@ -406,7 +405,7 @@ TEST(GenerationTest, AQuoteInFlightAtTheCloseIsCancelledOnItsAcceptedAndManualOr
     RunSpec spec = config({.order_latency = kMs, .report_latency = kMs}).defaults;
     spec.days = {.day = {2019y / 12 / 30}, .count = 1};
     spec.window = TradingWindow::Regular;
-    spec.strategy = {.kind = SessionStrategyKind::MarketMaker, .market_maker = {.quote_size = 10}};
+    spec.strategy = strategy_spec("market_maker", std::vector<Param>{{"quote_size", 10}});
     Generation g{config(), spec, std::make_unique<VectorSource>(events)};
     Timestamp ts{0};
     while (g.loop.peek(ts) == PeekStatus::Event && server::step(g.loop).ok) {

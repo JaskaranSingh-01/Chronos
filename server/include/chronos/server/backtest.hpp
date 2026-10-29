@@ -19,13 +19,12 @@ namespace simulator::server {
 // ponytail: 50k rows (~2.8 MB) per run kept in memory; load results on demand past a few hundred runs.
 inline constexpr std::size_t max_fill_rows = 50'000;
 
-// `simulator backtest`'s risk limits for `strategy`: its own max position and order size, and one IOC or two quotes
-// open at once.
+// `strategy`'s own risk limits for its params, as `simulator backtest` takes them; none for no strategy.
 RiskLimits default_limits(const StrategySpec& strategy);
 
-// `simulator backtest`'s settings for `kind`, which a Lab run's omitted keys take: its latencies, fees, params and
-// limits, under a Regular window.
-RunSpec default_spec(SessionStrategyKind kind);
+// `simulator backtest`'s settings for `strategy`, which a Lab run's omitted keys take: its latencies, fees and limits,
+// under a Regular window.
+RunSpec default_spec(const StrategySpec& strategy);
 
 // One fill of a run.
 struct FillRow
@@ -90,7 +89,7 @@ struct RunResult
     std::vector<FillRow> fills{};  // the first max_fill_rows
     bool truncated{false};
     std::vector<std::string> hashes{};  // with hash as read: each day's segment hash as read, "" if not intact
-    std::optional<OrbStats> orb{};      // an ORB run's own stats
+    std::vector<Stat> stats{};          // the strategy's own counters
     std::int64_t wall_ms{0};
     std::int64_t cpu_ms{0};
 

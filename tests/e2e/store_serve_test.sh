@@ -34,7 +34,7 @@ results() {
     "$simulator" "$@" --symbol ACME --date 2019-12-30 2>/dev/null |
         grep -vE '^  (file|store) |^  messages |^(Elapsed|Memory) '
 }
-for command in replay 'backtest --strategy mm'; do
+for command in replay 'backtest --strategy market_maker'; do
     from_file=$(results $command data/12302019.NASDAQ_ITCH50.bin)
     from_store=$(results $command --store data/store)
     if [ -z "$from_file" ] || [ "$from_file" != "$from_store" ]; then

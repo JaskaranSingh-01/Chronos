@@ -7,7 +7,7 @@ import { tokenKey, type Env } from './store';
 // chronos-serve's Lab over HTTP (server/src/protocol.cpp): money in tick-shares, times in epoch ns but equity.t.
 
 export type RunState = 'queued' | 'running' | 'completed' | 'failed' | 'cancelled';
-export type StrategyKind = 'market_maker' | 'imbalance' | 'orb';
+export type StrategyKind = string; // a registered strategy's name, as /api/strategies lists it
 export type Window = 'regular' | 'full_day';
 export interface Limits {
   max_position: number;
@@ -19,7 +19,9 @@ export interface Limits {
 export interface Strategies {
   strategies: {
     kind: StrategyKind;
-    params: { name: string; default: number; min: number; max: number | null }[]; // max null: any finite number
+    label: string;
+    summary: string;
+    params: { name: string; default: number; min: number; max: number | null; help: string }[]; // max null: no cap
     limits: Limits; // at the default params; an omitted limit follows the params
   }[];
   latency: { order_ns: number; report_ns: number; max: number };
@@ -69,21 +71,11 @@ export interface Verification {
   changed: string[]; // input_changed: the days whose segment as read differs
 }
 
-// An ORB run's own stats (server/src/protocol.cpp results_json): decisions, then shares; the range in price ticks.
-export interface OrbStats {
-  long_entries: number;
-  short_entries: number;
-  stops: number;
-  flattens: number;
-  closing_orders: number;
-  risk_rejects: number;
-  no_range_days: number;
-  requested: number;
-  bought: number;
-  sold: number;
-  expired: number;
-  range_high: number | null; // the last day's; null without one
-  range_low: number | null;
+// One of a strategy's own counters (server/src/protocol.cpp results_json); a price is in ticks.
+export interface StrategyStat {
+  name: string;
+  value: number;
+  price: boolean;
 }
 
 export interface Results {
@@ -103,7 +95,7 @@ export interface Results {
   filled_shares: number;
   fill_rate: number; // filled / (filled + cancelled + expired) shares
   digests: Digests | null; // null when partial
-  orb?: OrbStats; // an ORB run's
+  stats?: StrategyStat[]; // the strategy's own; none in a run from before strategy plugins
   equity: { granularity: 'event_second'; t: number[]; pnl: number[]; position: number[] }; // t: epoch seconds
   by_hour: { hour: number[]; pnl: number[] }; // New York hour, summed over days
   by_day: { date: string; pnl: number; fills: number }[];
@@ -187,11 +179,9 @@ export interface LabState {
   notice: string; // a refused cancel or delete, or a delete's warning
 }
 
-export const strategyNames: Record<string, string> = {
-  market_maker: 'Market maker',
-  imbalance: 'Imbalance',
-  orb: 'ORB',
-};
+// A strategy's label as /api/strategies gives it; its name until the list arrives, or once it is gone.
+export const strategyLabel = (s: Strategies | null, kind: string) =>
+  s?.strategies.find((k) => k.kind === kind)?.label ?? kind;
 
 // The page a location hash shows: the Lab at #lab, else the terminal.
 export const page = (hash: string) => (hash === '#lab' ? 'lab' : 'terminal');
@@ -303,20 +293,9 @@ export const cards = (r: Results, digits: number) =>
     return [name, kind === 'count' ? counts.format(n) : `${n.toFixed(1)}%`, ''];
   });
 
-// An ORB run's stat cards as [name, value]: decisions, shares and the last day's range at `priceDigits` decimals.
-export const orbCards = (o: OrbStats, priceDigits: number): [string, string][] => [
-  ['Entries', `${counts.format(o.long_entries)} long, ${counts.format(o.short_entries)} short`],
-  ['Closing', `${counts.format(o.stops)} stops, ${counts.format(o.flattens)} flattens`],
-  ['No-range days', counts.format(o.no_range_days)],
-  ['Risk rejects', counts.format(o.risk_rejects)],
-  ['Shares', `${counts.format(o.bought)} bought, ${counts.format(o.sold)} sold of ${counts.format(o.requested)}`],
-  [
-    'Range',
-    o.range_high === null || o.range_low === null
-      ? 'none'
-      : `${px(o.range_low, priceDigits)} to ${px(o.range_high, priceDigits)}`,
-  ],
-];
+// A strategy's own stats as [name, value]: a price at `priceDigits` decimals, else a number.
+export const statCards = (stats: StrategyStat[], priceDigits: number): [string, string][] =>
+  stats.map((s) => [s.name, s.price ? px(s.value, priceDigits) : counts.format(s.value)]);
 
 // Peak-to-date minus PnL at each sample; the peak starts at 0, as the Portfolio's does.
 export function drawdown(pnl: number[]): number[] {
@@ -363,7 +342,7 @@ export function compareStats(a: Results, b: Results, digits: number): [string, s
 export const specRows = (spec: Spec, digits: number): [string, string][] => [
   ['symbol', spec.symbol],
   ['days', spec.days.join(', ')],
-  ['strategy', strategyNames[spec.strategy] ?? spec.strategy],
+  ['strategy', spec.strategy],
   ...Object.entries(spec.params).map(([name, value]): [string, string] => [`params.${name}`, String(value)]),
   ['window', windowLabels[spec.window]],
   ['latency.order_ns', String(spec.latency.order_ns)],

@@ -20,8 +20,11 @@
 
 namespace simulator::server {
 
-// The command log's format version, written in every header line. 3: each day's segment hash.
-inline constexpr int log_protocol = 3;
+// The command log's format version, written in every header line. 3: each day's segment hash; 4: a strategy by its
+// registered name with its params.
+inline constexpr int log_protocol = 4;
+// The first protocol with the per-symbol store; an older log has no segment hashes to check its days against.
+inline constexpr int store_log_protocol = 3;
 
 // The log writer's queue: a push never waits, and once the queue has been full or the writer failed, it stays failed.
 class LogQueue

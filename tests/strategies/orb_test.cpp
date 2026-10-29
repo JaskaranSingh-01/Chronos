@@ -28,7 +28,7 @@ static_assert(Strategy<Orb>);
 // Drives an Orb directly: market callbacks with or without a trade, timers, and the reports of its orders.
 struct Fixture
 {
-    std::vector<OrbSession> sessions;
+    std::vector<DaySession> sessions;
     MarketBook book{kSymbol, 64};
     SimQueue queue{64};
     Portfolio portfolio;
@@ -38,7 +38,7 @@ struct Fixture
     OrderId next_id{1};
     std::vector<Timestamp> timers;  // when each timer it set fires
 
-    explicit Fixture(std::vector<OrbSession> days = {{kOpen, kClose}}, std::size_t max_open_orders = 1)
+    explicit Fixture(std::vector<DaySession> days = {{kOpen, kClose}}, std::size_t max_open_orders = 1)
         : sessions(std::move(days)),
           portfolio(kEquity,
                     RiskLimits{.max_position = 1'000,

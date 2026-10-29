@@ -23,11 +23,9 @@ namespace {
 using nlohmann::json;
 
 constexpr std::uint64_t int64_max = std::numeric_limits<std::int64_t>::max();
-// Strategy params, capped as the CLI caps them (src/cli/replay_args.cpp), so the strategies' signed arithmetic on
-// them (sizes, positions and ticks added to positions and prices; a cooldown added to a timestamp) cannot overflow.
+// A Lab run's risk limits, capped as the CLI caps them (src/cli/replay_args.cpp), so the arithmetic on sizes and
+// positions cannot overflow. Each strategy caps its own params.
 constexpr std::uint64_t max_param = 1'000'000'000;
-constexpr std::uint64_t max_cooldown_ns = 1'000'000'000'000'000;  // 1e9 ms
-constexpr std::uint64_t max_range_minutes = 390;                    // the regular session
 // A Lab run's latencies and fees, capped as the CLI caps them.
 constexpr std::uint64_t max_latency_ns = 1'000'000'000'000;  // 1,000 s
 constexpr std::int64_t max_fee = 1'000'000;                  // ticks a share
@@ -207,12 +205,35 @@ bool decode_order(const json& j, Command& c)
     return true;
 }
 
+// A param's value as JSON sends it: an integer within int64, or a finite number.
+bool param_value(const json& j, ParamValue& value)
+{
+    if (j.is_number_unsigned()) {
+        if (j.get<std::uint64_t>() > int64_max) {
+            return false;
+        }
+        value = static_cast<std::int64_t>(j.get<std::uint64_t>());
+        return true;
+    }
+    if (j.is_number_integer()) {
+        value = j.get<std::int64_t>();
+        return true;
+    }
+    if (j.is_number_float() && std::isfinite(j.get<double>())) {
+        value = j.get<double>();
+        return true;
+    }
+    return false;
+}
+
 // The strategy and its params, as attach and a Lab run take them: a param left out keeps its default. False with
 // `field` naming "strategy", "params" or the first bad param, e.g. "params.quote_size".
 bool decode_strategy(const json& j, StrategySpec& spec, std::string& field)
 {
     field = "strategy";
-    if (!read(j, "strategy", spec.kind) || spec.kind == SessionStrategyKind::None) {
+    const auto name = j.find("strategy");
+    const StrategyInfo* info = name != j.end() && name->is_string() ? find_strategy(name->get<std::string>()) : nullptr;
+    if (info == nullptr) {
         return false;
     }
     // By reference: copying a client's subtree recurses as deep as the client nested it.
@@ -223,55 +244,23 @@ bool decode_strategy(const json& j, StrategySpec& spec, std::string& field)
     if (!params.is_object()) {
         return false;
     }
-    const auto bad = [&](std::string_view param) {
-        field = "params." + std::string{param};
+    ParamList given;
+    for (const auto& item : params.items()) {
+        ParamValue value;
+        if (!param_value(item.value(), value)) {
+            field = "params." + item.key();
+            return false;
+        }
+        given.push_back({item.key(), value});
+    }
+    std::string bad;
+    if (!resolve_params(info->params, given, spec.params, bad)) {
+        field = "params." + bad;
         return false;
-    };
-    if (spec.kind == SessionStrategyKind::MarketMaker) {
-        MarketMakerParams& mm = spec.market_maker;
-        if (const auto key =
-                unknown_key(params, {"quote_size", "max_position", "requote_cooldown_ns", "improve_ticks"})) {
-            return bad(*key);
-        }
-        if (!read_optional(params, "quote_size", max_param, mm.quote_size) || mm.quote_size == 0) {
-            return bad("quote_size");
-        }
-        if (!read_optional(params, "max_position", max_param, mm.max_position)) {
-            return bad("max_position");
-        }
-        if (!read_optional(params, "requote_cooldown_ns", max_cooldown_ns, mm.requote_cooldown_ns)) {
-            return bad("requote_cooldown_ns");
-        }
-        return read_optional(params, "improve_ticks", max_param, mm.improve_ticks) || bad("improve_ticks");
     }
-    if (spec.kind == SessionStrategyKind::Orb) {
-        OrbParams& orb = spec.orb;
-        if (const auto key = unknown_key(params, {"range_minutes", "clip"})) {
-            return bad(*key);
-        }
-        if (!read_optional(params, "range_minutes", max_range_minutes, orb.range_minutes) || orb.range_minutes == 0) {
-            return bad("range_minutes");
-        }
-        return (read_optional(params, "clip", max_param, orb.clip) && orb.clip != 0) || bad("clip");
-    }
-    ImbalanceTakerParams& it = spec.imbalance;
-    if (const auto key = unknown_key(params, {"threshold", "clip", "max_position", "cooldown_ns"})) {
-        return bad(*key);
-    }
-    if (params.contains("threshold")) {
-        const json& threshold = params.at("threshold");
-        if (!threshold.is_number() || !std::isfinite(threshold.get<double>()) || threshold.get<double>() < 1.0) {
-            return bad("threshold");
-        }
-        it.threshold = threshold.get<double>();
-    }
-    if (!read_optional(params, "clip", max_param, it.clip) || it.clip == 0) {
-        return bad("clip");
-    }
-    if (!read_optional(params, "max_position", max_param, it.max_position)) {
-        return bad("max_position");
-    }
-    return read_optional(params, "cooldown_ns", max_cooldown_ns, it.cooldown_ns) || bad("cooldown_ns");
+    spec.name = info->name;
+    spec.source.clear();
+    return true;
 }
 
 bool decode_attach(const json& j, Command& c)
@@ -313,9 +302,7 @@ bool spec_from(const json& j, RunSpec& spec, std::string& field)
     if (!decode_strategy(j, strategy, field)) {
         return false;
     }
-    spec = default_spec(strategy.kind);
-    spec.strategy = strategy;
-    spec.limits = default_limits(strategy);
+    spec = default_spec(strategy);
     field = "symbol";
     if (!read_symbol(j, spec.ticker)) {
         return false;
@@ -363,10 +350,12 @@ bool spec_from(const json& j, RunSpec& spec, std::string& field)
         spec.limits.max_open_orders == 0) {
         return bad("limits.max_open_orders");
     }
-    if (strategy.kind == SessionStrategyKind::Orb &&
-        (strategy.orb.clip > static_cast<std::uint64_t>(spec.limits.max_position) ||
-         strategy.orb.clip > spec.limits.max_order_quantity.value())) {
-        return bad("params.clip");  // the ORB could never enter
+    // A strategy that could never trade under these limits, as the ORB with a clip over one.
+    const StrategyInfo* info = find_strategy(spec.strategy.name);
+    if (const std::string over = info != nullptr && info->check ? info->check(spec.strategy.params, spec.limits) : "";
+        !over.empty()) {
+        field = "params." + over;
+        return false;
     }
     return !j.contains("window") || read(j, "window", spec.window) || bad("window");
 }
@@ -428,28 +417,31 @@ json limits_json(const RunSpec& spec)
             {"max_open_orders", spec.limits.max_open_orders}};
 }
 
+// A param's value; a real param's infinite max as null.
+json value_json(const ParamValue& value)
+{
+    if (const auto* i = std::get_if<std::int64_t>(&value)) {
+        return *i;
+    }
+    const double d = std::get<double>(value);
+    return std::isfinite(d) ? json(d) : json(nullptr);
+}
+
+json params_json(const ParamList& params)
+{
+    json j = json::object();
+    for (const Param& p : params) {
+        j[p.name] = value_json(p.value);
+    }
+    return j;
+}
+
 json spec_json(const RunSpec& spec)
 {
-    const MarketMakerParams& mm = spec.strategy.market_maker;
-    const ImbalanceTakerParams& it = spec.strategy.imbalance;
-    json params = json::object();
-    if (spec.strategy.kind == SessionStrategyKind::MarketMaker) {
-        params = {{"quote_size", mm.quote_size},
-                  {"max_position", mm.max_position},
-                  {"requote_cooldown_ns", mm.requote_cooldown_ns},
-                  {"improve_ticks", mm.improve_ticks}};
-    } else if (spec.strategy.kind == SessionStrategyKind::ImbalanceTaker) {
-        params = {{"threshold", it.threshold},
-                  {"clip", it.clip},
-                  {"max_position", it.max_position},
-                  {"cooldown_ns", it.cooldown_ns}};
-    } else if (spec.strategy.kind == SessionStrategyKind::Orb) {
-        params = {{"range_minutes", spec.strategy.orb.range_minutes}, {"clip", spec.strategy.orb.clip}};
-    }
     return {{"symbol", name(spec.ticker)},
             {"days", days_json(spec.days)},
-            {"strategy", spec.strategy.kind},
-            {"params", params},
+            {"strategy", spec.strategy.name.empty() ? "none" : spec.strategy.name},
+            {"params", params_json(spec.strategy.params)},
             {"latency", {{"order_ns", spec.latency.order_latency}, {"report_ns", spec.latency.report_latency}}},
             {"fees", fees_json(spec)},
             {"limits", limits_json(spec)},
@@ -588,45 +580,12 @@ json results_json(const RunResult& r)
                       {"fills", r.fills_by},
                       {"anomalies", r.anomalies_by}}},
                     {"fill_list", {{"truncated", r.truncated}, {"rows", rows}}}};
-    if (r.orb) {
-        const OrbStats& s = *r.orb;
-        results["orb"] = {{"long_entries", s.long_entries},
-                          {"short_entries", s.short_entries},
-                          {"stops", s.stops},
-                          {"flattens", s.flattens},
-                          {"closing_orders", s.closing_orders},
-                          {"risk_rejects", s.risk_rejects},
-                          {"no_range_days", s.no_range_days},
-                          {"requested", s.requested},
-                          {"bought", s.bought},
-                          {"sold", s.sold},
-                          {"expired", s.expired},
-                          {"range_high", s.has_range ? json(s.range_high.ticks) : json(nullptr)},
-                          {"range_low", s.has_range ? json(s.range_low.ticks) : json(nullptr)}};
+    json stats = json::array();
+    for (const Stat& stat : r.stats) {
+        stats.push_back({{"name", stat.name}, {"value", stat.value}, {"price", stat.price}});
     }
+    results["stats"] = stats;
     return results;
-}
-
-// A run's ORB stats, as results_json writes them.
-OrbStats orb_stats_from(const json& j)
-{
-    OrbStats s{.long_entries = j.at("long_entries").get<std::uint64_t>(),
-               .short_entries = j.at("short_entries").get<std::uint64_t>(),
-               .stops = j.at("stops").get<std::uint64_t>(),
-               .flattens = j.at("flattens").get<std::uint64_t>(),
-               .closing_orders = j.at("closing_orders").get<std::uint64_t>(),
-               .risk_rejects = j.at("risk_rejects").get<std::uint64_t>(),
-               .no_range_days = j.at("no_range_days").get<std::uint64_t>(),
-               .requested = j.at("requested").get<std::uint64_t>(),
-               .bought = j.at("bought").get<std::uint64_t>(),
-               .sold = j.at("sold").get<std::uint64_t>(),
-               .expired = j.at("expired").get<std::uint64_t>(),
-               .has_range = !j.at("range_high").is_null()};
-    if (s.has_range) {
-        s.range_high = Price{j.at("range_high").get<std::int64_t>()};
-        s.range_low = Price{j.at("range_low").get<std::int64_t>()};
-    }
-    return s;
 }
 
 RunResult results_from(const json& j)
@@ -651,8 +610,12 @@ RunResult results_from(const json& j)
     if (!r.partial) {
         r.digests = digests_from(j.at("digests"));
     }
-    if (const auto orb = j.find("orb"); orb != j.end()) {  // a run before the ORB has none
-        r.orb = orb_stats_from(*orb);
+    if (const auto stats = j.find("stats"); stats != j.end()) {  // a run before plugins has none
+        for (const json& stat : *stats) {
+            r.stats.push_back({.name = stat.at("name").get<std::string>(),
+                               .value = stat.at("value").get<double>(),
+                               .price = stat.at("price").get<bool>()});
+        }
     }
     const json& equity = j.at("equity");
     for (std::size_t i = 0; i < equity.at("t").size(); ++i) {
@@ -929,7 +892,7 @@ std::string encode_record(std::string_view session_id, const Record& r)
     case RecordKind::GenerationStart:
         j["kind"] = "generation_start";
         j["symbol"] = name(r.control.spec.ticker);
-        j["strategy"] = r.control.spec.strategy.kind;
+        j["strategy"] = r.control.spec.strategy.name.empty() ? "none" : r.control.spec.strategy.name;
         j["days"] = days_json(r.control.spec.days);
         j["window"] = r.control.spec.window;
         j["run_id"] = name(r.control.watch.run_id);
@@ -1019,50 +982,40 @@ bool decode_run_spec(std::string_view text, RunSpec& spec, std::string& field)
 
 std::string encode_strategies()
 {
-    const auto param = [](const char* name, const json& value, const json& min, const json& max) {
-        return json{{"name", name}, {"default", value}, {"min", min}, {"max", max}};
-    };
-    const RunSpec mm = default_spec(SessionStrategyKind::MarketMaker);
-    const RunSpec it = default_spec(SessionStrategyKind::ImbalanceTaker);
-    const RunSpec orb = default_spec(SessionStrategyKind::Orb);
-    const MarketMakerParams& m = mm.strategy.market_maker;
-    const ImbalanceTakerParams& i = it.strategy.imbalance;
-    const OrbParams& o = orb.strategy.orb;
-    const json strategies =
-        json::array({{{"kind", SessionStrategyKind::MarketMaker},
-                      {"params",
-                       json::array({param("quote_size", m.quote_size, 1, max_param),
-                                    param("max_position", m.max_position, 0, max_param),
-                                    param("requote_cooldown_ns", m.requote_cooldown_ns, 0, max_cooldown_ns),
-                                    param("improve_ticks", m.improve_ticks, 0, max_param)})},
-                      {"limits", limits_json(mm)}},
-                     {{"kind", SessionStrategyKind::ImbalanceTaker},
-                      {"params",
-                       json::array({param("threshold", i.threshold, 1, nullptr), param("clip", i.clip, 1, max_param),
-                                    param("max_position", i.max_position, 0, max_param),
-                                    param("cooldown_ns", i.cooldown_ns, 0, max_cooldown_ns)})},
-                      {"limits", limits_json(it)}},
-                     {{"kind", SessionStrategyKind::Orb},
-                      {"params",
-                       json::array({param("range_minutes", o.range_minutes, 1, max_range_minutes),
-                                    param("clip", o.clip, 1, max_param)})},
-                      {"limits", limits_json(orb)}}});
-    return text(
-        {{"strategies", strategies},
-         {"latency",
-          {{"order_ns", mm.latency.order_latency}, {"report_ns", mm.latency.report_latency}, {"max", max_latency_ns}}},
-         {"fees",
-          {{"maker", mm.fees.maker_fee_per_share},
-           {"taker", mm.fees.taker_fee_per_share},
-           {"min", -max_fee},
-           {"max", max_fee},
-           {"taker_min", 0}}},
-         {"limit_max", max_param},
-         {"windows",
-          json::array({{{"id", TradingWindow::Regular}, {"label", "Regular (feed session)"}},
-                       {{"id", TradingWindow::FullDay}, {"label", "Full day"}}})},
-         {"max_days", max_days},
-         {"max_queued", max_queued}});
+    json strategies = json::array();
+    for (const StrategyInfo& info : registered_strategies()) {
+        json params = json::array();
+        for (const ParamInfo& p : info.params) {
+            params.push_back({{"name", p.name},
+                              {"default", value_json(p.default_value)},
+                              {"min", value_json(p.min)},
+                              {"max", value_json(p.max)},
+                              {"help", p.help}});
+        }
+        strategies.push_back({{"kind", info.name},
+                              {"label", info.label},
+                              {"summary", info.summary},
+                              {"params", params},
+                              {"limits", limits_json(default_spec(strategy_spec(info.name)))}});
+    }
+    const RunSpec defaults = default_spec(StrategySpec{});
+    return text({{"strategies", strategies},
+                 {"latency",
+                  {{"order_ns", defaults.latency.order_latency},
+                   {"report_ns", defaults.latency.report_latency},
+                   {"max", max_latency_ns}}},
+                 {"fees",
+                  {{"maker", defaults.fees.maker_fee_per_share},
+                   {"taker", defaults.fees.taker_fee_per_share},
+                   {"min", -max_fee},
+                   {"max", max_fee},
+                   {"taker_min", 0}}},
+                 {"limit_max", max_param},
+                 {"windows",
+                  json::array({{{"id", TradingWindow::Regular}, {"label", "Regular (feed session)"}},
+                               {{"id", TradingWindow::FullDay}, {"label", "Full day"}}})},
+                 {"max_days", max_days},
+                 {"max_queued", max_queued}});
 }
 
 std::string encode_run(const Run& run)

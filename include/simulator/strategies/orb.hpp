@@ -18,15 +18,6 @@ struct OrbParams
     bool operator==(const OrbParams&) const = default;
 };
 
-// One day's regular session in event time, [open, close).
-struct OrbSession
-{
-    Timestamp open{0};
-    Timestamp close{0};
-
-    bool operator==(const OrbSession&) const = default;
-};
-
 // Decisions and shares counted apart: an accepted IOC is a decision whatever it fills.
 struct OrbStats
 {
@@ -59,7 +50,7 @@ private:
     static constexpr Timestamp flatten_before_close = 5 * minute;
 
     OrbParams params_;
-    std::span<const OrbSession> sessions_;  // oldest first
+    std::span<const DaySession> sessions_;  // oldest first
     OrbStats stats_;
     std::size_t day_{0};
     bool started_{false};
@@ -69,7 +60,7 @@ private:
     bool closing_{false};
     OrderId in_flight_{0};
 
-    const OrbSession& session() const noexcept
+    const DaySession& session() const noexcept
     {
         return sessions_[day_];
     }
@@ -199,7 +190,7 @@ private:
 
 public:
     // `sessions`: each day's, oldest first; the caller keeps them alive. With none, it never trades.
-    Orb(OrbParams params, std::span<const OrbSession> sessions) noexcept
+    Orb(OrbParams params, std::span<const DaySession> sessions) noexcept
         : params_(params), sessions_(sessions)
     {}
 

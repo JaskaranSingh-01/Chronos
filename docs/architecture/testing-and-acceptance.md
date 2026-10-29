@@ -89,6 +89,14 @@ named), **Pending** (not yet built or measured).
 | A33 | Per-event cost is known in distribution | **Partial** | batch-mean percentiles only ([Q8](README.md#open-questions-and-known-gaps)) |
 | A34 | Throughput is reproduced on a second machine or architecture | **Pending** | one machine measured |
 
+### Strategies
+
+| # | Criterion | Status | Evidence |
+|---|---|---|---|
+| A35 | A strategy added as one file is offered by the CLI, the server and the Lab with no other change | **Pass** | `strategies/trend_taker.cpp` was added alone and runs from `--strategy`, `/api/strategies` and the Lab's form |
+| A36 | Every plugin is deterministic and leaves the history digest of a plain replay | **Pass** | `StrategyRegistryTest`, over every registered strategy |
+| A37 | Moving the strategies behind the registry changes no result | **Pass** | the same fills, PnL and books for the three strategies on AAPL and the market maker on SPY, 2019-12-30; the golden digests unchanged |
+
 ## What a new change must pass
 
 Before a change is handed off: the full C++ suite, the formatting check over every file, the isolation and hot-path

@@ -159,14 +159,15 @@ change no downstream code.
 
 **Decision.** A strategy is a type with three callbacks (an applied market event, a delivered report, a timer), each
 given a context holding the read-only book, the read-only portfolio, the order gateway and the trade the event
-printed. It is a compile-time concept, so a headless backtest calls it directly. The server wraps the built-in
-strategies, or none, in one adapter type that it can swap at a command boundary.
+printed. It is a compile-time concept. The strategy registry ([D21](#d21-strategies-are-plugins-behind-a-registry))
+wraps each strategy behind a virtual interface, and the server holds one, or none, in an adapter it can swap at a
+command boundary.
 
-**Alternatives.** The UI design allowed virtual dispatch in the server's adapter, as cheap enough at UI speed; the
-implementation uses a closed set of types instead.
+**Alternatives.** The UI design allowed virtual dispatch in the server's adapter, as cheap enough at UI speed. The first
+implementation used a closed set of types instead, which D21 replaced.
 
 **Consequences.** A strategy cannot change history, read a wall clock, or see an event before the book has applied it
-([I6](README.md#the-invariants)). Adding a strategy to the server means adding it to the adapter's set. Manual orders
+([I6](README.md#the-invariants)). Adding a strategy means adding one file ([D21](#d21-strategies-are-plugins-behind-a-registry)). Manual orders
 from the terminal do not pass through the strategy interface: there is no "UI bridge" strategy. They go through the
 same order gateway, so they meet the same risk checks, latency and fill rules, and the command log records them as
 commands with their own lifecycle.
@@ -368,3 +369,38 @@ architecture kept the matching engine isolated, never connected to the historica
 
 **Decision.** Removed, with its tests. The execution simulator ([D2](#d2-the-fill-model)) is the only place simulated
 fills are decided.
+
+## D21. Strategies are plugins behind a registry
+
+**Status:** implemented (2026-10-29).
+
+**Context.** The user means to write several strategies. Adding the ORB had touched ten files outside the strategy
+itself: the CLI's flags, parsing, printing and JSON; the server's strategy enum, decoder, encoder, command log, default
+limits and results; the Lab's types. Every new strategy would repeat that.
+
+**Decision.** A strategy is a plugin: one file in `strategies/` that registers it with its name, label, summary,
+params (each a field of its params struct, with bounds and help), default risk limits, and optionally how to build it,
+its stats and a check of its params against the limits. The registry is the only list of strategies: the CLI's
+`--strategy` and `--param`, the server's decoder and `/api/strategies`, the command log, the Lab's results and the
+Lab's form all read it. A strategy runs behind `AnyStrategy`, whose callbacks are virtual. Every plugin is compiled
+into an object library linked into each executable, so its registration runs at start-up.
+
+**Alternatives.**
+
+- Keep the closed set of types: static dispatch, but each strategy edits the CLI, the server and the UI.
+- Load compiled strategies at run time from shared libraries: no rebuild, but an ABI to keep stable, a crashing
+  plugin taking the server down, and a saved run that cannot prove which plugin binary it ran.
+- Generate a variant of every plugin at build time: static dispatch with no edits, at the cost of code generation in
+  CMake; not needed while the virtual call costs nothing measurable.
+
+**Consequences.** One virtual call per callback: on SPY's full day the market maker's median went from 109.8 to
+108.4 ns an event and the imbalance taker's from 93.1 to 95.0, within the spread of 11 alternating runs, with every
+fill, PnL and book unchanged (the record is outside the repository, with the overnight work). A run's spec and the
+command log carry a strategy's name and every param, sorted by name; the log's protocol went to 4, and a log of
+protocol 3 is refused as written by another build. The CLI's strategy-specific flags became `--param NAME=VALUE`, and
+the market maker's name is `market_maker` everywhere. A new strategy needs a rebuild and a server restart.
+`StrategyRegistryTest` runs every plugin, so a new one is checked for determinism and for leaving history alone with
+no test of its own.
+
+**Preserve.** Nothing outside a plugin names a strategy. A plugin includes only the engine
+(`scripts/check-isolation.sh` scans `strategies/`).

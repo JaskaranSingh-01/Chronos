@@ -36,8 +36,10 @@ NASDAQ's public sample day, 2019-12-30: 8.25 GB, 268,744,780 messages, 8,906 sym
   as one thread.
 - **Backtests** through one deterministic event loop: constant order and report latencies, a fill model that tracks each
   simulated order's queue position among the historical orders and fills it by four explicit rules with a trade-price
-  guard, a portfolio with pre-trade risk limits and maker/taker fees. Three strategies: a market maker, an imbalance
-  taker and an opening range breakout.
+  guard, a portfolio with pre-trade risk limits and maker/taker fees.
+- **Takes strategies as plugins**: a strategy is one file in [`strategies/`](strategies/) that registers itself, and the
+  CLI, the server and the Lab's form pick it up with no other change ([docs/strategies.md](docs/strategies.md)). Four
+  ship: a market maker, an imbalance taker, an opening range breakout and the guide's example.
 - **Serves the Trading Terminal**: replay any symbol at 1× to Max, step, seek, across several days; a TradingView-style
   chart, the L3 book with your queue position, and an order ticket that trades against the historical queue.
 - **Serves the Strategy Lab**: run backtests from the browser, compare runs, verify a run against its recorded digests,
@@ -65,7 +67,7 @@ mkdir -p data/itch
 curl -fL 'https://emi.nasdaq.com/ITCH/Nasdaq%20ITCH/12302019.NASDAQ_ITCH50.gz' | gunzip > data/itch/12302019.NASDAQ_ITCH50.bin
 
 ./build/simulator replay data/itch/12302019.NASDAQ_ITCH50.bin --all --date 2019-12-30        # every book, the whole day
-./build/simulator backtest data/itch/12302019.NASDAQ_ITCH50.bin --symbol SPY --date 2019-12-30 --strategy mm
+./build/simulator backtest data/itch/12302019.NASDAQ_ITCH50.bin --symbol SPY --date 2019-12-30 --strategy market_maker
 ./build/chronos-serve --data data/itch                                                         # http://127.0.0.1:8080/
 ```
 
@@ -119,6 +121,7 @@ and lists the eight files to read first.
 | [Market data](docs/market-data.md) | the event contract, ITCH 5.0, the per-symbol store |
 | [Order book](docs/order-book.md) | the L3 book, allocation-free storage, the list and the ladder, invariants, digests |
 | [Backtesting](docs/backtesting.md) | the event loop, the fill model, risk and fees, the strategies |
+| [Writing a strategy](docs/strategies.md) | a strategy as a plugin: the template, its params, limits and stats, testing it |
 | [Performance](docs/performance.md) | the numbers, the profile, the method |
 | [Server](docs/server.md) | sessions, the command log, the Strategy Lab, the HTTP and WebSocket protocol, security |
 | [UI](docs/ui.md) | the Trading Terminal and the Strategy Lab, and how the page stays at 60 frames a second |

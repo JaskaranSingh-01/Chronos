@@ -15,6 +15,9 @@
 #include "chronos/server/itch_input.hpp"
 #include "simulator/cli/replay_args.hpp"
 #include "simulator/itch/itch_source.hpp"
+#include "simulator/strategies/imbalance_taker.hpp"
+#include "simulator/strategies/market_maker.hpp"
+#include "simulator/strategies/orb.hpp"
 #include "test_support.hpp"
 
 namespace simulator::server::test {
@@ -53,14 +56,25 @@ SessionConfig lab_config()
     return SessionConfig{.session_id = "test", .instrument = kEquity};
 }
 
-// The CLI's settings for `kind` on ACME over `days`.
-RunSpec acme(SessionStrategyKind kind, const DayList& days, TradingWindow window = TradingWindow::Regular)
+// The CLI's settings for the registered `strategy` on ACME over `days`.
+RunSpec acme(std::string_view strategy, const DayList& days, TradingWindow window = TradingWindow::Regular)
 {
-    RunSpec spec = default_spec(kind);
+    RunSpec spec = default_spec(strategy_spec(strategy));
     spec.ticker = ticker("ACME");
     spec.days = days;
     spec.window = window;
     return spec;
+}
+
+// The strategy's own stat `name` in `r`, or -1.
+double stat(const RunResult& r, std::string_view name)
+{
+    for (const Stat& s : r.stats) {
+        if (s.name == name) {
+            return s.value;
+        }
+    }
+    return -1;
 }
 
 RunResult run(const RunSpec& spec, std::span<const DayHandle> days, bool hash_as_read = false,
@@ -91,9 +105,7 @@ TEST(BacktestTest, AOneDayFullDayRunEqualsTheHeadlessBacktestForBothStrategies)
     const Timestamp midnight = session_midnight_ns(2019y / 12 / 30, -5h);
     for (const bool mm : {true, false}) {
         SCOPED_TRACE(mm ? "market maker" : "imbalance");
-        const RunResult r = run(acme(mm ? SessionStrategyKind::MarketMaker : SessionStrategyKind::ImbalanceTaker,
-                                     kMonday, TradingWindow::FullDay),
-                                days);
+        const RunResult r = run(acme(mm ? "market_maker" : "imbalance", kMonday, TradingWindow::FullDay), days);
 
         InstrumentRegistry registry{1};
         ItchSource source{monday.bytes(),
@@ -101,32 +113,28 @@ TEST(BacktestTest, AOneDayFullDayRunEqualsTheHeadlessBacktestForBothStrategies)
                           registry};
         MarketBook book{0, std::size_t{1} << 20};
         ExecutionSimulator execution{midnight};
-        Portfolio portfolio{
-            source.instrument(),
-            {.max_position = b.max_position,
-             .max_order_quantity = Quantity{mm ? b.quote_size : b.clip},
-             .max_open_orders = default_max_open_orders(mm ? StrategyKind::MarketMaker : StrategyKind::Imbalance)},
-            {.maker_fee_per_share = b.maker_fee_ticks,
-             .taker_fee_per_share = static_cast<std::int64_t>(b.taker_fee_ticks)}};
+        // The strategies' own limits at their default params: 500 shares, 100 a quote or clip, two quotes or one IOC.
+        Portfolio portfolio{source.instrument(),
+                            {.max_position = 500, .max_order_quantity = Quantity{100}, .max_open_orders = mm ? 2u : 1u},
+                            {.maker_fee_per_share = b.maker_fee_ticks,
+                             .taker_fee_per_share = static_cast<std::int64_t>(b.taker_fee_ticks)}};
         const LatencyConfig latency{.order_latency = static_cast<Timestamp>(b.order_latency_ns),
                                     .report_latency = static_cast<Timestamp>(b.report_latency_ns)};
         const ReplayOptions options{.session_midnight = midnight};
         LoopReport report;
+        std::uint64_t strategy_fills = 0;
         if (mm) {
-            MarketMaker strategy{{.quote_size = b.quote_size,
-                                  .max_position = b.max_position,
-                                  .requote_cooldown_ns = static_cast<Timestamp>(b.requote_ms) * 1'000'000}};
+            MarketMaker strategy{MarketMakerParams{}};
             report = EventLoop<MarketMaker>{source, book, execution, portfolio, strategy, latency, options}.run();
+            strategy_fills = strategy.stats().fills;
         } else {
-            ImbalanceTaker strategy{{.threshold = b.threshold,
-                                     .clip = b.clip,
-                                     .max_position = b.max_position,
-                                     .cooldown_ns = static_cast<Timestamp>(b.cooldown_ms) * 1'000'000}};
+            ImbalanceTaker strategy{ImbalanceTakerParams{}};
             report = EventLoop<ImbalanceTaker>{source, book, execution, portfolio, strategy, latency, options}.run();
+            strategy_fills = strategy.stats().fills;
         }
 
         EXPECT_GT(mm ? r.maker_fills : r.taker_fills, 0u);
-        EXPECT_FALSE(r.orb.has_value());
+        EXPECT_EQ(stat(r, "Fills"), static_cast<double>(strategy_fills));  // its own stats, through the registry
         EXPECT_EQ(r.pnl, portfolio.pnl());
         EXPECT_EQ(r.fees, portfolio.fees());
         EXPECT_EQ(r.position, portfolio.position());
@@ -169,8 +177,8 @@ TEST(BacktestTest, AnOrbRunEqualsTheHeadlessBacktest)
     Lab lab{"backtest-orb"};
     lab.write("12302019.NASDAQ_ITCH50.bin", day.bytes());
     const std::vector<DayHandle> days = lab.days();
-    RunSpec spec = acme(SessionStrategyKind::Orb, kMonday, TradingWindow::FullDay);
-    spec.strategy.orb.range_minutes = 1;
+    RunSpec spec = acme("orb", kMonday, TradingWindow::FullDay);
+    spec.strategy = strategy_spec("orb", std::vector<Param>{{"range_minutes", 1}});
     const RunResult r = run(spec, days);
 
     const BacktestArgs b{};
@@ -180,13 +188,10 @@ TEST(BacktestTest, AnOrbRunEqualsTheHeadlessBacktest)
                       ItchSourceConfig{.ticker = "ACME", .session_date = 2019y / 12 / 30, .utc_offset = -5h}, registry};
     MarketBook book{0, std::size_t{1} << 20};
     ExecutionSimulator execution{midnight};
-    Portfolio portfolio{source.instrument(),
-                        {.max_position = b.max_position,
-                         .max_order_quantity = Quantity{b.clip},
-                         .max_open_orders = default_max_open_orders(StrategyKind::Orb)},
-                        {}};
-    const OrbSession session{.open = midnight + RTH_OPEN_NS, .close = midnight + RTH_CLOSE_NS};
-    Orb strategy{{.range_minutes = 1, .clip = b.clip}, {&session, 1}};
+    Portfolio portfolio{
+        source.instrument(), {.max_position = 500, .max_order_quantity = Quantity{100}, .max_open_orders = 1}, {}};
+    const DaySession session{.open = midnight + RTH_OPEN_NS, .close = midnight + RTH_CLOSE_NS};
+    Orb strategy{{.range_minutes = 1, .clip = 100}, {&session, 1}};
     EventLoop<Orb>{source,
                    book,
                    execution,
@@ -197,8 +202,11 @@ TEST(BacktestTest, AnOrbRunEqualsTheHeadlessBacktest)
                    {.session_midnight = midnight}}
         .run();
 
-    ASSERT_TRUE(r.orb.has_value());
-    EXPECT_EQ(*r.orb, strategy.stats());
+    EXPECT_EQ(stat(r, "Long entries"), 1);
+    EXPECT_EQ(stat(r, "Stops"), 1);
+    EXPECT_EQ(stat(r, "Short entries"), 1);
+    EXPECT_EQ(stat(r, "Flattens"), 1);
+    EXPECT_EQ(stat(r, "Range high"), static_cast<double>(strategy.stats().range_high.ticks));
     EXPECT_EQ(strategy.stats().long_entries, 1u);
     EXPECT_EQ(strategy.stats().stops, 1u);
     EXPECT_EQ(strategy.stats().short_entries, 1u);
@@ -214,7 +222,7 @@ TEST(BacktestTest, AnOrbRunEqualsTheHeadlessBacktest)
     RunSpec regular = spec;
     regular.window = TradingWindow::Regular;
     const RunResult again = run(regular, days);
-    EXPECT_EQ(again.orb, r.orb);
+    EXPECT_EQ(again.stats, r.stats);
     EXPECT_EQ(again.pnl, r.pnl);
 }
 
@@ -226,13 +234,13 @@ TEST(BacktestTest, TheFixtureRunsDigestsAreGolden)
     lab.write("12302019.NASDAQ_ITCH50.bin", lab_day(2).bytes());
     const std::vector<DayHandle> days = lab.days();
     const std::span<const DayHandle> monday = std::span{days}.last(1);
-    EXPECT_EQ(hex(run(acme(SessionStrategyKind::MarketMaker, kMonday), monday).digests),
+    EXPECT_EQ(hex(run(acme("market_maker", kMonday), monday).digests),
               "c7eb451b0b743f7d 6ae9bf90f1f85c85 1c4e84dc022da0ee");
-    EXPECT_EQ(hex(run(acme(SessionStrategyKind::ImbalanceTaker, kMonday), monday).digests),
+    EXPECT_EQ(hex(run(acme("imbalance", kMonday), monday).digests),
               "c7eb451b0b743f7d 84d6e3d50e269aaf 0bbc3c95e9d96772");
-    EXPECT_EQ(hex(run(acme(SessionStrategyKind::MarketMaker, kFridayAndMonday), days).digests),
+    EXPECT_EQ(hex(run(acme("market_maker", kFridayAndMonday), days).digests),
               "c7eb451b0b743f7d d623951ea5a8287b 7c3a3dc06d7a69d0");
-    EXPECT_EQ(hex(run(acme(SessionStrategyKind::ImbalanceTaker, kFridayAndMonday), days).digests),
+    EXPECT_EQ(hex(run(acme("imbalance", kFridayAndMonday), days).digests),
               "c7eb451b0b743f7d 0a99d7d61f572c28 6fb2f87e540e3c7c");
 }
 
@@ -244,7 +252,7 @@ TEST(BacktestTest, TheDaysHoursAndCurveAddUpToThePnlWithOneSamplePerEventSecond)
     lab.write("12272019.NASDAQ_ITCH50.bin", lab_day(1).bytes());
     lab.write("12302019.NASDAQ_ITCH50.bin", lab_day(2).bytes());
     const std::vector<DayHandle> days = lab.days();
-    const RunSpec spec = acme(SessionStrategyKind::MarketMaker, kFridayAndMonday);
+    const RunSpec spec = acme("market_maker", kFridayAndMonday);
     const RunResult r = run(spec, days);
 
     ASSERT_EQ(r.by_day.size(), 2u);
@@ -305,8 +313,9 @@ TEST(BacktestTest, TheFillListStopsAtItsCapButTheCountersCountEveryFill)
     }
     Lab lab{"backtest-cap"};
     lab.write("12302019.NASDAQ_ITCH50.bin", itch.bytes());
-    RunSpec spec = acme(SessionStrategyKind::ImbalanceTaker, kMonday, TradingWindow::FullDay);
-    spec.strategy.imbalance = {.threshold = 3.0, .clip = 1, .max_position = 1'000'000'000, .cooldown_ns = 0};
+    RunSpec spec = acme("imbalance", kMonday, TradingWindow::FullDay);
+    spec.strategy = strategy_spec("imbalance",
+                                  std::vector<Param>{{"clip", 1}, {"max_position", 1'000'000'000}, {"cooldown_ns", 0}});
     spec.limits = default_limits(spec.strategy);
     const RunResult r = run(spec, lab.days());
 
@@ -331,7 +340,7 @@ TEST(BacktestTest, ACancelLandsBeforeTheNextEventAndAFailedRunKeepsItsAggregates
     lab.write("12272019.NASDAQ_ITCH50.bin", lab_day(1).bytes());
     lab.write("12302019.NASDAQ_ITCH50.bin", monday.bytes().first(monday.bytes().size() - 5));  // 'M' cut off
     const std::vector<DayHandle> days = lab.days();
-    const RunSpec spec = acme(SessionStrategyKind::MarketMaker, kFridayAndMonday);
+    const RunSpec spec = acme("market_maker", kFridayAndMonday);
 
     const std::atomic<bool> cancel{true};
     std::atomic<std::uint64_t> bytes_read{0};
@@ -347,10 +356,8 @@ TEST(BacktestTest, ACancelLandsBeforeTheNextEventAndAFailedRunKeepsItsAggregates
     EXPECT_TRUE(failed.partial);
     EXPECT_EQ(failed.reason, "source_error on 2019-12-30: TruncatedMessage");
     ASSERT_EQ(failed.by_day.size(), 2u);
-    EXPECT_EQ(
-        failed.by_day[0],
-        run(acme(SessionStrategyKind::MarketMaker, {.day = {2019y / 12 / 27}, .count = 1}), std::span{days}.first(1))
-            .by_day[0]);
+    EXPECT_EQ(failed.by_day[0],
+              run(acme("market_maker", {.day = {2019y / 12 / 27}, .count = 1}), std::span{days}.first(1)).by_day[0]);
     EXPECT_GT(failed.by_day[1].fills, 0u);
     EXPECT_FALSE(failed.equity.empty());
 
@@ -368,12 +375,11 @@ TEST(BacktestTest, ACancelLandsBeforeTheNextEventAndAFailedRunKeepsItsAggregates
     more.write("12302019.NASDAQ_ITCH50.bin", backwards.bytes());
     more.write("12312019.NASDAQ_ITCH50.bin", crossed.bytes());
     const std::vector<DayHandle> invalid = more.days();
-    EXPECT_EQ(run(acme(SessionStrategyKind::MarketMaker, kMonday), std::span{invalid}.first(1)).reason,
-              "out_of_order_timestamp");
+    EXPECT_EQ(run(acme("market_maker", kMonday), std::span{invalid}.first(1)).reason, "out_of_order_timestamp");
     SessionConfig checked = lab_config();
     checked.check_invariants_every = 1;
-    const RunResult crossing = run(acme(SessionStrategyKind::MarketMaker, {.day = {2019y / 12 / 31}, .count = 1}),
-                                   std::span{invalid}.last(1), false, checked);
+    const RunResult crossing =
+        run(acme("market_maker", {.day = {2019y / 12 / 31}, .count = 1}), std::span{invalid}.last(1), false, checked);
     EXPECT_EQ(crossing.reason, "invariant_violation");
     EXPECT_TRUE(crossing.partial);
     EXPECT_EQ(crossing.digests, Digests{});
@@ -387,7 +393,7 @@ TEST(BacktestTest, TheSameRunTwiceGivesTheSameResultsAndHashAsReadAddsTheDaysHas
     lab.write("12272019.NASDAQ_ITCH50.bin", lab_day(1).bytes());
     lab.write("12302019.NASDAQ_ITCH50.bin", lab_day(2).bytes());
     const std::vector<DayHandle> days = lab.days();
-    const RunSpec spec = acme(SessionStrategyKind::ImbalanceTaker, kFridayAndMonday);
+    const RunSpec spec = acme("imbalance", kFridayAndMonday);
     RunResult first = run(spec, days);
     RunResult second = run(spec, days, true);
     EXPECT_EQ(second.hashes, (std::vector<std::string>{days[0]->hash, days[1]->hash}));
@@ -414,7 +420,7 @@ TEST(BacktestTest, TheLastDaysCloseCancelsTheQuotesWhenItsInputEndsFirst)
         .system_event(0, 16 * kHour, 'M');
     Lab lab{"backtest-close"};
     lab.write("12302019.NASDAQ_ITCH50.bin", itch.bytes());
-    const RunResult r = run(acme(SessionStrategyKind::MarketMaker, kMonday), lab.days());
+    const RunResult r = run(acme("market_maker", kMonday), lab.days());
 
     ASSERT_EQ(r.fills.size(), 1u);
     EXPECT_EQ(r.fills[0].rule, FillCause::RuleAExecute);

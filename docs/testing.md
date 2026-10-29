@@ -4,14 +4,14 @@
 
 | Suite | Count | What |
 |---|---|---|
-| `simulator_tests` | 513 pass, 6 skip | the engine: types, ITCH framing and decoding, sources, the book, pools and indices, the ladder, the pipeline, the event loop, the fill model, the portfolio, the strategies, the CLI's arguments |
+| `simulator_tests` | 518 pass, 6 skip | the engine: types, ITCH framing and decoding, sources, the book, pools and indices, the ladder, the pipeline, the event loop, the fill model, the portfolio, the strategies and their registry, the CLI's arguments |
 | `chronos_server_tests` | 156 | the server: protocol schemas, peers and resync, sessions and generations, the command log and its reproduction, the store's builder and reader, the Lab, Watch, security |
 | `alloc_counter_test` | 3 | the counting `operator new` the replay's zero-allocation figure relies on |
 | CLI tests | 19 | `simulator` and `chronos-serve` run as processes: exit codes, usage, a store shared between them |
-| Vitest (`web/`) | 121 | the stores' reducers, candles and fill marks, the depth ladder, the PnL curve, symbol matching, order checks, the Lab's model and formatting |
+| Vitest (`web/`) | 122 | the stores' reducers, candles and fill marks, the depth ladder, the PnL curve, symbol matching, order checks, the Lab's model and formatting |
 | Playwright (`web/e2e/`) | 13, plus 2 measurement specs | the terminal and the Lab in Chromium against a real `chronos-serve` |
 
-`ctest` runs 698 tests: every GoogleTest case, the CLI tests and a build-info test. Five of the 6 skips are the
+`ctest` runs 703 tests: every GoogleTest case, the CLI tests and a build-info test. Five of the 6 skips are the
 real-data tests, which need a day file; the sixth is the conformance suite's error check, which does not apply to
 `VectorSource`.
 
@@ -25,6 +25,10 @@ cmake -S . -B build && cmake --build build -j && ctest --test-dir build
 - **Byte-exact ITCH.** `ItchBuilderTest.*MatchesRealNasdaqBytes`: the test-side ITCH builder reproduces real NASDAQ
   messages byte for byte, so every ITCH test runs on the real wire layout.
 - **Every source behaves.** `SourceConformanceTest` runs one contract over `VectorSource`, `CsvSource` and `ItchSource`.
+- **Every strategy plugin behaves.** `StrategyRegistryTest` runs every registered strategy, so a new plugin with no test
+  of its own is still checked: a sound declaration (its name, its params' defaults within their bounds, positive
+  limits that its defaults can trade under), two identical runs over a synthetic market, and the history digest of a
+  plain replay.
 - **The book against a model.** `BookModelTest` applies a random operation stream to the list, to the ladder at two
   steps and to a plain `std::map` model, and compares the books after every operation. `MarketBookTest` runs 10,000
   seeded random events, valid and invalid, checking every invariant after each.

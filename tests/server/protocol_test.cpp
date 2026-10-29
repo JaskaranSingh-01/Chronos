@@ -78,20 +78,22 @@ TEST(ProtocolTest, DecodesEveryClientMessage)
     const Command mm =
         decoded(client_message("attach", R"(,"strategy":"market_maker","params":{"quote_size":50})")).command;
     EXPECT_EQ(mm.type, CommandType::Attach);
-    EXPECT_EQ(mm.strategy.kind, SessionStrategyKind::MarketMaker);
-    EXPECT_EQ(mm.strategy.market_maker, (MarketMakerParams{.quote_size = 50}));  // the rest keep their defaults
+    // The rest keep their defaults.
+    EXPECT_EQ(mm.strategy, strategy_spec("market_maker", std::vector<Param>{{"quote_size", 50}}));
     const Command taker =
         decoded(client_message("attach", R"(,"strategy":"imbalance","params":{"threshold":1.5,"clip":20})")).command;
-    EXPECT_EQ(taker.strategy.imbalance, (ImbalanceTakerParams{.threshold = 1.5, .clip = 20}));
-    EXPECT_EQ(decoded(client_message("attach", R"(,"strategy":"imbalance")")).command.strategy.imbalance,
-              ImbalanceTakerParams{});
-    EXPECT_EQ(decoded(client_message("attach", R"(,"strategy":"market_maker")")).command.strategy.market_maker,
-              MarketMakerParams{});
+    EXPECT_EQ(taker.strategy, strategy_spec("imbalance", std::vector<Param>{{"threshold", 1.5}, {"clip", 20}}));
+    // An integer for a real param is that number.
+    EXPECT_EQ(decoded(client_message("attach", R"(,"strategy":"imbalance","params":{"threshold":2})")).command.strategy,
+              strategy_spec("imbalance", std::vector<Param>{{"threshold", 2.0}}));
+    EXPECT_EQ(decoded(client_message("attach", R"(,"strategy":"imbalance")")).command.strategy,
+              strategy_spec("imbalance"));
+    EXPECT_EQ(decoded(client_message("attach", R"(,"strategy":"market_maker")")).command.strategy,
+              strategy_spec("market_maker"));
     const Command orb =
         decoded(client_message("attach", R"(,"strategy":"orb","params":{"range_minutes":30,"clip":50})")).command;
-    EXPECT_EQ(orb.strategy.kind, SessionStrategyKind::Orb);
-    EXPECT_EQ(orb.strategy.orb, (OrbParams{.range_minutes = 30, .clip = 50}));
-    EXPECT_EQ(decoded(client_message("attach", R"(,"strategy":"orb")")).command.strategy.orb, OrbParams{});
+    EXPECT_EQ(orb.strategy, strategy_spec("orb", std::vector<Param>{{"range_minutes", 30}, {"clip", 50}}));
+    EXPECT_EQ(decoded(client_message("attach", R"(,"strategy":"orb")")).command.strategy, strategy_spec("orb"));
     EXPECT_EQ(decoded(client_message("detach")).command.type, CommandType::Detach);
 
     const ClientMessage resync = decoded(client_message("resync", R"(,"from_report_seq":42)"));
@@ -486,11 +488,10 @@ TEST(ProtocolTest, EncodesSnapshotsRecordsAndReplies)
                           R"("control_seq":9,"state":"seeking"})"));
     const json start = json::parse(encode_record(
         "s1",
-        Record{
-            .seq = 8,
-            .generation = 4,
-            .kind = RecordKind::GenerationStart,
-            .control = {.spec = {.ticker = ticker("MSFT"), .strategy = {.kind = SessionStrategyKind::MarketMaker}}}}));
+        Record{.seq = 8,
+               .generation = 4,
+               .kind = RecordKind::GenerationStart,
+               .control = {.spec = {.ticker = ticker("MSFT"), .strategy = strategy_spec("market_maker")}}}));
     EXPECT_EQ(start["kind"], "generation_start");
     EXPECT_EQ(start["symbol"], "MSFT");
     EXPECT_EQ(start["strategy"], "market_maker");
@@ -539,8 +540,7 @@ TEST(ProtocolTest, EncodesTheGenerationsSpecAndTheDayASourceErrorIsOn)
                        .latency = {.order_latency = 50'000, .report_latency = 40'000},
                        .fees = {.maker_fee_per_share = -20, .taker_fee_per_share = 30},
                        .limits = {.max_position = 500, .max_order_quantity = Quantity{100}, .max_open_orders = 2},
-                       .strategy = {.kind = SessionStrategyKind::MarketMaker,
-                                    .market_maker = {.quote_size = 100, .max_position = 500}}};
+                       .strategy = strategy_spec("market_maker")};
     const json start = json::parse(encode_record(
         "s1", Record{.seq = 8, .generation = 4, .kind = RecordKind::GenerationStart, .control = {.spec = spec}}));
     EXPECT_EQ(start["days"], json::parse(R"(["2019-12-27","2019-12-30"])"));
@@ -597,7 +597,7 @@ TEST(ProtocolTest, RefusesAnOrbRunWhoseClipIsAboveThePositionLimit)
     const RunSpec spec = run_spec(
         R"({"symbol":"SPY","days":["2019-12-30"],"strategy":"orb","params":{"clip":600},"limits":{"max_position":600,)"
         R"("max_order_quantity":600}})");
-    EXPECT_EQ(spec.strategy.orb.clip, 600u);
+    EXPECT_EQ(*find_param(spec.strategy.params, "clip"), ParamValue{600});
     const std::string order_limit =
         R"({"symbol":"SPY","days":["2019-12-30"],"strategy":"orb","limits":{"max_order_quantity":50}})";
     EXPECT_EQ(bad_field(order_limit), "params.clip");  // the default clip of 100, above the order limit
@@ -608,7 +608,7 @@ TEST(ProtocolTest, RefusesAnOrbRunWhoseClipIsAboveThePositionLimit)
 TEST(ProtocolTest, DecodesARunSpecWithTheClisDefaults)
 {
     using namespace std::chrono_literals;
-    RunSpec expected = default_spec(SessionStrategyKind::MarketMaker);
+    RunSpec expected = default_spec(strategy_spec("market_maker"));
     expected.ticker = ticker("SPY");
     expected.days = {.day = {2019y / 12 / 27, 2019y / 12 / 30}, .count = 2};
     const RunSpec minimal =
@@ -619,7 +619,7 @@ TEST(ProtocolTest, DecodesARunSpecWithTheClisDefaults)
     EXPECT_EQ(minimal.latency.order_latency, 50'000);
     EXPECT_EQ(minimal.limits.max_open_orders, 2u);
 
-    RunSpec expected_imbalance = default_spec(SessionStrategyKind::ImbalanceTaker);
+    RunSpec expected_imbalance = default_spec(strategy_spec("imbalance"));
     expected_imbalance.ticker = ticker("SPY");
     expected_imbalance.days = {.day = {2019y / 12 / 30}, .count = 1};
     const RunSpec imbalance = run_spec(R"({"symbol":"SPY","days":["2019-12-30"],"strategy":"imbalance"})");
@@ -631,7 +631,7 @@ TEST(ProtocolTest, DecodesARunSpecWithTheClisDefaults)
                                    R"("params":{"quote_size":200,"max_position":800}})");
     EXPECT_EQ(sized.limits.max_order_quantity, Quantity{200});  // as --quote-size 200 --max-position 800 set them
     EXPECT_EQ(sized.limits.max_position, 800);
-    EXPECT_EQ(sized.strategy.market_maker.requote_cooldown_ns, 100'000'000);
+    EXPECT_EQ(*find_param(sized.strategy.params, "requote_cooldown_ns"), ParamValue{100'000'000});
 
     const RunSpec full = run_spec(
         R"({"symbol":"AAPL","days":["2019-12-30"],"strategy":"imbalance",)"
@@ -639,9 +639,10 @@ TEST(ProtocolTest, DecodesARunSpecWithTheClisDefaults)
         R"("latency":{"order_ns":1000000000000,"report_ns":0},"fees":{"maker":-1000000,"taker":1000000},)"
         R"("limits":{"max_position":1000000000,"max_order_quantity":7,"max_open_orders":3},"window":"full_day"})");
     EXPECT_EQ(name(full.ticker), "AAPL");
-    EXPECT_EQ(full.strategy.kind, SessionStrategyKind::ImbalanceTaker);
-    EXPECT_EQ(full.strategy.imbalance,
-              (ImbalanceTakerParams{.threshold = 2.5, .clip = 50, .max_position = 300, .cooldown_ns = 0}));
+    EXPECT_EQ(
+        full.strategy,
+        strategy_spec("imbalance",
+                      std::vector<Param>{{"threshold", 2.5}, {"clip", 50}, {"max_position", 300}, {"cooldown_ns", 0}}));
     EXPECT_EQ(full.latency.order_latency, 1'000'000'000'000);
     EXPECT_EQ(full.latency.report_latency, 0);
     EXPECT_EQ(full.fees.maker_fee_per_share, -1'000'000);
@@ -703,20 +704,27 @@ TEST(ProtocolTest, RefusesABadRunSpecNamingItsField)
 TEST(ProtocolTest, EncodesTheStrategiesWithTheirDefaultsAndCaps)
 {
     const json j = json::parse(encode_strategies());
-    ASSERT_EQ(j["strategies"].size(), 3u);
-    const json& mm = j["strategies"][0];
+    ASSERT_EQ(j["strategies"].size(), registered_strategies().size());  // by name: each plugin, none special-cased
+    const json& imbalance = j["strategies"][0];
+    EXPECT_EQ(imbalance["kind"], "imbalance");
+    EXPECT_EQ(imbalance["label"], "Imbalance");
+    const json threshold = imbalance["params"][0];
+    EXPECT_EQ(threshold["name"], "threshold");
+    EXPECT_EQ(threshold["default"], 3.0);
+    EXPECT_EQ(threshold["min"], 1.0);
+    EXPECT_TRUE(threshold["max"].is_null());  // no cap
+    EXPECT_EQ(imbalance["limits"]["max_open_orders"], 1);
+    const json& mm = j["strategies"][1];
     EXPECT_EQ(mm["kind"], "market_maker");
-    EXPECT_EQ(mm["params"][0], json::parse(R"({"name":"quote_size","default":100,"min":1,"max":1000000000})"));
+    EXPECT_EQ(mm["params"][0],
+              json::parse(R"({"name":"quote_size","default":100,"min":1,"max":1000000000,)"
+                          R"("help":"shares per quote"})"));
     EXPECT_EQ(mm["params"][2]["default"], 100'000'000);
     EXPECT_EQ(mm["limits"], json::parse(R"({"max_position":500,"max_order_quantity":100,"max_open_orders":2})"));
-    const json& imbalance = j["strategies"][1];
-    EXPECT_EQ(imbalance["kind"], "imbalance");
-    EXPECT_EQ(imbalance["params"][0], json::parse(R"({"name":"threshold","default":3.0,"min":1,"max":null})"));
-    EXPECT_EQ(imbalance["limits"]["max_open_orders"], 1);
     const json& orb = j["strategies"][2];
     EXPECT_EQ(orb["kind"], "orb");
-    EXPECT_EQ(orb["params"][0], json::parse(R"({"name":"range_minutes","default":15,"min":1,"max":390})"));
-    EXPECT_EQ(orb["params"][1], json::parse(R"({"name":"clip","default":100,"min":1,"max":1000000000})"));
+    EXPECT_EQ(orb["params"][0]["max"], 390);
+    EXPECT_EQ(orb["params"][1]["name"], "clip");
     EXPECT_EQ(orb["limits"], json::parse(R"({"max_position":500,"max_order_quantity":100,"max_open_orders":1})"));
     EXPECT_EQ(j["latency"], json::parse(R"({"order_ns":50000,"report_ns":50000,"max":1000000000000})"));
     EXPECT_EQ(j["fees"], json::parse(R"({"maker":0,"taker":0,"min":-1000000,"max":1000000,"taker_min":0})"));
@@ -772,23 +780,15 @@ TEST(ProtocolTest, ARunDocumentReadsBackAsItWasWritten)
                       .truncated = true};
     results.fills_by[0][2] = 1;
     results.anomalies_by[3][1] = 2;
-    results.orb = OrbStats{.long_entries = 1,
-                           .stops = 1,
-                           .closing_orders = 2,
-                           .requested = 200,
-                           .bought = 100,
-                           .sold = 100,
-                           .has_range = true,
-                           .range_high = Price{100'500},
-                           .range_low = Price{99'800}};
-    RunSpec spec = default_spec(SessionStrategyKind::MarketMaker);
+    results.stats = {{"Long entries", 1}, {"Range high", 100'500, true}, {"Average", 2.5}};
+    RunSpec spec = default_spec(strategy_spec("market_maker"));
     spec.ticker = ticker("ACME");
     spec.days = {.day = {2019y / 12 / 30}, .count = 1};
     spec.latency = {.order_latency = 123'456, .report_latency = 7};
     spec.fees = {.maker_fee_per_share = -2, .taker_fee_per_share = 3};
     spec.limits.max_open_orders = 4;
     spec.window = TradingWindow::FullDay;
-    spec.strategy.market_maker.improve_ticks = 2;
+    spec.strategy = strategy_spec("market_maker", std::vector<Param>{{"improve_ticks", 2}});
     server::Run run{.id = "20261018T101500Z-9c2e41d07ab35f18",
                     .state = RunState::Completed,
                     .warning = "not saved: No space left on device",
@@ -822,7 +822,7 @@ TEST(ProtocolTest, ARunDocumentReadsBackAsItWasWritten)
     EXPECT_EQ(written["state"], "completed");
     EXPECT_EQ(written["results"]["digests"]["book"], "cbf29ce484222325");
     EXPECT_EQ(written["results"]["fills"], 2);
-    EXPECT_EQ(written["results"]["orb"]["range_high"], 100'500);
+    EXPECT_EQ(written["results"]["stats"][1], json::parse(R"({"name":"Range high","value":100500.0,"price":true})"));
     EXPECT_EQ(written["results"]["equity"]["t"], json::parse("[1577716201,1577716202]"));
     EXPECT_EQ(written["results"]["by_hour"], json::parse(R"({"hour":[9],"pnl":[-200]})"));
     EXPECT_EQ(written["results"]["attribution"]["fills"][0], json::parse("[0,0,1,0,0]"));

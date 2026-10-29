@@ -48,37 +48,13 @@ std::string failure(const ReplayReport& replay, std::span<const DayHandle> days,
 
 RiskLimits default_limits(const StrategySpec& strategy)
 {
-    switch (strategy.kind) {
-    case SessionStrategyKind::MarketMaker:
-        return {.max_position = strategy.market_maker.max_position,
-                .max_order_quantity = Quantity{strategy.market_maker.quote_size},
-                .max_open_orders = default_max_open_orders(StrategyKind::MarketMaker)};
-    case SessionStrategyKind::Orb:
-        return {.max_position = BacktestArgs{}.max_position,
-                .max_order_quantity = Quantity{strategy.orb.clip},
-                .max_open_orders = default_max_open_orders(StrategyKind::Orb)};
-    case SessionStrategyKind::None:
-    case SessionStrategyKind::ImbalanceTaker:
-        break;
-    }
-    return {.max_position = strategy.imbalance.max_position,
-            .max_order_quantity = Quantity{strategy.imbalance.clip},
-            .max_open_orders = default_max_open_orders(StrategyKind::Imbalance)};
+    const StrategyInfo* info = find_strategy(strategy.name);
+    return info != nullptr ? info->limits(strategy.params) : RiskLimits{};
 }
 
-RunSpec default_spec(SessionStrategyKind kind)
+RunSpec default_spec(const StrategySpec& strategy)
 {
     const BacktestArgs cli{};
-    const StrategySpec strategy{
-        .kind = kind,
-        .market_maker = {.quote_size = cli.quote_size,
-                         .max_position = cli.max_position,
-                         .requote_cooldown_ns = static_cast<Timestamp>(cli.requote_ms) * 1'000'000},
-        .imbalance = {.threshold = cli.threshold,
-                      .clip = cli.clip,
-                      .max_position = cli.max_position,
-                      .cooldown_ns = static_cast<Timestamp>(cli.cooldown_ms) * 1'000'000},
-        .orb = {.range_minutes = cli.range_minutes, .clip = cli.clip}};
     return RunSpec{.latency = {.order_latency = static_cast<Timestamp>(cli.order_latency_ns),
                                .report_latency = static_cast<Timestamp>(cli.report_latency_ns)},
                    .fees = {.maker_fee_per_share = cli.maker_fee_ticks,
@@ -165,15 +141,16 @@ RunResult backtest(const SessionConfig& config, const RunSpec& spec, std::span<c
         const bool stepped = step(g.loop).ok;
         drain();
         bytes_read.store(source.position(), std::memory_order_relaxed);
-        if (!stepped) {
+        if (!stepped || !g.strategy.error().empty()) {
             break;
         }
         second = clear ? second : next / second_ns;
     }
     const ReplayReport& replay = g.loop.report().replay;
-    r.cancelled =
-        cancel.load(std::memory_order_relaxed) && replay.succeeded() && g.loop.peek(next) == PeekStatus::Event;
-    if (!r.cancelled) {
+    const bool stopped = !g.strategy.error().empty();  // a script's error
+    r.cancelled = !stopped && cancel.load(std::memory_order_relaxed) && replay.succeeded() &&
+        g.loop.peek(next) == PeekStatus::Event;
+    if (!r.cancelled && !stopped) {
         finish(g);
         drain();
     }
@@ -186,8 +163,9 @@ RunResult backtest(const SessionConfig& config, const RunSpec& spec, std::span<c
 
     const Portfolio& p = g.portfolio;
     const ExecutionStatistics& e = g.execution.statistics();
-    r.reason = failure(replay, days, g.loop.session_midnight());
-    r.partial = r.cancelled || !replay.succeeded();
+    r.reason = stopped ? "strategy_error: " + std::string{g.strategy.error()}
+                       : failure(replay, days, g.loop.session_midnight());
+    r.partial = r.cancelled || stopped || !replay.succeeded();
     r.events = replay.events;
     r.sim_events = g.loop.report().sim_events;
     r.pnl = p.pnl();
@@ -204,9 +182,7 @@ RunResult backtest(const SessionConfig& config, const RunSpec& spec, std::span<c
     r.digests = r.partial ? Digests{} : digests(g);
     r.fills_by = e.fills_by;
     r.anomalies_by = e.anomalies_by;
-    if (const OrbStats* orb = g.strategy.orb_stats(); orb != nullptr) {
-        r.orb = *orb;
-    }
+    r.stats = g.strategy.stats();
     bytes_read.store(source.position(), std::memory_order_relaxed);
     if (hash_as_read && !r.cancelled) {
         r.hashes = source.hashes();

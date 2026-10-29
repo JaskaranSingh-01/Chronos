@@ -22,49 +22,41 @@ namespace {
 
 using nlohmann::json;
 
+// A strategy as the log keeps it: its name ("none" for none), every param, and a script's source.
 json strategy_json(const StrategySpec& spec)
 {
-    const MarketMakerParams& mm = spec.market_maker;
-    const ImbalanceTakerParams& it = spec.imbalance;
-    return {{"kind", spec.kind},
-            {"market_maker",
-             {{"quote_size", mm.quote_size},
-              {"max_position", mm.max_position},
-              {"requote_cooldown_ns", mm.requote_cooldown_ns},
-              {"improve_ticks", mm.improve_ticks}}},
-            {"imbalance",
-             {{"threshold", it.threshold},
-              {"clip", it.clip},
-              {"max_position", it.max_position},
-              {"cooldown_ns", it.cooldown_ns}}},
-            {"orb", {{"range_minutes", spec.orb.range_minutes}, {"clip", spec.orb.clip}}}};
-}
-
-// A log written before the ORB has no "orb": its defaults.
-OrbParams orb_from(const json& j)
-{
-    const auto found = j.find("orb");
-    if (found == j.end()) {
-        return {};
+    json params = json::object();
+    for (const Param& p : spec.params) {
+        if (const auto* i = std::get_if<std::int64_t>(&p.value)) {
+            params[p.name] = *i;
+        } else {
+            params[p.name] = std::get<double>(p.value);
+        }
     }
-    return {.range_minutes = found->at("range_minutes").get<std::uint32_t>(),
-            .clip = found->at("clip").get<std::uint64_t>()};
+    json j = {{"kind", spec.name.empty() ? "none" : spec.name}, {"params", params}};
+    if (!spec.source.empty()) {
+        j["source"] = spec.source;
+    }
+    return j;
 }
 
 StrategySpec strategy_from(const json& j)
 {
-    const json& mm = j.at("market_maker");
-    const json& it = j.at("imbalance");
-    return StrategySpec{.kind = j.at("kind").get<SessionStrategyKind>(),
-                        .market_maker = {.quote_size = mm.at("quote_size").get<std::uint64_t>(),
-                                         .max_position = mm.at("max_position").get<std::int64_t>(),
-                                         .requote_cooldown_ns = mm.at("requote_cooldown_ns").get<Timestamp>(),
-                                         .improve_ticks = mm.at("improve_ticks").get<std::int64_t>()},
-                        .imbalance = {.threshold = it.at("threshold").get<double>(),
-                                      .clip = it.at("clip").get<std::uint64_t>(),
-                                      .max_position = it.at("max_position").get<std::int64_t>(),
-                                      .cooldown_ns = it.at("cooldown_ns").get<Timestamp>()},
-                        .orb = orb_from(j)};
+    StrategySpec spec;
+    const std::string kind = j.at("kind").get<std::string>();
+    if (kind == "none") {
+        return spec;
+    }
+    spec.name = kind;
+    for (const auto& item : j.at("params").items()) {  // in key order, as a ParamList is sorted
+        spec.params.push_back({item.key(),
+                               item.value().is_number_float() ? ParamValue{item.value().get<double>()}
+                                                              : ParamValue{item.value().get<std::int64_t>()}});
+    }
+    if (const auto source = j.find("source"); source != j.end()) {
+        spec.source = source->get<std::string>();
+    }
+    return spec;
 }
 
 json command_json(const Command& c)
@@ -482,7 +474,7 @@ bool read_log(const std::filesystem::path& path, std::uint64_t generation, Logge
             json expected;  // what the writer would have written for the record just read
             const std::string type = line.at("type").get<std::string>();
             if (type == "header") {
-                if (const int protocol = line.at("protocol").get<int>(); protocol < log_protocol) {
+                if (const int protocol = line.at("protocol").get<int>(); protocol < store_log_protocol) {
                     error = where + "log protocol " + std::to_string(protocol) + " predates the per-symbol store";
                     return false;
                 } else if (protocol != log_protocol) {
@@ -492,7 +484,9 @@ bool read_log(const std::filesystem::path& path, std::uint64_t generation, Logge
                 }
                 record = Record{.generation = line.at("generation").get<std::uint64_t>(),
                                 .kind = RecordKind::GenerationStart};
+                const StrategySpec& strategy = record.control.spec.strategy;
                 if (!spec_from(line, record.control.spec, days) ||
+                    (!strategy.name.empty() && !strategy_fits(strategy)) ||
                     !to_padded(line.at("run_id").get<std::string>(), record.control.watch.run_id)) {
                     error = where + "unexpected field or value";
                     return false;
@@ -501,6 +495,10 @@ bool read_log(const std::filesystem::path& path, std::uint64_t generation, Logge
                                        line.at("dirty").get<bool>(), line.at("source_digest").get<std::string>());
             } else if (type == "command") {
                 record = command_record_from(line);
+                if (record.command.type == CommandType::Attach && !strategy_fits(record.command.strategy)) {
+                    error = where + "unexpected field or value";  // a strategy this build does not have
+                    return false;
+                }
                 expected = record_json(record);
             } else if (type == "report") {
                 record = report_record_from(line);

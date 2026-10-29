@@ -102,8 +102,8 @@ the replay (play, pause, step, speed, seek, restart, load, watch).
 
 ### Strategies and manual orders in a session
 
-The session's event loop drives a **session strategy**: an adapter that holds either no strategy or one built-in
-strategy, swapped at a command boundary. Manual orders do not go through the strategy interface; they go through the
+The session's event loop drives a **session strategy**: an adapter that holds either no strategy or one registered
+strategy ([D21](decisions.md#d21-strategies-are-plugins-behind-a-registry)), swapped at a command boundary. Manual orders do not go through the strategy interface; they go through the
 same order gateway that strategies use, so they meet the same risk checks, latency and fill rules. While a strategy is
 attached, manual orders are refused (one controller of the position at a time). The adapter also enforces an attached
 strategy's trading window, each day's session hours by default.
@@ -111,7 +111,7 @@ strategy's trading window, each day's session hours by default.
 | Capability | Status |
 |---|---|
 | Manual orders through the shared gateway | **Verified** |
-| Attaching and detaching a built-in strategy over the protocol | **Implemented**; the page has no control for it |
+| Attaching and detaching a registered strategy over the protocol | **Implemented**; the page has no control for it |
 | Replaying a Lab run's strategy in the terminal (Watch) to a reproduced-or-not verdict | **Verified** |
 
 ## Exchange time and wall-clock time

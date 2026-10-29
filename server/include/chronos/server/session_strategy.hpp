@@ -3,34 +3,37 @@
 #include <cstddef>
 #include <cstdint>
 #include <limits>
+#include <memory>
+#include <span>
+#include <string>
+#include <string_view>
 #include <utility>
-#include <variant>
 #include <vector>
 
-#include "simulator/engine/strategy.hpp"
+#include "simulator/engine/strategy_registry.hpp"
 #include "simulator/sim/execution_simulator.hpp"
-#include "simulator/strategies/imbalance_taker.hpp"
-#include "simulator/strategies/market_maker.hpp"
-#include "simulator/strategies/orb.hpp"
 
 namespace simulator::server {
 
-enum class SessionStrategyKind : std::uint8_t {
-    None,  // manual trading
-    MarketMaker,
-    ImbalanceTaker,
-    Orb
-};
-
+// A strategy and its params: a registered one by name, or a Lua script with its source.
 struct StrategySpec
 {
-    SessionStrategyKind kind{SessionStrategyKind::None};
-    MarketMakerParams market_maker{};
-    ImbalanceTakerParams imbalance{};
-    OrbParams orb{};
+    std::string name{};    // "" = none: manual trading
+    ParamList params{};    // every param of the strategy, sorted by name
+    std::string source{};  // a script's Lua source; "" for a registered strategy
 
     bool operator==(const StrategySpec&) const = default;
 };
+
+// The strategy `spec` names, built for `setup`; null for none or a name not registered.
+std::unique_ptr<AnyStrategy> make_strategy(const StrategySpec& spec, const StrategySetup& setup);
+
+// Whether `spec` names a registered strategy and each of its params fits it.
+bool strategy_fits(const StrategySpec& spec);
+
+// The registered strategy `name` with its default params but for `given`; none if the name or a param is unknown or a
+// value does not fit.
+StrategySpec strategy_spec(std::string_view name, std::span<const Param> given = {});
 
 enum class TradingWindow : std::uint8_t {
     Regular,  // each day's feed session: a run's default
@@ -65,12 +68,13 @@ inline void cancel_resting(const ExecutionSimulator& execution, OrderGateway& ga
 class SessionStrategy
 {
 private:
-    std::variant<NullStrategy, MarketMaker, ImbalanceTaker, Orb> active_;
+    std::unique_ptr<AnyStrategy> active_;  // null: manual trading
     StrategySpec spec_{};
     const ExecutionSimulator& execution_;  // the resting orders a close cancels
     TradingWindow window_;
     std::vector<FeedSession> sessions_;  // each day's, oldest first
-    std::vector<OrbSession> orb_sessions_;  // the same, as an Orb reads them
+    std::vector<DaySession> day_sessions_;  // the same, as a strategy reads them
+    unsigned price_scale_;
     std::size_t day_{0};  // each Clear starts the next
     bool open_{false};  // from the first market event inside the day's session to its close timer
     Timestamp close_{0};  // the close of the window opened last
@@ -87,33 +91,20 @@ public:
     std::vector<ExecutionReport> delivered;  // the session drains it after each loop call
 
     SessionStrategy(const StrategySpec& spec, const ExecutionSimulator& execution, TradingWindow window,
-                    std::vector<FeedSession> sessions)
-        : execution_(execution), window_(window), sessions_(std::move(sessions))
+                    std::vector<FeedSession> sessions, unsigned price_scale)
+        : execution_(execution), window_(window), sessions_(std::move(sessions)), price_scale_(price_scale)
     {
         delivered.reserve(4'096);
         for (const FeedSession& day : sessions_) {
-            orb_sessions_.push_back(OrbSession{.open = day.open, .close = day.close});
+            day_sessions_.push_back(DaySession{.open = day.open, .close = day.close});
         }
         attach(spec);
     }
 
-    void attach(const StrategySpec& spec) noexcept
+    void attach(const StrategySpec& spec)
     {
         spec_ = spec;
-        switch (spec.kind) {
-        case SessionStrategyKind::None:
-            active_.emplace<NullStrategy>();
-            return;
-        case SessionStrategyKind::MarketMaker:
-            active_.emplace<MarketMaker>(spec.market_maker);
-            return;
-        case SessionStrategyKind::ImbalanceTaker:
-            active_.emplace<ImbalanceTaker>(spec.imbalance);
-            return;
-        case SessionStrategyKind::Orb:
-            active_.emplace<Orb>(spec.orb, orb_sessions_);
-            return;
-        }
+        active_ = make_strategy(spec, {.sessions = day_sessions_, .price_scale = price_scale_});
     }
 
     const StrategySpec& spec() const noexcept
@@ -121,16 +112,25 @@ public:
         return spec_;
     }
 
-    // The attached ORB's stats, or null.
-    const OrbStats* orb_stats() const noexcept
+    // The attached strategy's own counters; none without one.
+    std::vector<Stat> stats() const
     {
-        const Orb* orb = std::get_if<Orb>(&active_);
-        return orb != nullptr ? &orb->stats() : nullptr;
+        std::vector<Stat> out;
+        if (active_ != nullptr) {
+            active_->stats(out);
+        }
+        return out;
+    }
+
+    // Why the attached strategy stopped (a script's error), or empty.
+    std::string_view error() const noexcept
+    {
+        return active_ != nullptr ? active_->error() : std::string_view{};
     }
 
     bool attached() const noexcept
     {
-        return !std::holds_alternative<NullStrategy>(active_);
+        return active_ != nullptr;
     }
 
     const std::vector<FeedSession>& sessions() const noexcept
@@ -162,7 +162,9 @@ public:
                 ctx.set_timer(close_, close_timer);
             }
         }
-        std::visit([&](auto& strategy) { strategy.on_market(ctx, event); }, active_);
+        if (active_ != nullptr) {
+            active_->on_market(ctx, event);
+        }
     }
 
     void on_report(StrategyContext& ctx, const ExecutionReport& report) noexcept
@@ -172,7 +174,9 @@ public:
         if (windowed() && !open_ && report.type == ReportType::Accepted && report.exchange_time >= close_) {
             ctx.gateway.cancel(report.order_id);  // it was in flight at the close
         }
-        std::visit([&](auto& strategy) { strategy.on_report(ctx, report); }, active_);
+        if (active_ != nullptr) {
+            active_->on_report(ctx, report);
+        }
     }
 
     // The close timer shuts the gateway and cancels every resting order.
@@ -181,7 +185,9 @@ public:
     void on_timer(StrategyContext& ctx, std::uint64_t timer_id) noexcept
     {
         if (timer_id != close_timer) {
-            std::visit([&](auto& strategy) { strategy.on_timer(ctx, timer_id); }, active_);
+            if (active_ != nullptr) {
+                active_->on_timer(ctx, timer_id);
+            }
             return;
         }
         open_ = false;

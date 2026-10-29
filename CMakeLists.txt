@@ -66,6 +66,7 @@ add_library(simulator_lib
     src/cli/replay_args.cpp
     src/portfolio/portfolio.cpp
     src/sim/execution_simulator.cpp
+    src/engine/strategy_registry.cpp
 )
 
 target_include_directories(simulator_lib
@@ -74,6 +75,18 @@ target_include_directories(simulator_lib
 )
 
 target_compile_options(simulator_lib PRIVATE ${CHRONOS_WARNINGS})
+
+
+# -------------------------
+# Strategy plugins: each strategies/*.cpp registers one strategy at start-up (docs/strategies.md), so a new file is
+# picked up by the next build. An OBJECT library linked into each executable, so the linker keeps every file's
+# registration though nothing calls it; a static library would drop them.
+# -------------------------
+
+file(GLOB chronos_strategy_sources CONFIGURE_DEPENDS ${PROJECT_SOURCE_DIR}/strategies/*.cpp)
+add_library(chronos_strategies OBJECT ${chronos_strategy_sources})
+target_link_libraries(chronos_strategies PUBLIC simulator_lib)
+target_compile_options(chronos_strategies PRIVATE ${CHRONOS_WARNINGS})
 
 
 # -------------------------
@@ -157,6 +170,7 @@ target_include_directories(simulator PRIVATE ${PROJECT_BINARY_DIR}/generated)
 target_link_libraries(simulator
     PRIVATE
         simulator_store
+        chronos_strategies
 )
 
 
@@ -214,6 +228,7 @@ add_library(chronos_server
     server/src/replay_session.cpp
     server/src/security.cpp
     server/src/session_runner.cpp
+    server/src/session_strategy.cpp
 )
 
 target_include_directories(chronos_server
@@ -244,7 +259,7 @@ add_executable(chronos-serve
 
 target_compile_options(chronos-serve PRIVATE ${CHRONOS_WARNINGS})
 
-target_link_libraries(chronos-serve PRIVATE chronos_server)
+target_link_libraries(chronos-serve PRIVATE chronos_server chronos_strategies)
 
 
 # -------------------------
@@ -300,6 +315,7 @@ add_executable(simulator_tests
     tests/sim/order_gateway_test.cpp
     tests/engine/event_loop_test.cpp
     tests/engine/backtest_determinism_test.cpp
+    tests/engine/strategy_registry_test.cpp
     tests/strategies/imbalance_taker_test.cpp
     tests/strategies/orb_test.cpp
     tests/strategies/market_maker_test.cpp
@@ -318,6 +334,7 @@ target_compile_options(simulator_tests PRIVATE ${CHRONOS_WARNINGS})
 target_link_libraries(simulator_tests
     PRIVATE
         simulator_store
+        chronos_strategies
         GTest::gtest_main
 )
 
@@ -360,6 +377,7 @@ target_include_directories(chronos_server_tests PRIVATE ${PROJECT_SOURCE_DIR}/te
 target_link_libraries(chronos_server_tests
     PRIVATE
         chronos_server
+        chronos_strategies
         nlohmann_json::nlohmann_json
         GTest::gtest_main
 )

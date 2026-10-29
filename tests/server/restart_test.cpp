@@ -66,9 +66,7 @@ TEST(RestartTest, RestartKeepsTheAttachedStrategy)
     const std::vector<MarketEvent> events{add(100, 1, Side::Buy, 999'900, 100),
                                           add(200, 2, Side::Sell, 1'000'000, 100)};
     ReplaySession session{config(), over(events)};
-    session.submit(
-        Command{.generation = 1, .type = CommandType::Attach, .strategy = {.kind = SessionStrategyKind::MarketMaker}},
-        0);
+    session.submit(Command{.generation = 1, .type = CommandType::Attach, .strategy = strategy_spec("market_maker")}, 0);
     session.tick(kWall);
     session.control(Control{.type = ControlType::Restart});
     session.tick(kWall);
@@ -78,7 +76,7 @@ TEST(RestartTest, RestartKeepsTheAttachedStrategy)
         return r.kind == RecordKind::GenerationStart && r.generation == 2;
     });
     ASSERT_NE(start, all.end());
-    EXPECT_EQ(start->control.spec.strategy.kind, SessionStrategyKind::MarketMaker);
+    EXPECT_EQ(start->control.spec.strategy.name, "market_maker");
     Command manual = post_only_buy(999'800, 10);
     manual.generation = 2;
     session.submit(manual, 0);

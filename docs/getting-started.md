@@ -68,7 +68,7 @@ gunzip -c data/itch/12302019.NASDAQ_ITCH50.gz > data/itch/12302019.NASDAQ_ITCH50
 ./build/simulator replay data/itch/12302019.NASDAQ_ITCH50.bin --all --date 2019-12-30
 
 # backtest the market maker on SPY
-./build/simulator backtest data/itch/12302019.NASDAQ_ITCH50.bin --symbol SPY --date 2019-12-30 --strategy mm
+./build/simulator backtest data/itch/12302019.NASDAQ_ITCH50.bin --symbol SPY --date 2019-12-30 --strategy market_maker
 
 # the Trading Terminal and the Strategy Lab
 ./build/chronos-serve --data data/itch          # open http://127.0.0.1:8080/, type AAPL, press Enter

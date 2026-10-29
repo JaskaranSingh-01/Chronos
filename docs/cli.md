@@ -39,30 +39,22 @@ replay only:
                           over the batches
   --latency-batch N       events per timed batch (implies --latency)
 
-backtest runs a toy strategy against the replayed book, which our orders never change:
-  --strategy S            imbalance (default): IOCs on top-of-book imbalance;
-                          mm: post-only quotes at the best bid and ask;
-                          orb: opening range breakout, an IOC on a trade beyond the range
+backtest runs a strategy against the replayed book, which our orders never change:
+  --strategy NAME         a registered strategy (default imbalance): the list, with each one's
+                          params, follows this help
+  --param NAME=VALUE      set one of its params; repeat for more; the rest keep their defaults
   --order-latency-ns N    strategy to exchange, in nanoseconds (default 50000)
   --order-latency-us N    the same in microseconds
   --report-latency-ns N   exchange back to strategy and portfolio (default 50000)
   --report-latency-us N   the same in microseconds
-risk limits (the largest order is the strategy's own --clip or --quote-size):
-  --max-position N        |position| limit in shares (default 500)
-  --max-open-orders N     live orders at once (default 2 for mm, else 1)
+risk limits (default: the strategy's own, from its params):
+  --max-position N        |position| limit in shares
+  --max-order-quantity N  the largest order in shares
+  --max-open-orders N     live orders at once
 fees, per share in price ticks ($0.0001 for ITCH):
   --taker-fee-ticks N     paid when taking liquidity (default 0)
   --maker-fee-ticks N     paid when providing it; negative = rebate (default 0)
-imbalance and orb:
-  --clip N                shares per order (default 100); for orb at most --max-position
-imbalance only:
-  --threshold X           trade when one top-of-book size >= X times the other (>= 1, default 3)
-  --cooldown-ms N         wait after each order (default 100)
-orb only (session 09:30-16:00 ET; flattens at 15:55):
-  --range-minutes N       the opening range from 09:30, 1-390 (default 15)
-mm only:
-  --quote-size N          shares per quote (default 100)
-  --requote-ms N          a quote lives at least this long before it is moved (default 100)
+a backtest's day is one session, 09:30-16:00 ET
 
   -h, --help              print this help
   --version               print the commit, build type and compiler
@@ -75,6 +67,25 @@ exit status:
      a book out of room (raise --capacity); rejected events alone are counted, not failures
   2  bad usage, an input file that cannot be opened, a symbol the store does not hold on --date,
      a store that cannot be read, or a --json file that cannot be written
+
+strategies (--strategy NAME, then --param NAME=VALUE for any param):
+  imbalance: A toy: an IOC at the touch when one top-of-book size is threshold times the other
+    threshold              3 (1 to any): one side's top size over the other's that triggers an order
+    clip                   100 (1 to 1000000000): shares per order
+    max_position           500 (0 to 1000000000): |position| the strategy itself will not exceed
+    cooldown_ns            100000000 (0 to 1000000000000000): the wait after each order, in ns
+  market_maker: A toy: post-only quotes joining the best bid and ask, one per side
+    quote_size             100 (1 to 1000000000): shares per quote
+    max_position           500 (0 to 1000000000): |position| a fill of the next quote may not exceed
+    requote_cooldown_ns    100000000 (0 to 1000000000000000): the youngest quote that may be moved, in ns
+    improve_ticks          0 (0 to 1000000000): grid ticks inside the touch, while the spread is over twice it
+  orb: Opening range breakout: an IOC on the first trade beyond the day's opening range; a stop, and a flatten 5 minutes before the close
+    range_minutes          15 (1 to 390): the opening range from the open, minutes
+    clip                   100 (1 to 1000000000): shares per entry
+  trend_taker: The plugin guide's example: an IOC buy after a run of rising trades, sold after a hold
+    clip                   100 (1 to 1000000): shares per entry
+    run_length             3 (1 to 1000): rising trades in a row that trigger an entry
+    hold_ns                1000000000 (1 to 3600000000000): how long a position is held, in ns
 ```
 
 A bad argument prints a two-line error on stderr and exits 2.
@@ -91,9 +102,11 @@ A bad argument prints a two-line error on stderr and exits 2.
 # one symbol from the per-symbol store chronos-serve builds
 ./build/simulator replay --store data/itch/store --symbol AAPL --date 2019-12-30
 # backtests
-./build/simulator backtest data/itch/12302019.NASDAQ_ITCH50.bin --symbol SPY --date 2019-12-30 --strategy mm --maker-fee-ticks -20
+./build/simulator backtest data/itch/12302019.NASDAQ_ITCH50.bin --symbol SPY --date 2019-12-30 --strategy market_maker --maker-fee-ticks -20
 ./build/simulator backtest data/itch/12302019.NASDAQ_ITCH50.bin --symbol SPY --date 2019-12-30 --strategy imbalance --taker-fee-ticks 30
-./build/simulator backtest --store data/itch/store --symbol AAPL --date 2019-12-30 --strategy orb --range-minutes 30
+./build/simulator backtest --store data/itch/store --symbol AAPL --date 2019-12-30 --strategy orb --param range_minutes=30
+# a param and a risk limit: --param sets the strategy's own, --max-position the gateway's
+./build/simulator backtest --store data/itch/store --symbol AAPL --date 2019-12-30 --strategy imbalance --param clip=50 --max-position 200
 ```
 
 ### A replay's report
@@ -143,8 +156,8 @@ it lists the 10 symbols with the most events and any symbol with rejections or o
 
 `--json PATH` writes one JSON object with `"schema": 1` and the members `date`, `build` (commit, dirty flag, build type,
 compiler), `machine`, `input` (the file, its size and a fingerprint), `run` (the exact arguments), `result`, `time`,
-`memory` and `latency`; `backtest` adds a `backtest` member with its config, fills, fees, PnL and, for the ORB, its
-stats. `bench/summary.py` reads these files.
+`memory` and `latency`; `backtest` adds a `backtest` member with its config, fills, fees, PnL, the strategy's
+`params` and its own `stats` (a price stat in ticks). `bench/summary.py` reads these files.
 
 ## `chronos-serve`
 

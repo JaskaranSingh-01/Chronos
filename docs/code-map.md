@@ -25,6 +25,7 @@ The components are those of [system-architecture.md](architecture/system-archite
 | Execution simulator | `ExecutionSimulator`, `ExecutionReport` ([`sim/`](../include/simulator/sim/)) |
 | Portfolio | `Portfolio`, `RiskLimits`, `FeeSchedule` ([`portfolio/`](../include/simulator/portfolio/)) |
 | Strategy boundary | the `Strategy` concept, `StrategyContext`, `NullStrategy` ([`engine/strategy.hpp`](../include/simulator/engine/strategy.hpp)); `MarketMaker`, `ImbalanceTaker`, `Orb` ([`strategies/`](../include/simulator/strategies/)) |
+| Strategy registry | `StrategyInfo`, `ParamInfo`, `AnyStrategy`, `register_plugin` and `resolve_params` ([`engine/strategy_registry.hpp`](../include/simulator/engine/strategy_registry.hpp)); one plugin file per strategy in [`strategies/`](../strategies/); `make_strategy` and `strategy_spec` in the server's [`session_strategy.hpp`](../server/include/chronos/server/session_strategy.hpp) |
 | Day library | `DayLibrary` ([`itch_input.hpp`](../server/include/chronos/server/itch_input.hpp)) |
 | Replay session | `ReplaySession` ([`replay_session.hpp`](../server/include/chronos/server/replay_session.hpp)), run by `SessionRunner`; one `Generation` at a time; `SessionStrategy`; the channels `FixedQueue`, `LatestSlot` and `RecordRing` ([`channels.hpp`](../server/include/chronos/server/channels.hpp)) |
 | Command log writer | `LogQueue`, `LogWriter` ([`command_log.hpp`](../server/include/chronos/server/command_log.hpp)) |
@@ -45,7 +46,7 @@ The invariants are defined in [architecture/README.md](architecture/README.md#th
 | I5 deterministic order | `EventLoop` merges by (timestamp, stream, sequence) and reads no clock; `ReplaySession` applies commands at boundaries | `EventLoopTest.TieGoesToMarketInTheSpecWalkthrough`, `ReplaySessionTest.OrderingAtOneTimestampIsMarketThenSimulatorThenCommand`, `CommandLogTest`, `LabTest`, `WatchTest` |
 | I6 no look-ahead | `StrategyContext` holds the post-event book; `OrderGateway` schedules arrivals after the order latency | the event loop's latency tests |
 | I7 the engine thread owns the engine | `ReplaySession`'s engine-only members; the admission queue, `LatestSlot` and `RecordRing` | `chronos_server_tests` under ThreadSanitizer in CI |
-| I8 headless isolation | `simulator_lib` links only the standard library; the server is `chronos_server` | [`scripts/check-isolation.sh`](../scripts/check-isolation.sh) in CI: the engine's includes and `simulator_lib`'s links |
+| I8 headless isolation | `simulator_lib` links only the standard library; the server is `chronos_server` | [`scripts/check-isolation.sh`](../scripts/check-isolation.sh) in CI: the engine's and the plugins' includes, and `simulator_lib`'s links |
 | I9 bounded channels | fixed capacities in `ReplaySession` (1,024 commands, 64 controls, 65,536 records) and `LogQueue` (4,096) | `RecordRingTest`, `PeerTest`, `ServerTest.AClientThatStopsReadingNeverBlocksTheEngineOrOtherClients` |
 | I10 no allocation on the replay path | `BookStorage` reserves pools, indices, ladder windows; the ring is sized before the replay | the counting `operator new` in [`app/alloc_counter.cpp`](../app/alloc_counter.cpp); [`scripts/check-hot-path.sh`](../scripts/check-hot-path.sh) in CI |
 | I11 nothing applies without its place in the log | a command applies only with a slot `LogQueue::reserve` holds; `ReplaySession::admission` refuses while the log has failed | `PeerTest.ACommandWhoseRecordNeverReachesTheLogGetsLogUnavailable`, `CommandLogTest` |
@@ -68,6 +69,7 @@ The invariants are defined in [architecture/README.md](architecture/README.md#th
 | `include/simulator/portfolio/` | `Portfolio`, `RiskLimits`, `FeeSchedule` |
 | `include/simulator/engine/` | `EventLoop<S>`, the `Strategy` concept, `StrategyContext`, `NullStrategy` |
 | `include/simulator/strategies/` | `ImbalanceTaker`, `MarketMaker` and `Orb` (opening range breakout) |
+| `strategies/` | the strategy plugins: one file each registers a strategy ([strategies.md](strategies.md)) |
 | `include/simulator/metrics/` | `LatencyHistogram` |
 | `include/simulator/cli/` | argument parsing and the usage text |
 | `src/` | the implementations, mirroring `include/simulator/` |

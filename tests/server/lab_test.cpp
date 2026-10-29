@@ -43,7 +43,7 @@ struct Days
     // Submits the market maker on ACME over Friday, or over the long Monday.
     std::string submit(Backtester& lab, bool long_day = false, Refusal expected = Refusal::None)
     {
-        RunSpec spec = default_spec(SessionStrategyKind::MarketMaker);
+        RunSpec spec = default_spec(strategy_spec("market_maker"));
         spec.ticker = ticker("ACME");
         spec.days = {.day = {long_day ? 2019y / 12 / 30 : 2019y / 12 / 27}, .count = 1};
         std::string id;
@@ -374,7 +374,7 @@ TEST(LabTest, AnotherSymbolsChangedMessageLeavesARunReproducible)
     DayLibrary library{dir.path, dir.path / "fingerprints.json"};
     const DayHandle before = library.scan().at(0);
     Backtester lab{lab_config(), dir.path / "runs"};
-    RunSpec spec = default_spec(SessionStrategyKind::MarketMaker);
+    RunSpec spec = default_spec(strategy_spec("market_maker"));
     spec.ticker = ticker("ACME");
     spec.days = {.day = {2019y / 12 / 27}, .count = 1};
     std::string id;

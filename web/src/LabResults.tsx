@@ -4,7 +4,8 @@ import { px, ruleLabel, shares, signed, stamp, tone } from './format';
 import {
   align,
   cards,
-  orbCards,
+  statCards,
+  strategyLabel,
   compareStats,
   drawdown,
   likeForLike,
@@ -202,6 +203,7 @@ function ResultTabs({ run, r }: { run: Run; r: Results }) {
 // The run shown's stats, as metric rows; a partial run says so.
 export function Metrics() {
   const run = useLab((l) => l.details[l.selected]);
+  const strategies = useLab((l) => l.strategies);
   const r = run?.results;
   return (
     <section className="panel metrics" aria-label="Metrics">
@@ -229,13 +231,14 @@ export function Metrics() {
                 <b className={color}>{value}</b>
               </div>
             ))}
-            {r.orb &&
-              orbCards(r.orb, run.provenance.engine.price_scale).map(([name, value]) => (
-                <div key={name} className="card wide">
-                  <span className="muted">ORB · {name}</span>
-                  <b>{value}</b>
-                </div>
-              ))}
+            {statCards(r.stats ?? [], run.provenance.engine.price_scale).map(([name, value]) => (
+              <div key={name} className="card wide">
+                <span className="muted">
+                  {strategyLabel(strategies, run.spec.strategy)} · {name}
+                </span>
+                <b>{value}</b>
+              </div>
+            ))}
           </div>
         )}
       </div>

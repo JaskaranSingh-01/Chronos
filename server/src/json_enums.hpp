@@ -58,11 +58,6 @@ NLOHMANN_JSON_SERIALIZE_ENUM(CommandType,
                               {CommandType::Detach, "detach"}})
 NLOHMANN_JSON_SERIALIZE_ENUM(
     OrderType, {{OrderType::PostOnly, "post_only"}, {OrderType::Ioc, "ioc"}, {OrderType::Market, "market"}})
-NLOHMANN_JSON_SERIALIZE_ENUM(SessionStrategyKind,
-                             {{SessionStrategyKind::None, "none"},
-                              {SessionStrategyKind::MarketMaker, "market_maker"},
-                              {SessionStrategyKind::ImbalanceTaker, "imbalance"},
-                              {SessionStrategyKind::Orb, "orb"}})
 NLOHMANN_JSON_SERIALIZE_ENUM(Lifecycle,
                              {{Lifecycle::Received, "received"},
                               {Lifecycle::Admitted, "admitted"},

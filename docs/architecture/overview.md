@@ -41,7 +41,7 @@ strategies are deliberately simple ([Scope](#scope-and-non-goals)).
 
 1. **Replay and check a day.** Rebuild the book of one, several or all symbols of a day file, and report events,
    rejections, invariant checks, digests and timing.
-2. **Backtest a strategy.** Run a built-in strategy over one symbol, for one day from the CLI or one or more
+2. **Backtest a strategy.** Run a registered strategy over one symbol, for one day from the CLI or one or more
    consecutive days from the server, and get fills with the rule that produced each, PnL, drawdown and fill
    attribution.
 3. **Trade by hand.** Replay a symbol in the browser at 1×, 10×, 100× or as fast as possible, pause, step, seek, and
@@ -65,7 +65,8 @@ questions, not missing core pieces. The statuses use the words defined in [READM
 | Trading-status (halt) events: halted books may cross; no fills while not trading | **Implemented** |
 | A per-symbol store: one symbol's day readable without reading the whole day file | **Verified** (hash-checked on every read) |
 | A deterministic event loop with latencies, a queue-position fill model, a portfolio with risk limits and fees | **Verified** (determinism); the fill model's realism is open ([Q1](README.md#open-questions-and-known-gaps)) |
-| Three strategies: a market maker, an imbalance taker, an opening range breakout | **Implemented** (toys by design) |
+| Strategies as plugins: one file each in `strategies/`, offered by the CLI, the server and the Lab with no other change | **Verified** (every plugin run by `StrategyRegistryTest`; the same fills before and after the move) |
+| Four strategies: a market maker, an imbalance taker, an opening range breakout, the plugin guide's example | **Implemented** (toys by design) |
 | Multi-day runs over consecutive days of one symbol, in the server (the terminal and the Lab); the CLI runs one day | **Implemented** |
 | `chronos-serve`: an interactive session, a command log that reproduces it, an HTTP and WebSocket API | **Verified** (reproduction from the log is tested) |
 | The Trading Terminal and the Strategy Lab in the browser | **Verified** (end-to-end tests against a real server) |
@@ -94,8 +95,8 @@ questions, not missing core pieces. The statuses use the words defined in [READM
 ## Scope and non-goals
 
 In scope: L3 (per-order) equity data, one venue per run, NASDAQ ITCH 5.0 as the real format, simulated IOC,
-post-only and (in the terminal) protected market orders, constant latencies, per-share fees, built-in C++
-strategies, a local single-user server.
+post-only and (in the terminal) protected market orders, constant latencies, per-share fees, C++
+strategy plugins, a local single-user server.
 
 Out of scope, by decision:
 
@@ -108,7 +109,7 @@ Out of scope, by decision:
 - **Several venues or several symbols in one backtest or session.** A replay may cover many symbols; a backtest or a
   session trades one.
 - **Hosting, logins, several users,** in-browser strategy scripting, derivatives and Python bindings.
-- **Profitable strategies.** The built-in strategies exist to exercise the loop and the fill model.
+- **Profitable strategies.** The shipped strategies exist to exercise the loop and the fill model.
 
 ## Milestones
 
@@ -141,6 +142,7 @@ A milestone is **done** when each of its completion criteria has evidence; where
 | **Trading-status events** | halted books may cross without failing the crossed check | **Done** |
 | **Engine round** | zero allocations, cache-friendly levels, a two-thread pipeline, each proven and measured | **Done** (2026-10-26); the ladder a cent apart and the ORB followed (2026-10-27) |
 | **Docker and documentation** | `docker compose up` serves the UI; the README presents measured numbers | **Done** (2026-10-27) |
+| **Strategy plugins** | a strategy added as one file runs in the CLI, the server and the Lab with no other change; results unchanged | **Done** (2026-10-29) |
 | **UI-3** Engine monitor and symbol browser | | **Planned** |
 
 ## What the finished project must demonstrate

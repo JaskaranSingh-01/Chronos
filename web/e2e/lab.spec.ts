@@ -37,7 +37,12 @@ async function runAcme(page: Page, also: string[] = [], edit = async () => {}) {
   await page.getByRole('button', { name: '▶ Run backtest' }).click();
 }
 
-const card = (page: Page, name: string) => page.locator('.card', { hasText: name }).locator('b');
+// The stat card named `name` exactly: a strategy's own cards are named after it, e.g. 'Market maker · Fills'.
+const card = (page: Page, name: string) =>
+  page
+    .locator('.card')
+    .filter({ has: page.getByText(name, { exact: true }) })
+    .locator('b');
 const rows = (page: Page) => page.locator('.lab-tabs tbody tr:not(.muted)');
 const runs = (page: Page) => page.locator('.runs > table tr:not(.muted)');
 

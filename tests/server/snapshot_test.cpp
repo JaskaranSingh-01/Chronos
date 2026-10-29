@@ -20,8 +20,9 @@ TEST(SnapshotTest, ASnapshotIsOneBoundaryAndItsWatermarksOnlyRise)
     session.submit(
         Command{.generation = 1,
                 .type = CommandType::Attach,
-                .strategy = {.kind = SessionStrategyKind::MarketMaker,
-                             .market_maker = {.quote_size = 10, .max_position = 1'000, .requote_cooldown_ns = 0}}},
+                .strategy = strategy_spec(
+                    "market_maker",
+                    std::vector<Param>{{"quote_size", 10}, {"max_position", 1'000}, {"requote_cooldown_ns", 0}})},
         0);
     session.control(kPlay);
 

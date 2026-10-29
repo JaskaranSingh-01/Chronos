@@ -25,7 +25,7 @@ the process that paces a replay by a clock.
   for each report, a place in the L3 queue. A market order is an IOC limited to 1 % beyond the best opposite price,
   rounded to the cent. A price off the cent grid at $1 or more is rejected (`off_tick`), as Reg NMS Rule 612 requires.
   Limits: 10,000 shares of position, 1,000 shares an order, 16 open orders.
-- **A strategy in the session.** `attach` runs a built-in strategy against the live replay from the next event, and
+- **A strategy in the session.** `attach` runs a registered strategy against the live replay from the next event, and
   `detach` stops it; each cancels whatever rests first. Manual orders are refused while one is attached.
 - **One controller.** The first tab to connect controls the session; any other is a viewer that sees everything and
   sends nothing, and is told why.
@@ -33,7 +33,8 @@ the process that paces a replay by a clock.
 ### The command log
 
 Every command the session applies is appended to `sessions/<id>.jsonl` in the working directory, after a header that
-records the build, the symbol, and each day's hash and segment hash. A generation's log replays it exactly:
+records the build, the symbol, each day's hash and segment hash, and the strategy attached from the start, by name with
+every param. A generation's log replays it exactly:
 `CommandLogTest` reads a log back and reproduces the session's digests. `GET /api/sessions/<id>/log` serves it.
 
 A command is admitted once its lines are queued for the log's writer, and the engine may apply it from then on. The
@@ -59,21 +60,23 @@ have applied it), and every later command is refused, so the log replays the ses
 ## The Strategy Lab
 
 The Lab runs backtests on a worker thread of its own, one at a time with up to 8 waiting, while the terminal plays: a
-built-in strategy over one symbol and one or more days, at full speed.
+registered strategy over one symbol and one or more days, at full speed.
 
 - **A run** is posted as `{"symbol":"SPY","days":["2019-12-30"],"strategy":"market_maker"}`. Every other key takes
   `simulator backtest`'s default: `params`, `latency` (`order_ns`, `report_ns`), `fees` (`maker`, `taker`, in ticks a
   share), `limits` and `window`. The window is `"regular"` by default, so a strategy trades only inside each day's feed
   session, from its own 'Q' to its 'M' System Event (09:30-16:00 when a file lacks them); `"full_day"` trades the whole
   file. A one-day, full-day run with the defaults gives `simulator backtest`'s PnL, fills and fill attribution.
-- **Strategies**: `market_maker`, `imbalance` and `orb`, each with its params, defaults and caps listed by
-  `GET /api/strategies`. The market maker's `improve_ticks` counts ticks of the price grid, a cent each at $1 or
-  more. A value past its cap is refused with the field named; an ORB clip above the run's position or
-  order-size limit is refused as one that could never enter.
+- **Strategies**: every plugin in `strategies/` ([strategies.md](strategies.md)), by name: `imbalance`,
+  `market_maker`, `orb` and `trend_taker` ship. `GET /api/strategies` lists each with its label, summary, params
+  (default, min, max, help) and default limits. The market maker's `improve_ticks` counts ticks of the price grid, a
+  cent each at $1 or more. An unknown param, an integer param given a fraction, or a value past its cap is refused with
+  the field named; a run its strategy could never trade, such as an ORB clip above the position or order-size limit, is
+  refused naming the param.
 - **Saved runs.** Each finished run is written to `runs/<id>.json` with the build it ran on (commit, source digest,
   compiler), each day's hash and its symbol's segment (`segment: {hash, size}`), the regular hours, and its results: the
-  PnL at the end of every second with a market event, PnL by day and by hour, the first 50,000 fills and the fill
-  attribution. A restart reloads them.
+  PnL at the end of every second with a market event, PnL by day and by hour, the first 50,000 fills, the fill
+  attribution and the strategy's own stats. A restart reloads them.
 - **Verify** re-runs a saved run, reading its segments afresh and checking them as read, and records a verdict:
   `reproduced` (the same digests: the book's; the execution counters and resting orders; and the portfolio's, which
   hashes every fill in order, then the totals), `mismatch`, `different_code` (this build's source digest is not the
@@ -128,7 +131,7 @@ arrays, to keep snapshots small: level `[price, quantity, orders]`, trade `[ts, 
 | `control` | `action`: `play`, `pause`, `restart`, `cancel_seek`, `step` (`n`), `speed` (`speed`, 0 = Max), `seek` (`ts`), `symbol` (`symbol`, `days`), `watch` (`run_id`) |
 | `order` | `client_id`, `side`, `order_type` (`post_only`, `ioc`, `market`), `price` (not for `market`), `qty` |
 | `cancel` | `order_id` |
-| `attach` | `strategy` (`market_maker`, `imbalance` or `orb`) and its `params`: runs it in the session |
+| `attach` | `strategy` (a registered name) and its `params`: runs it in the session |
 | `detach` | stops the attached strategy |
 
 Every client message is checked against its schema: exactly its keys, each of its type and in range, at most 64 KiB.

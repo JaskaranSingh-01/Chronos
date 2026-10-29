@@ -193,7 +193,7 @@ A strategy is called on three occasions: an applied market event, a report deliv
 call gets a read-only book and portfolio, the order gateway, and the trade the event printed, if any. A strategy cannot
 reach the book's writer, the simulator's state or any wall clock; the only time it sees is exchange time. In an
 interactive session the same boundary holds an
-attached built-in strategy, or none; manual orders use the same gateway instead
+attached registered strategy, or none; manual orders use the same gateway instead
 ([web-terminal.md](web-terminal.md#strategies-and-manual-orders-in-a-session)).
 
 ## What the model leaves out

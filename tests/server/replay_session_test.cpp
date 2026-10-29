@@ -9,6 +9,7 @@
 
 #include "chronos/server/itch_input.hpp"
 #include "chronos/server/replay_session.hpp"
+#include "simulator/strategies/imbalance_taker.hpp"
 #include "test_support.hpp"
 
 namespace simulator::server::test {
@@ -155,7 +156,8 @@ TEST(ReplaySessionTest, EndOfStreamDrainsExactlyLikeTheHeadlessRun)
     // ImbalanceTaker buys at 200; its IOC arrives at 1,200 and the fill is delivered at 2,200, after the last event.
     const std::vector<MarketEvent> events{add(100, 1, Side::Buy, 999'900, 300),
                                           add(200, 2, Side::Sell, 1'000'000, 100)};
-    const ImbalanceTakerParams params{.threshold = 3.0, .clip = 10, .max_position = 500, .cooldown_ns = 0};
+    const ImbalanceTakerParams params{
+        .threshold = 3.0, .clip = 10, .max_position = 500, .cooldown_ns = 0};  // as attached
     const SessionConfig cfg = config({.order_latency = 1'000, .report_latency = 1'000});
 
     VectorSource source{events};
@@ -168,10 +170,13 @@ TEST(ReplaySessionTest, EndOfStreamDrainsExactlyLikeTheHeadlessRun)
     ASSERT_EQ(expected.drained_sim_events, 2u);
 
     ReplaySession session{cfg, over(events)};
-    session.submit(Command{.generation = 1,
-                           .type = CommandType::Attach,
-                           .strategy = {.kind = SessionStrategyKind::ImbalanceTaker, .imbalance = params}},
-                   0);
+    session.submit(
+        Command{.generation = 1,
+                .type = CommandType::Attach,
+                .strategy = strategy_spec(
+                    "imbalance",
+                    std::vector<Param>{{"threshold", 3.0}, {"clip", 10}, {"max_position", 500}, {"cooldown_ns", 0}})},
+        0);
     session.tick(kWall);  // attached before the first event
     session.control(kFullSpeed);
     session.control(kPlay);
@@ -245,17 +250,19 @@ TEST(ReplaySessionTest, AdmissionRefusesBadRequestsStaleGenerationsAFullQueueAnd
     EXPECT_EQ(trace(session).back(), "refused cmd1027 not_ready");
     EXPECT_EQ(session.submit(cancel(99), 0).error, ErrorCode::NotReady);
 
-    // An attach's imbalance threshold is at least 1 and finite, checked before the ended session's refusal.
+    // An attach's params fit its strategy, so an imbalance threshold is at least 1 and finite, checked before the
+    // ended session's refusal.
     const auto attach = [](double threshold) {
-        return Command{
-            .generation = 1,
-            .type = CommandType::Attach,
-            .strategy = {.kind = SessionStrategyKind::ImbalanceTaker, .imbalance = {.threshold = threshold}}};
+        return Command{.generation = 1,
+                       .type = CommandType::Attach,
+                       .strategy = {.name = "imbalance", .params = {{"threshold", threshold}}}};
     };
     EXPECT_EQ(session.submit(attach(0.99), 0).error, ErrorCode::BadRequest);
     EXPECT_EQ(session.submit(attach(std::numeric_limits<double>::infinity()), 0).error, ErrorCode::BadRequest);
     EXPECT_EQ(session.submit(attach(std::nan("")), 0).error, ErrorCode::BadRequest);
     EXPECT_EQ(session.submit(attach(1.0), 0).error, ErrorCode::NotReady);  // valid: only the ended session refuses it
+    EXPECT_EQ(session.submit(Command{.generation = 1, .type = CommandType::Attach, .strategy = {.name = "x"}}, 0).error,
+              ErrorCode::BadRequest);
 }
 
 TEST(ReplaySessionTest, ApplyRefusesNoLiquidityRiskAndManualOrdersUnderAStrategy)
@@ -267,9 +274,7 @@ TEST(ReplaySessionTest, ApplyRefusesNoLiquidityRiskAndManualOrdersUnderAStrategy
     session.submit(
         Command{.generation = 1, .order_type = OrderType::Market, .side = Side::Buy, .quantity = Quantity{10}}, 0);
     session.submit(post_only_buy(999'800, 501), 0);
-    session.submit(
-        Command{.generation = 1, .type = CommandType::Attach, .strategy = {.kind = SessionStrategyKind::MarketMaker}},
-        0);
+    session.submit(Command{.generation = 1, .type = CommandType::Attach, .strategy = strategy_spec("market_maker")}, 0);
     session.submit(post_only_buy(999'800, 10), 0);
     session.tick(kWall);
     EXPECT_EQ(trace(session),
@@ -402,7 +407,7 @@ TEST(ReplaySessionTest, AChainPlayedByTheSessionEqualsSteppingItAndEndsOnTheLast
     SessionConfig cfg = config({.order_latency = 1'000, .report_latency = 1'000});
     cfg.defaults.ticker = ticker("ACME");
     cfg.defaults.days = {.day = {2019y / 12 / 27, 2019y / 12 / 30}, .count = 2};
-    cfg.defaults.strategy = {.kind = SessionStrategyKind::MarketMaker, .market_maker = {.quote_size = 10}};
+    cfg.defaults.strategy = strategy_spec("market_maker", std::vector<Param>{{"quote_size", 10}});
     const SourceFactory factory = chain_factory(library, kEquity, false);
 
     ReplaySession session{cfg, factory};
@@ -449,7 +454,7 @@ TEST(ReplaySessionTest, TheLastDaysCloseCancelsTheQuotesWhenItsInputEndsFirst)
     cfg.defaults.ticker = ticker("ACME");
     cfg.defaults.days = {.day = {2019y / 12 / 30}, .count = 1};
     cfg.defaults.window = TradingWindow::Regular;
-    cfg.defaults.strategy = {.kind = SessionStrategyKind::MarketMaker, .market_maker = {.quote_size = 10}};
+    cfg.defaults.strategy = strategy_spec("market_maker", std::vector<Param>{{"quote_size", 10}});
 
     ReplaySession session{cfg, chain_factory(library, kEquity, false)};
     session.control(kFullSpeed);

@@ -9,7 +9,8 @@ import {
   drawdown,
   fromSpec,
   likeForLike,
-  orbCards,
+  statCards,
+  strategyLabel,
   outcomes,
   page,
   refusalText,
@@ -83,29 +84,35 @@ const strategies: Strategies = {
   strategies: [
     {
       kind: 'market_maker',
+      label: 'Market maker',
+      summary: 'A toy',
       params: [
-        { name: 'quote_size', default: 100, min: 1, max: 1_000_000_000 },
-        { name: 'max_position', default: 500, min: 0, max: 1_000_000_000 },
-        { name: 'requote_cooldown_ns', default: 100_000_000, min: 0, max: 1e15 },
-        { name: 'improve_ticks', default: 0, min: 0, max: 1_000_000_000 },
+        { name: 'quote_size', default: 100, min: 1, max: 1_000_000_000, help: '' },
+        { name: 'max_position', default: 500, min: 0, max: 1_000_000_000, help: '' },
+        { name: 'requote_cooldown_ns', default: 100_000_000, min: 0, max: 1e15, help: '' },
+        { name: 'improve_ticks', default: 0, min: 0, max: 1_000_000_000, help: '' },
       ],
       limits: { max_position: 500, max_order_quantity: 100, max_open_orders: 2 },
     },
     {
       kind: 'imbalance',
+      label: 'Imbalance',
+      summary: 'A toy',
       params: [
-        { name: 'threshold', default: 3, min: 1, max: null },
-        { name: 'clip', default: 100, min: 1, max: 1_000_000_000 },
-        { name: 'max_position', default: 500, min: 0, max: 1_000_000_000 },
-        { name: 'cooldown_ns', default: 1_000_000_000, min: 0, max: 1e15 },
+        { name: 'threshold', default: 3, min: 1, max: null, help: '' },
+        { name: 'clip', default: 100, min: 1, max: 1_000_000_000, help: '' },
+        { name: 'max_position', default: 500, min: 0, max: 1_000_000_000, help: '' },
+        { name: 'cooldown_ns', default: 1_000_000_000, min: 0, max: 1e15, help: '' },
       ],
       limits: { max_position: 500, max_order_quantity: 100, max_open_orders: 1 },
     },
     {
       kind: 'orb',
+      label: 'ORB',
+      summary: 'Opening range breakout',
       params: [
-        { name: 'range_minutes', default: 15, min: 1, max: 390 },
-        { name: 'clip', default: 100, min: 1, max: 1_000_000_000 },
+        { name: 'range_minutes', default: 15, min: 1, max: 390, help: '' },
+        { name: 'clip', default: 100, min: 1, max: 1_000_000_000, help: '' },
       ],
       limits: { max_position: 500, max_order_quantity: 100, max_open_orders: 1 },
     },
@@ -253,31 +260,26 @@ describe('the ORB', () => {
     );
   });
 
-  it('shows its decisions, shares and the last range in prices, or none', () => {
-    const orb = {
-      long_entries: 1,
-      short_entries: 1,
-      stops: 1,
-      flattens: 1,
-      closing_orders: 3,
-      risk_rejects: 0,
-      no_range_days: 0,
-      requested: 500,
-      bought: 200,
-      sold: 200,
-      expired: 100,
-      range_high: 2_905_100,
-      range_low: 2_899_800,
-    };
-    expect(orbCards(orb, 4)).toEqual([
-      ['Entries', '1 long, 1 short'],
-      ['Closing', '1 stops, 1 flattens'],
-      ['No-range days', '0'],
-      ['Risk rejects', '0'],
-      ['Shares', '200 bought, 200 sold of 500'],
-      ['Range', '289.98 to 290.51'],
+  it("shows a strategy's own stats: a price in dollars, other values as numbers", () => {
+    const stats = [
+      { name: 'Long entries', value: 1, price: false },
+      { name: 'Shares requested', value: 12_500, price: false },
+      { name: 'Average size', value: 2.5, price: false },
+      { name: 'Range high', value: 2_905_100, price: true },
+    ];
+    expect(statCards(stats, 4)).toEqual([
+      ['Long entries', '1'],
+      ['Shares requested', '12,500'],
+      ['Average size', '2.5'],
+      ['Range high', '290.51'],
     ]);
-    expect(orbCards({ ...orb, range_high: null, range_low: null }, 4)[5]).toEqual(['Range', 'none']);
+    expect(statCards([], 4)).toEqual([]);
+  });
+
+  it('labels a strategy as the server does, or by its name until the list arrives or once it is gone', () => {
+    expect(strategyLabel(strategies, 'orb')).toBe('ORB');
+    expect(strategyLabel(strategies, 'mine')).toBe('mine');
+    expect(strategyLabel(null, 'orb')).toBe('orb');
   });
 });
 
@@ -360,7 +362,7 @@ describe('compare', () => {
     const diff = specDiff(spec, other, 4);
     expect(diff.filter((row) => row.differs).map((row) => [row.field, row.a, row.b])).toEqual([
       ['days', '2019-12-30', '2019-12-27, 2019-12-30'],
-      ['strategy', 'Market maker', 'Imbalance'],
+      ['strategy', 'market_maker', 'imbalance'],
       ['params.quote_size', '100', '—'],
       ['params.requote_cooldown_ns', '100000000', '—'],
       ['params.improve_ticks', '0', '—'],

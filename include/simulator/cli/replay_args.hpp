@@ -8,6 +8,7 @@
 #include <string_view>
 #include <vector>
 
+#include "simulator/engine/strategy_registry.hpp"
 #include "simulator/orders/book_storage.hpp"
 
 namespace simulator {
@@ -45,30 +46,22 @@ inline constexpr std::string_view usage =
     "                          over the batches\n"
     "  --latency-batch N       events per timed batch (implies --latency)\n"
     "\n"
-    "backtest runs a toy strategy against the replayed book, which our orders never change:\n"
-    "  --strategy S            imbalance (default): IOCs on top-of-book imbalance;\n"
-    "                          mm: post-only quotes at the best bid and ask;\n"
-    "                          orb: opening range breakout, an IOC on a trade beyond the range\n"
+    "backtest runs a strategy against the replayed book, which our orders never change:\n"
+    "  --strategy NAME         a registered strategy (default imbalance): the list, with each one's\n"
+    "                          params, follows this help\n"
+    "  --param NAME=VALUE      set one of its params; repeat for more; the rest keep their defaults\n"
     "  --order-latency-ns N    strategy to exchange, in nanoseconds (default 50000)\n"
     "  --order-latency-us N    the same in microseconds\n"
     "  --report-latency-ns N   exchange back to strategy and portfolio (default 50000)\n"
     "  --report-latency-us N   the same in microseconds\n"
-    "risk limits (the largest order is the strategy's own --clip or --quote-size):\n"
-    "  --max-position N        |position| limit in shares (default 500)\n"
-    "  --max-open-orders N     live orders at once (default 2 for mm, else 1)\n"
+    "risk limits (default: the strategy's own, from its params):\n"
+    "  --max-position N        |position| limit in shares\n"
+    "  --max-order-quantity N  the largest order in shares\n"
+    "  --max-open-orders N     live orders at once\n"
     "fees, per share in price ticks ($0.0001 for ITCH):\n"
     "  --taker-fee-ticks N     paid when taking liquidity (default 0)\n"
     "  --maker-fee-ticks N     paid when providing it; negative = rebate (default 0)\n"
-    "imbalance and orb:\n"
-    "  --clip N                shares per order (default 100); for orb at most --max-position\n"
-    "imbalance only:\n"
-    "  --threshold X           trade when one top-of-book size >= X times the other (>= 1, default 3)\n"
-    "  --cooldown-ms N         wait after each order (default 100)\n"
-    "orb only (session 09:30-16:00 ET; flattens at 15:55):\n"
-    "  --range-minutes N       the opening range from 09:30, 1-390 (default 15)\n"
-    "mm only:\n"
-    "  --quote-size N          shares per quote (default 100)\n"
-    "  --requote-ms N          a quote lives at least this long before it is moved (default 100)\n"
+    "a backtest's day is one session, 09:30-16:00 ET\n"
     "\n"
     "  -h, --help              print this help\n"
     "  --version               print the commit, build type and compiler\n"
@@ -89,34 +82,19 @@ enum class CliCommand : std::uint8_t {
     Version
 };
 
-enum class StrategyKind : std::uint8_t {
-    Imbalance,
-    MarketMaker,
-    Orb
-};
-
 struct BacktestArgs
 {
-    StrategyKind strategy{StrategyKind::Imbalance};
+    std::string_view strategy{"imbalance"};  // a registered strategy's name
+    ParamList params{};                      // every param of the strategy: --param's values, else the defaults
+    RiskLimits limits{};                     // the strategy's own for its params, but for each limit flag given
     std::uint64_t order_latency_ns{50'000};  // --order-latency-ns, or -us x 1'000
     std::uint64_t report_latency_ns{50'000};
-    std::int64_t max_position{500};
-    std::size_t max_open_orders{0};  // 0 = default_max_open_orders(strategy)
     std::uint64_t taker_fee_ticks{0};
-    double threshold{3.0};           // imbalance
-    std::uint64_t clip{100};
-    std::uint64_t cooldown_ms{100};
-    std::uint64_t quote_size{100};   // mm
-    std::uint64_t requote_ms{100};
     std::int64_t maker_fee_ticks{0};
-    std::uint32_t range_minutes{15};  // orb
 };
 
-// One IOC in flight for imbalance and orb; one quote per side for mm.
-constexpr std::size_t default_max_open_orders(StrategyKind strategy) noexcept
-{
-    return strategy == StrategyKind::MarketMaker ? 2 : 1;
-}
+// Every registered strategy with its params, for --help.
+std::string strategies_help();
 
 // Default --capacity of the pool shared by --symbols/--all: 2^22, over twice the
 // 1,924,078 peak live orders of the 2019-12-30 full day.

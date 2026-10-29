@@ -3,7 +3,9 @@
 #include <algorithm>
 #include <charconv>
 #include <cmath>
+#include <cstdio>
 #include <cstdlib>
+#include <utility>
 
 #include "simulator/types/timestamp.hpp"
 
@@ -25,19 +27,72 @@ bool parse_digits(std::string_view text, unsigned& value) noexcept
     return text.find_first_not_of("0123456789") == std::string_view::npos && parse_number(text, value);
 }
 
-// A finite decimal >= 1, all of `text`, e.g. "3" or "2.5".
-bool parse_threshold(std::string_view text, double& value)
+std::string text_of(const ParamValue& value)
 {
-    if (text.empty() || text[0] < '0' || text[0] > '9') {  // no sign, space, nan or inf
+    if (const auto* i = std::get_if<std::int64_t>(&value)) {
+        return std::to_string(*i);
+    }
+    const double d = std::get<double>(value);
+    if (std::isinf(d)) {
+        return "any";
+    }
+    char text[32];
+    std::snprintf(text, sizeof text, "%g", d);
+    return text;
+}
+
+// The --param pairs as `strategy`'s params, then its limits and each limit flag given. False with `error` set.
+bool resolve_backtest(BacktestArgs& b, std::span<const std::pair<std::string_view, std::string_view>> given,
+                      std::int64_t max_position, std::uint64_t max_order_quantity, std::size_t max_open_orders,
+                      std::string& error)
+{
+    const StrategyInfo* info = find_strategy(b.strategy);
+    if (info == nullptr) {
+        error = "unknown --strategy '" + std::string{b.strategy} + "': registered are";
+        for (const StrategyInfo& s : registered_strategies()) {
+            error += " " + s.name;
+        }
         return false;
     }
-    const std::string copy{text};
-    char* end = nullptr;
-    const double parsed = std::strtod(copy.c_str(), &end);
-    if (end != copy.c_str() + copy.size() || !std::isfinite(parsed) || parsed < 1.0) {
+    ParamList values;
+    for (const auto& [name, text] : given) {
+        const auto it =
+            std::find_if(info->params.begin(), info->params.end(), [&](const ParamInfo& p) { return p.name == name; });
+        if (it == info->params.end()) {
+            error = std::string{b.strategy} + " has no param '" + std::string{name} + "'; its params:";
+            for (const ParamInfo& p : info->params) {
+                error += " " + p.name;
+            }
+            return false;
+        }
+        ParamValue value;
+        if (!parse_param(*it, text, value)) {
+            error = "bad value for --param " + std::string{name} + ": '" + std::string{text} + "' (" +
+                (std::holds_alternative<std::int64_t>(it->default_value) ? "an integer" : "a number") + " from " +
+                text_of(it->min) + " to " + text_of(it->max) + ")";
+            return false;
+        }
+        values.push_back({std::string{name}, value});
+    }
+    std::string bad;
+    if (!resolve_params(info->params, values, b.params, bad)) {
+        error = "bad --param " + bad;
         return false;
     }
-    value = parsed;
+    b.limits = info->limits(b.params);
+    if (max_position >= 0) {
+        b.limits.max_position = max_position;
+    }
+    if (max_order_quantity != 0) {
+        b.limits.max_order_quantity = Quantity{max_order_quantity};
+    }
+    if (max_open_orders != 0) {
+        b.limits.max_open_orders = max_open_orders;
+    }
+    if (info->check && !(bad = info->check(b.params, b.limits)).empty()) {
+        error = "--param " + bad + " is over a risk limit: " + info->name + " could never trade";
+        return false;
+    }
     return true;
 }
 
@@ -141,6 +196,10 @@ bool parse_replay_args(std::span<const std::string_view> args, ReplayArgs& out, 
     bool has_date = false;
     bool has_offset = false;
     bool has_capacity = false;
+    std::vector<std::pair<std::string_view, std::string_view>> params;  // --param NAME=VALUE
+    std::int64_t max_position = -1;                                     // -1, 0, 0: the strategy's own
+    std::uint64_t max_order_quantity = 0;
+    std::size_t max_open_orders = 0;
 
     for (std::size_t i = 1; i < args.size(); ++i) {
         const std::string_view arg = args[i];
@@ -206,30 +265,24 @@ bool parse_replay_args(std::span<const std::string_view> args, ReplayArgs& out, 
             ok = parse_latency(value, arg.ends_with("-us") ? 1'000 : 1, b.order_latency_ns);
         } else if (backtest && (arg == "--report-latency-ns" || arg == "--report-latency-us")) {
             ok = parse_latency(value, arg.ends_with("-us") ? 1'000 : 1, b.report_latency_ns);
-        } else if (backtest && arg == "--threshold") {
-            ok = parse_threshold(value, b.threshold);
-        } else if (backtest && arg == "--clip") {
-            ok = parse_number(value, b.clip) && b.clip > 0 && b.clip <= max_value;
         } else if (backtest && arg == "--max-position") {
-            ok = parse_number(value, b.max_position) && b.max_position >= 0 &&
-                static_cast<std::uint64_t>(b.max_position) <= max_value;
-        } else if (backtest && arg == "--cooldown-ms") {
-            ok = parse_number(value, b.cooldown_ms) && b.cooldown_ms <= max_value;
+            ok = parse_number(value, max_position) && max_position >= 0 &&
+                static_cast<std::uint64_t>(max_position) <= max_value;
+        } else if (backtest && arg == "--max-order-quantity") {
+            ok = parse_number(value, max_order_quantity) && max_order_quantity > 0 && max_order_quantity <= max_value;
+        } else if (backtest && arg == "--max-open-orders") {
+            ok = parse_number(value, max_open_orders) && max_open_orders > 0 && max_open_orders <= max_value;
         } else if (backtest && arg == "--taker-fee-ticks") {
             ok = parse_number(value, b.taker_fee_ticks) && b.taker_fee_ticks <= 1'000'000;
         } else if (backtest && arg == "--strategy") {
-            ok = value == "imbalance" || value == "mm" || value == "orb";
-            b.strategy = value == "mm" ? StrategyKind::MarketMaker
-                : value == "orb"       ? StrategyKind::Orb
-                                       : StrategyKind::Imbalance;
-        } else if (backtest && arg == "--max-open-orders") {
-            ok = parse_number(value, b.max_open_orders) && b.max_open_orders > 0 && b.max_open_orders <= max_value;
-        } else if (backtest && arg == "--range-minutes") {
-            ok = parse_number(value, b.range_minutes) && b.range_minutes >= 1 && b.range_minutes <= 390;
-        } else if (backtest && arg == "--quote-size") {
-            ok = parse_number(value, b.quote_size) && b.quote_size > 0 && b.quote_size <= max_value;
-        } else if (backtest && arg == "--requote-ms") {
-            ok = parse_number(value, b.requote_ms) && b.requote_ms <= max_value;
+            b.strategy = value;
+            ok = !value.empty();
+        } else if (backtest && arg == "--param") {
+            const std::size_t equals = value.find('=');
+            ok = equals != 0 && equals != std::string_view::npos;
+            if (ok) {
+                params.emplace_back(value.substr(0, equals), value.substr(equals + 1));
+            }
         } else if (backtest && arg == "--maker-fee-ticks") {
             ok = parse_number(value, b.maker_fee_ticks) && b.maker_fee_ticks >= -1'000'000 &&
                 b.maker_fee_ticks <= 1'000'000;
@@ -265,9 +318,8 @@ bool parse_replay_args(std::span<const std::string_view> args, ReplayArgs& out, 
         error = "backtest runs one symbol: use --symbol, not --symbols or --all";
     } else if (!has_date) {
         error = "missing --date";
-    } else if (backtest && parsed.backtest.strategy == StrategyKind::Orb &&
-               parsed.backtest.clip > static_cast<std::uint64_t>(parsed.backtest.max_position)) {
-        error = "--clip is more than --max-position: the ORB could never enter";
+    } else if (backtest && !resolve_backtest(b, params, max_position, max_order_quantity, max_open_orders, error)) {
+        return false;
     } else {
         if (!has_offset) {
             parsed.utc_offset = us_eastern_utc_offset(parsed.date);
@@ -279,6 +331,22 @@ bool parse_replay_args(std::span<const std::string_view> args, ReplayArgs& out, 
         return true;
     }
     return false;
+}
+
+std::string strategies_help()
+{
+    std::string text = "\nstrategies (--strategy NAME, then --param NAME=VALUE for any param):\n";
+    for (const StrategyInfo& s : registered_strategies()) {
+        text += "  " + s.name + ": " + s.summary + "\n";
+        for (const ParamInfo& p : s.params) {
+            char line[512];
+            std::snprintf(line, sizeof line, "    %-22s %s (%s to %s)%s%s\n", p.name.c_str(),
+                          text_of(p.default_value).c_str(), text_of(p.min).c_str(), text_of(p.max).c_str(),
+                          p.help.empty() ? "" : ": ", p.help.c_str());
+            text += line;
+        }
+    }
+    return text;
 }
 
 } // namespace simulator

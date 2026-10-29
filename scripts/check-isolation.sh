@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Checks the engine stays independent of the UI: nothing in include/, src/ or app/ includes
+# Checks the engine stays independent of the UI: nothing in include/, src/, app/ or strategies/ includes
 # server or web code or a server library, and simulator_lib links only the standard library.
 #
 #   scripts/check-isolation.sh
@@ -12,7 +12,7 @@ status=0
 # grep exits 0 on a match, 1 on none, and 2 on an error such as a missing directory.
 rc=0
 grep -rnE '#[[:space:]]*include[[:space:]]*[<"]([^">]*/)?(server|web|chronos|nlohmann|crow|asio)[/.">]' \
-    include src app || rc=$?
+    include src app strategies || rc=$?
 if [ $rc -ne 1 ]; then
     echo "error: the engine includes server or web code, or a directory could not be scanned (above)" >&2
     status=1

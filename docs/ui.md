@@ -55,9 +55,9 @@ At `http://127.0.0.1:8080/#lab`, or through the switch in the top bar:
   and queue ahead at entry; the fill attribution; PnL by hour and, over several days, by day. Comparing, the two runs'
   PnL overlaid, lined up by day and time of day, their stats side by side, every setting that differs marked, and runs
   over another symbol or other days flagged.
-- **Metrics** (top right): total PnL, fills, fill rate, max drawdown, fees and rebates, max |position|; for the ORB its
-  entries, closing orders, no-range days, risk rejects, shares and last range. A failed or cancelled run's figures are
-  marked partial.
+- **Metrics** (top right): total PnL, fills, fill rate, max drawdown, fees and rebates, max |position|, then the
+  strategy's own stats, each named after it (the ORB's entries, closing orders, range and shares, say). A failed or
+  cancelled run's figures are marked partial.
 - **The run picked** (right): **Watch in Terminal**, **Verify**, **Export JSON**, **Edit as new**, **Cancel** and
   **Delete**, and its provenance: the build, each day's hash, session source and size, the engine, the timings, the
   digests and every verification.

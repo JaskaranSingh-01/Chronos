@@ -56,7 +56,7 @@ Generation::Generation(const SessionConfig& config, const RunSpec& run, std::uni
       book(config.symbol, config.book_capacity, config.book, ladder_step(config.instrument.price_scale)),
       execution(first_midnight(run.days)),
       portfolio(config.instrument, run.limits, run.fees),
-      strategy(run.strategy, execution, run.window, sessions(run.days, *source)),
+      strategy(run.strategy, execution, run.window, sessions(run.days, *source), config.instrument.price_scale),
       loop(*source, book, execution, portfolio, strategy, run.latency,
            {.check_invariants_every = config.check_invariants_every, .session_midnight = first_midnight(run.days)})
 {}

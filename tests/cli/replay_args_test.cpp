@@ -4,6 +4,7 @@
 #include <string>
 #include <string_view>
 #include <utility>
+#include <variant>
 #include <vector>
 
 #include "simulator/cli/replay_args.hpp"
@@ -115,6 +116,17 @@ TEST(ReplayArgsTest, RejectsBadValues)
     EXPECT_FALSE(parse({"replay", "a.bin", "b.bin", "--symbol", "AAPL", "--date", "2019-12-30"}).ok);
 }
 
+// A param's value in `b`, or -1 for none.
+double param(const BacktestArgs& b, std::string_view name)
+{
+    const ParamValue* value = find_param(b.params, name);
+    if (value == nullptr) {
+        return -1;
+    }
+    return std::holds_alternative<double>(*value) ? std::get<double>(*value)
+                                                  : static_cast<double>(std::get<std::int64_t>(*value));
+}
+
 TEST(ReplayArgsTest, ParsesBacktestOptions)
 {
     const Parsed p = parse({"backtest",
@@ -130,61 +142,82 @@ TEST(ReplayArgsTest, ParsesBacktestOptions)
                             "20",
                             "--report-latency-us",
                             "30",
-                            "--threshold",
-                            "2.5",
-                            "--clip",
-                            "200",
+                            "--param",
+                            "threshold=2.5",
+                            "--param",
+                            "clip=200",
                             "--max-position",
                             "1000",
-                            "--cooldown-ms",
-                            "5",
+                            "--param",
+                            "cooldown_ns=5000000",
                             "--taker-fee-ticks",
                             "30"});
 
     ASSERT_TRUE(p.ok) << p.error;
+    const BacktestArgs& b = p.args.backtest;
     EXPECT_EQ(p.args.command, CliCommand::Backtest);
     EXPECT_EQ(p.args.symbol, "SPY");
     EXPECT_TRUE(p.args.allow_truncated_tail);
     EXPECT_EQ(p.args.capacity, 4'096u);
-    EXPECT_EQ(p.args.backtest.order_latency_ns, 20'000u);
-    EXPECT_EQ(p.args.backtest.report_latency_ns, 30'000u);
-    EXPECT_EQ(p.args.backtest.threshold, 2.5);
-    EXPECT_EQ(p.args.backtest.clip, 200u);
-    EXPECT_EQ(p.args.backtest.max_position, 1'000);
-    EXPECT_EQ(p.args.backtest.cooldown_ms, 5u);
-    EXPECT_EQ(p.args.backtest.taker_fee_ticks, 30u);
+    EXPECT_EQ(b.order_latency_ns, 20'000u);
+    EXPECT_EQ(b.report_latency_ns, 30'000u);
+    EXPECT_EQ(b.strategy, "imbalance");
+    EXPECT_EQ(param(b, "threshold"), 2.5);
+    EXPECT_EQ(param(b, "clip"), 200);
+    EXPECT_EQ(param(b, "max_position"), 500);  // the param; --max-position is the risk limit
+    EXPECT_EQ(param(b, "cooldown_ns"), 5'000'000);
+    EXPECT_EQ(b.limits.max_position, 1'000);
+    EXPECT_EQ(b.limits.max_order_quantity.value(), 200u);  // the strategy's own: its clip
+    EXPECT_EQ(b.limits.max_open_orders, 1u);
+    EXPECT_EQ(b.taker_fee_ticks, 30u);
 }
 
 TEST(ReplayArgsTest, BacktestDefaultsAndFlagsOnlyForBacktest)
 {
     const Parsed p = parse({"backtest", "day.bin", "--symbol", "SPY", "--date", "2019-12-30"});
     ASSERT_TRUE(p.ok) << p.error;
-    EXPECT_EQ(p.args.backtest.order_latency_ns, 50'000u);
-    EXPECT_EQ(p.args.backtest.report_latency_ns, 50'000u);
-    EXPECT_EQ(p.args.backtest.threshold, 3.0);
-    EXPECT_EQ(p.args.backtest.clip, 100u);
-    EXPECT_EQ(p.args.backtest.max_position, 500);
-    EXPECT_EQ(p.args.backtest.cooldown_ms, 100u);
-    EXPECT_EQ(p.args.backtest.taker_fee_ticks, 0u);
+    const BacktestArgs& b = p.args.backtest;
+    EXPECT_EQ(b.order_latency_ns, 50'000u);
+    EXPECT_EQ(b.report_latency_ns, 50'000u);
+    EXPECT_EQ(b.strategy, "imbalance");
+    EXPECT_EQ(param(b, "threshold"), 3.0);
+    EXPECT_EQ(param(b, "clip"), 100);
+    EXPECT_EQ(param(b, "max_position"), 500);
+    EXPECT_EQ(param(b, "cooldown_ns"), 100'000'000);
+    EXPECT_EQ(b.limits.max_position, 500);  // the strategy's own, from its params
+    EXPECT_EQ(b.taker_fee_ticks, 0u);
+    EXPECT_EQ(b.maker_fee_ticks, 0);
 
     const Parsed replay = parse({"replay", "day.bin", "--symbol", "SPY", "--date", "2019-12-30"});
     ASSERT_TRUE(replay.ok) << replay.error;
     EXPECT_EQ(replay.args.command, CliCommand::Replay);
-    EXPECT_FALSE(parse({"replay", "day.bin", "--symbol", "SPY", "--date", "2019-12-30", "--clip", "100"}).ok);
+    EXPECT_FALSE(parse({"replay", "day.bin", "--symbol", "SPY", "--date", "2019-12-30", "--param", "clip=1"}).ok);
+    EXPECT_FALSE(parse({"replay", "day.bin", "--symbol", "SPY", "--date", "2019-12-30", "--strategy", "orb"}).ok);
 
     auto with = [](std::string_view flag, std::string_view value) {
         return parse({"backtest", "day.bin", "--symbol", "SPY", "--date", "2019-12-30", flag, value}).ok;
     };
-    EXPECT_FALSE(with("--clip", "0"));
-    EXPECT_FALSE(with("--threshold", "0.5"));  // below 1 both sides would trigger
-    EXPECT_FALSE(with("--threshold", "three"));
-    EXPECT_FALSE(with("--threshold", "nan"));
-    EXPECT_FALSE(with("--threshold", "3x"));
+    EXPECT_FALSE(with("--param", "clip=0"));
+    EXPECT_FALSE(with("--param", "threshold=0.5"));  // below 1 both sides would trigger
+    EXPECT_FALSE(with("--param", "threshold=three"));
+    EXPECT_FALSE(with("--param", "threshold=nan"));
+    EXPECT_FALSE(with("--param", "threshold=inf"));
+    EXPECT_FALSE(with("--param", "threshold=3x"));
+    EXPECT_FALSE(with("--param", "threshold= 3"));
+    EXPECT_FALSE(with("--param", "clip=2.5"));  // an integer param takes only an integer
+    EXPECT_FALSE(with("--param", "clip"));
+    EXPECT_FALSE(with("--param", "=5"));
+    EXPECT_FALSE(with("--param", "quote_size=5"));  // the market maker's, not the imbalance taker's
+    EXPECT_FALSE(with("--param", "cooldown_ns=1000000000000000001"));
     EXPECT_FALSE(with("--max-position", "-1"));
+    EXPECT_FALSE(with("--max-order-quantity", "0"));
+    EXPECT_FALSE(with("--max-open-orders", "0"));
     EXPECT_FALSE(with("--order-latency-us", "1000000001"));  // ns would overflow past this
-    EXPECT_FALSE(with("--cooldown-ms", "1000000001"));
     EXPECT_FALSE(with("--taker-fee-ticks", "-30"));
-    EXPECT_TRUE(with("--threshold", "1"));
+    EXPECT_FALSE(with("--maker-fee-ticks", "-1000001"));
+    EXPECT_FALSE(with("--maker-fee-ticks", "+5"));
+    EXPECT_TRUE(with("--param", "threshold=1"));
+    EXPECT_TRUE(with("--param", "threshold=4"));
     EXPECT_TRUE(with("--max-position", "0"));
 }
 
@@ -197,13 +230,13 @@ TEST(ReplayArgsTest, ParsesMarketMakerOptions)
                             "--date",
                             "2019-12-30",
                             "--strategy",
-                            "mm",
-                            "--quote-size",
-                            "200",
-                            "--max-position",
-                            "800",
-                            "--requote-ms",
-                            "250",
+                            "market_maker",
+                            "--param",
+                            "quote_size=200",
+                            "--param",
+                            "max_position=800",
+                            "--param",
+                            "requote_cooldown_ns=250000000",
                             "--maker-fee-ticks",
                             "-20",
                             "--taker-fee-ticks",
@@ -213,39 +246,37 @@ TEST(ReplayArgsTest, ParsesMarketMakerOptions)
 
     ASSERT_TRUE(p.ok) << p.error;
     const BacktestArgs& b = p.args.backtest;
-    EXPECT_EQ(b.strategy, StrategyKind::MarketMaker);
-    EXPECT_EQ(b.quote_size, 200u);
-    EXPECT_EQ(b.max_position, 800);
-    EXPECT_EQ(b.requote_ms, 250u);
-    EXPECT_EQ(b.maker_fee_ticks, -20);  // a rebate
+    EXPECT_EQ(b.strategy, "market_maker");
+    EXPECT_EQ(param(b, "quote_size"), 200);
+    EXPECT_EQ(param(b, "max_position"), 800);
+    EXPECT_EQ(param(b, "requote_cooldown_ns"), 250'000'000);
+    EXPECT_EQ(param(b, "improve_ticks"), 0);  // its default
+    EXPECT_EQ(b.limits.max_position, 800);    // from the params
+    EXPECT_EQ(b.limits.max_order_quantity.value(), 200u);
+    EXPECT_EQ(b.limits.max_open_orders, 4u);  // the flag
+    EXPECT_EQ(b.maker_fee_ticks, -20);        // a rebate
     EXPECT_EQ(b.taker_fee_ticks, 30u);
-    EXPECT_EQ(b.max_open_orders, 4u);
+    // A ParamList is sorted by name.
+    ASSERT_EQ(b.params.size(), 4u);
+    EXPECT_EQ(b.params[0].name, "improve_ticks");
+    EXPECT_EQ(b.params[3].name, "requote_cooldown_ns");
 }
 
-TEST(ReplayArgsTest, StrategyDefaultsAndBadValues)
+TEST(ReplayArgsTest, AnUnknownStrategyOrParamNamesWhatIsRegistered)
 {
-    const Parsed p = parse({"backtest", "day.bin", "--symbol", "SPY", "--date", "2019-12-30"});
-    ASSERT_TRUE(p.ok) << p.error;
-    const BacktestArgs& b = p.args.backtest;
-    EXPECT_EQ(b.strategy, StrategyKind::Imbalance);
-    EXPECT_EQ(b.quote_size, 100u);
-    EXPECT_EQ(b.requote_ms, 100u);
-    EXPECT_EQ(b.maker_fee_ticks, 0);
-    EXPECT_EQ(b.max_open_orders, 0u);  // the strategy's own default
-    EXPECT_EQ(default_max_open_orders(StrategyKind::Imbalance), 1u);
-    EXPECT_EQ(default_max_open_orders(StrategyKind::MarketMaker), 2u);
-
-    auto with = [](std::string_view flag, std::string_view value) {
-        return parse({"backtest", "day.bin", "--symbol", "SPY", "--date", "2019-12-30", flag, value}).ok;
-    };
-    EXPECT_TRUE(with("--strategy", "imbalance"));
-    EXPECT_FALSE(with("--strategy", "MM"));
-    EXPECT_FALSE(with("--quote-size", "0"));
-    EXPECT_FALSE(with("--requote-ms", "1000000001"));
-    EXPECT_FALSE(with("--maker-fee-ticks", "-1000001"));
-    EXPECT_FALSE(with("--maker-fee-ticks", "+5"));
-    EXPECT_FALSE(with("--max-open-orders", "0"));
-    EXPECT_FALSE(parse({"replay", "day.bin", "--symbol", "SPY", "--date", "2019-12-30", "--strategy", "mm"}).ok);
+    const Parsed mm = parse({"backtest", "day.bin", "--symbol", "SPY", "--date", "2019-12-30", "--strategy", "mm"});
+    EXPECT_FALSE(mm.ok);
+    EXPECT_EQ(mm.error, "unknown --strategy 'mm': registered are imbalance market_maker orb trend_taker");
+    const Parsed bad = parse(
+        {"backtest", "day.bin", "--symbol", "SPY", "--date", "2019-12-30", "--strategy", "orb", "--param", "x=1"});
+    EXPECT_EQ(bad.error, "orb has no param 'x'; its params: range_minutes clip");
+    const Parsed range = parse({"backtest", "day.bin", "--symbol", "SPY", "--date", "2019-12-30", "--strategy", "orb",
+                                "--param", "range_minutes=391"});
+    EXPECT_EQ(range.error, "bad value for --param range_minutes: '391' (an integer from 1 to 390)");
+    const std::string help = strategies_help();
+    for (const StrategyInfo& s : registered_strategies()) {
+        EXPECT_NE(help.find("  " + s.name + ": "), std::string::npos) << s.name;
+    }
 }
 
 // The ORB: its range within the session, and a clip it could enter with.
@@ -257,21 +288,21 @@ TEST(ReplayArgsTest, ParsesTheOrbAndRefusesARangeOrClipItCouldNotTradeWith)
         args.insert(args.end(), more);
         return parse(args);
     };
-    const Parsed p = orb({"--range-minutes", "30", "--clip", "50"});
+    const Parsed p = orb({"--param", "range_minutes=30", "--param", "clip=50"});
     ASSERT_TRUE(p.ok) << p.error;
-    EXPECT_EQ(p.args.backtest.strategy, StrategyKind::Orb);
-    EXPECT_EQ(p.args.backtest.range_minutes, 30u);
-    EXPECT_EQ(p.args.backtest.clip, 50u);
-    EXPECT_EQ(orb({}).args.backtest.range_minutes, 15u);
-    EXPECT_EQ(default_max_open_orders(StrategyKind::Orb), 1u);
-    EXPECT_TRUE(orb({"--range-minutes", "1"}).ok);
-    EXPECT_TRUE(orb({"--range-minutes", "390"}).ok);
-    EXPECT_FALSE(orb({"--range-minutes", "0"}).ok);
-    EXPECT_FALSE(orb({"--range-minutes", "391"}).ok);
-    const Parsed too_big = orb({"--clip", "600"});  // more than the default --max-position of 500
+    EXPECT_EQ(p.args.backtest.strategy, "orb");
+    EXPECT_EQ(param(p.args.backtest, "range_minutes"), 30);
+    EXPECT_EQ(param(p.args.backtest, "clip"), 50);
+    EXPECT_EQ(param(orb({}).args.backtest, "range_minutes"), 15);
+    EXPECT_EQ(orb({}).args.backtest.limits.max_open_orders, 1u);
+    EXPECT_TRUE(orb({"--param", "range_minutes=1"}).ok);
+    EXPECT_TRUE(orb({"--param", "range_minutes=390"}).ok);
+    EXPECT_FALSE(orb({"--param", "range_minutes=0"}).ok);
+    EXPECT_FALSE(orb({"--param", "range_minutes=391"}).ok);
+    const Parsed too_big = orb({"--param", "clip=600", "--max-order-quantity", "600"});  // over the position limit
     EXPECT_FALSE(too_big.ok);
-    EXPECT_EQ(too_big.error, "--clip is more than --max-position: the ORB could never enter");
-    EXPECT_TRUE(orb({"--clip", "600", "--max-position", "600"}).ok);
+    EXPECT_EQ(too_big.error, "--param clip is over a risk limit: orb could never trade");
+    EXPECT_TRUE(orb({"--param", "clip=600", "--max-position", "600"}).ok);
 }
 
 TEST(ReplayArgsTest, ParsesASymbolListOrAll)
@@ -397,7 +428,7 @@ TEST(ReplayArgsTest, HelpAndVersionWinAnywhere)
     for (const std::vector<std::string_view>& argv :
          {std::vector<std::string_view>{"--help"}, std::vector<std::string_view>{"-h"},
           std::vector<std::string_view>{"replay", "--help"},
-          std::vector<std::string_view>{"backtest", "day.bin", "--clip", "0", "-h"},
+          std::vector<std::string_view>{"backtest", "day.bin", "--param", "clip=0", "-h"},
           std::vector<std::string_view>{"play", "--help"}}) {
         const Parsed p = parse(argv);
         ASSERT_TRUE(p.ok) << p.error;
@@ -504,20 +535,17 @@ TEST(ReplayArgsTest, UsageDocumentsEveryOption)
         replay({"--latency-batch", "64"}),
         replay({"--json", "out.json"}),
         backtest({"--json", "out.json"}),
-        backtest({"--strategy", "mm"}),
+        backtest({"--strategy", "market_maker"}),
         backtest({"--order-latency-ns", "300"}),
         backtest({"--order-latency-us", "20"}),
         backtest({"--report-latency-ns", "300"}),
         backtest({"--report-latency-us", "20"}),
+        backtest({"--param", "clip=200"}),
         backtest({"--max-position", "10"}),
+        backtest({"--max-order-quantity", "50"}),
         backtest({"--max-open-orders", "3"}),
         backtest({"--taker-fee-ticks", "30"}),
         backtest({"--maker-fee-ticks", "-20"}),
-        backtest({"--threshold", "2.5"}),
-        backtest({"--clip", "200"}),
-        backtest({"--cooldown-ms", "5"}),
-        backtest({"--quote-size", "200"}),
-        backtest({"--requote-ms", "250"}),
         {"--help"},
         {"--version"},
     };

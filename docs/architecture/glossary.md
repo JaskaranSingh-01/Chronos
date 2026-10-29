@@ -63,6 +63,12 @@ traded or left. It falls as those orders execute or leave.
 Chronos has none for historical orders: the historical book only records what the feed says happened. The closest
 thing is the execution simulator, which decides only simulated fills.
 
+**Strategy plugin.** A file in `strategies/` that registers one strategy: its name, params, default risk limits and
+stats. Built into every executable; nothing else names a strategy.
+
+**Strategy registry.** The one list of strategies, sorted by name, from which the CLI, the server and the Lab learn
+each strategy's params and build it.
+
 **Execution simulator.** The component that holds shadow orders and decides their fills by the fill rules as market
 events arrive, fills IOC orders against the visible book on arrival, and emits execution reports.
 
