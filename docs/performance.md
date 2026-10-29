@@ -5,6 +5,10 @@ Chronos processes **4,885,679** market events per second: the full NASDAQ day of
 beside the book thread. On one thread it does 3,385,625, below the previous engine; the table and the profile say
 why.
 
+![Full-day replay throughput by book and threads: ladder with 2 threads, the default, 4.89 million events a second;
+list with 2 threads 4.62 million; ladder with 1 thread 3.39 million; list with 1 thread 3.27 million; the previous
+engine 4.00 million](images/throughput.svg)
+
 ## The numbers
 
 Full day, `--all`, median of 3 runs. Each round ran the four configurations and the previous engine (commit `b6f3517`)
@@ -58,16 +62,18 @@ Placing new levels is the next target ([order-book.md](order-book.md)), then che
   ring's stress test runs under ThreadSanitizer in CI.
 - **Locate filtering.** `ItchSource` reads a message's stock-locate field before decoding it, so a single-symbol replay
   decodes only its symbol's messages.
-- **The per-symbol store** ([market-data.md](market-data.md)) makes a one-symbol replay read about 1 % of the day.
+- **The per-symbol store** ([market-data.md](market-data.md)) makes a one-symbol replay read well under 1 % of the
+  day (AAPL: 46 MB of 8.25 GB, 17 MB compressed).
 
 ## Method
 
-- **Machine:** Apple M4 (4 performance + 6 efficiency cores), 16 GiB, macOS 27.0.1, Apple clang 17.0.0, CMake
-  `Release` (`-O3 -DNDEBUG`), on AC power with Low Power Mode off.
+- **Machine:** Apple M4 (4 performance + 6 efficiency cores), 16 GiB, macOS 27 (Darwin 27.0.0), Apple clang 17.0.0,
+  CMake `Release` (`-O3 -DNDEBUG`), on AC power with Low Power Mode off.
 - **Interleaved runs.** A one-thread replay that lands on an efficiency core runs about half as fast, so runs made one
-  configuration after another on a busy machine are not comparable: the engine round's first, sequential matrix
-  measured list × 1 at 1.48 M events/s, against 3.44 M interleaved. Every round runs every configuration in rotating
-  order, each run starting once the load average is below 4.
+  configuration after another on a busy machine are not comparable: the first matrix of the previous benchmark round
+  (2026-10-24, in `bench/RESULTS.md`), run one configuration after another, measured list × 1 at 1.48 M events/s,
+  against 3.44 M interleaved. Every round runs every configuration in rotating order, each run starting once the load
+  average is below 4.
 - **Per-event figures are a batch-derived estimate.** Each sample is the mean ns/event of a batch of 1,024 events, as
   `steady_clock` ticks every 41.67 ns on this machine and cannot time a single event. They show how the cost of an
   event varies across the day, not the latency of any one event. With two threads they are the book thread's.
@@ -104,5 +110,5 @@ A single replay prints its own timing and memory; `--latency` adds the per-batch
 ## The UI
 
 `web/e2e/lag.spec.ts` measures where the browser's time goes ([ui.md](ui.md#measuring-the-page)). Watching a market
-maker's run at Max brings about 14,000 WebSocket messages a second; the page keeps 60 frames a second, none over 50 ms,
-with its socket handler at 1.8 % of the main thread.
+maker's run at Max (replay as fast as the server can) brings about 14,000 WebSocket messages a second; the page keeps 60
+frames a second, none over 50 ms, with its socket handler at 1.8 % of the main thread.

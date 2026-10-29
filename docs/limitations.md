@@ -5,35 +5,41 @@
 - **No market impact.** Our fills never remove historical liquidity, so repeated IOCs can take the same visible shares
   again. Fill rates for aggressive orders are optimistic.
 - **Order types:** IOC, post-only Day orders, and in the terminal market orders (an IOC within 1 % of the best opposite
-  price, to the cent). A marketable Day order is rejected, not partly filled, and so is a price off the cent grid at
-  $1 or more (`OffTick`).
+  price, the band rounded down to the price grid). A marketable Day order is rejected, not partly filled, and so is a
+  price off the cent grid at $1 or more (`OffTick`).
 - **The fill rules are (a), (b), (c) and (d) with the trade-price guard** ([backtesting.md](backtesting.md)). Hidden and
   non-displayed liquidity is invisible: ITCH `P` prints never fill our orders, and neither do cross trades (`Q`). The
   opening and closing crosses are not modelled as auctions: executions in their seconds fill resting orders by the same
-  rules, at our limit price rather than the cross price. An order that arrives while the book is halted is rejected.
+  rules, at our limit price rather than the cross price. An order that arrives while the book is not trading (halted,
+  paused or quotation only) is rejected, and resting orders do not fill until it trades again.
 - **Constant latencies.** The order latency also stands for the market-data delay. There are no latency
   distributions or queueing at the exchange.
 - **Fees are per share only:** maker and taker fees or rebates. SEC Section 31 and the FINRA TAF on sells are not
   modelled yet.
-- **One symbol per backtest.** `replay` takes one symbol, a list or all of them; `backtest` and the Lab take one, over
-  one or more days.
+- **One symbol per backtest.** `replay` takes one symbol, a list or all of them; `backtest` takes one symbol on one day,
+  and the Lab one symbol over up to 32 days.
 - **The strategies are toys,** written to exercise the fill model and the loop, not to make money.
 - **Strategies written in the browser** run only in the server (the Lab and Watch), not the CLI; cost about 230 ns an
   event more than a C++ plugin; and may not use the clock, files, Lua's patterns, finalizers, or more than 10 million
-  instructions, 1 GiB allocated or 30 s a call. In the terminal, a script that errors stops trading without saying
-  why. A plugin needs a rebuild and a server restart.
+  instructions, 1 GiB allocated or 30 s a call, or 64 MiB held. In the terminal, a script that errors stops trading
+  without saying why. A plugin needs a rebuild and a server restart.
 
 ## What the engine assumes
 
 - **L3 data only.** Every source emits per-order events. The CLI and the server read NASDAQ TotalView-ITCH 5.0;
   `CsvSource` is available to the library and tests.
-- **Session times.** The CLI's regular trading hours are fixed at 09:30 to 16:00 ET, so half-day sessions are not
-  handled there (the server reads each day's own System Events). The default US Eastern offset follows the
+- **Session times.** Some trading hours are fixed at 09:30 to 16:00 ET: the CLI's session, the crossed-book check and
+  the fill attribution's phases (the Lab's included), so half days are wrong there. The server reads each day's own
+  session from its System Events for a strategy's trading window and the sessions it is built with. The CLI never
+  closes the gateway: a CLI backtest trades the whole day file. The default US Eastern offset follows the
   daylight-saving rules in force since 2007; pass `--utc-offset` for earlier dates.
 - **Capacity is fixed per run.** Pools and indices are sized before the replay from `--capacity`; a full one stops the
   run as `CapacityExhausted` instead of growing.
-- **The digest** is a regression check, not a proof: with every book empty at the end of a day it fingerprints each
-  symbol's count of Adds and Replaces. The invariants and the 0 rejections carry correctness.
+- **The digest** is a regression check, not a proof. A book's digest hashes the orders still resting in it, so after
+  a full day, when the book is empty, `replay --symbol` and `backtest` print the same constant, `cbf29ce484222325`, for
+  every symbol. Only the combined digest of `--symbols` and `--all`, which also mixes in each book's last sequence
+  number, fingerprints each symbol's count of Adds and Replaces; a backtest's execution and portfolio digests
+  fingerprint its fills and account. The invariants and the 0 rejections carry correctness.
 - **Platforms.** POSIX only (`mmap`). Performance is measured on macOS on an Apple M4; CI builds and tests on Ubuntu and
   macOS, and the Docker image runs on Linux. AddressSanitizer and ThreadSanitizer run only on Linux, as both hang at
   start-up on macOS 27.

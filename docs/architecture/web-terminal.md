@@ -10,7 +10,7 @@ reference for its endpoints, messages and options is [server.md](../server.md); 
 ```mermaid
 flowchart TB
     subgraph Browser
-        UI[Trading Terminal and Strategy Lab:<br/>render, validate input, send commands]
+        UI[Trading Terminal, Strategy Lab, Strategies:<br/>render, validate input, send commands]
     end
     subgraph Server["chronos-serve"]
         IO[I/O layer:<br/>HTTP, WebSocket, JSON,<br/>schema checks, security, static files]
@@ -41,16 +41,17 @@ flowchart TB
 | Requirement | How it holds | Status |
 |---|---|---|
 | Headless replay, backtests and benchmarks depend on no browser, HTTP, WebSocket or UI code | the engine library includes and links none of it; the server is its own library and executable | **Verified**: CI's isolation check ([I8](README.md#the-invariants)) |
-| No network I/O or JSON in the engine's processing path | the engine thread fills fixed binary structures; the I/O threads encode them | **Implemented** |
-| The server never reads mutable engine state without a protocol | it reads only the published snapshot, under the slot's lock, and the report ring, under its lock; everything else stays on the engine thread | **Implemented** ([I7](README.md#the-invariants)); the server's tests run under ThreadSanitizer in CI |
+| No network I/O or JSON in the engine's processing path | the engine thread fills binary structures (a record of an attach also carries the strategy's name, params and a script's source); the I/O threads encode them | **Implemented** |
+| The server never reads mutable engine state without a protocol | it reads only the published snapshot, under the slot's lock; the report ring, under its lock; the chart history (closed candles and recent trades, copied in at each snapshot), under its lock; and the session's state, generation and seek position, which are atomics. Everything else stays on the engine thread | **Implemented** ([I7](README.md#the-invariants)); the server's tests run under ThreadSanitizer in CI |
 | Commands enter through bounded queues and apply on the engine thread at defined boundaries | admission queues of 1,024 commands and 64 controls; applied in batches at boundaries ([below](#commands-and-controls)) | **Verified** by ordering tests |
-| A slow or disconnected client never blocks the engine | the engine never waits on a client: it try-locks the admission queues and the snapshot slot, and its other shared locks are held only for bounded copies ([Q3](README.md#open-questions-and-known-gaps)); a lagging client loses snapshots, and records it falls too far behind on are replaced by a gap and a full state | **Verified**: a server test with a client that stops reading |
+| A slow or disconnected client never blocks the engine | the engine never waits on a client: while it works it try-locks the admission queues, the snapshot slot and the history slot; between ticks it takes the admission lock to sleep, and that lock and its other shared locks are held only for bounded copies ([Q3](README.md#open-questions-and-known-gaps)); a lagging client loses snapshots, and records it falls too far behind on are replaced by a gap and a full state | **Verified**: a server test with a client that stops reading |
 | Snapshot publication is safe under concurrent access | one latest-value slot; the engine skips a frame while a reader holds it; no buffer is read and written at once | **Implemented**; tested under ThreadSanitizer |
 | Full queues, dropped snapshots, stale data, disconnects and invalid commands have defined outcomes | [the failure table](#defined-behaviour-under-failure) | **Verified** for each listed case |
 
 Lock-free structures are an option, not what is used here. The server's channels are short critical sections behind
-mutexes, try-locked by the engine where it must not wait. The only lock-free structure in Chronos is the headless
-replay's single-producer single-consumer ring ([performance-and-determinism.md](performance-and-determinism.md)). A
+mutexes, try-locked by the engine where it must not wait. The only lock-free structure in Chronos is the CLI's
+single-producer single-consumer ring (`replay` and `backtest` on two threads)
+([performance-and-determinism.md](performance-and-determinism.md)). A
 lock-free triple buffer for snapshots, or a sequence-locked report ring, are recorded options if a measurement ever
 shows the engine waiting.
 
@@ -61,10 +62,14 @@ flowchart LR
     IO[I/O threads] -->|commands: 1,024<br/>controls: 64<br/>full: refused| AQ[(admission<br/>queues)]
     AQ -->|try-lock, at a boundary| ENG[engine thread]
     ENG -->|try-publish:<br/>skipped if busy| SNAP[(latest snapshot)]
+    ENG -->|try-copy:<br/>skipped if busy| HIST[(chart history)]
     ENG -->|publish| RING[(report ring:<br/>last 65,536 records)]
     ENG -->|push| LOGQ[(log queue: 4,096)]
+    IO -->|admission records| RING
+    IO -->|admission records| LOGQ
     LOGQ --> WR[log writer]
     SNAP --> IO
+    HIST --> IO
     RING --> IO
 ```
 
@@ -73,21 +78,25 @@ flowchart LR
 | **Commands** (orders, cancels, attach, detach) | I/O → engine | 1,024 | refused with `queue_full`; never dropped silently | **Verified** |
 | **Controls** (play, pause, step, speed, seek, cancel seek, restart, load a symbol, watch) | I/O → engine | 64 | refused | **Verified** |
 | **Snapshot** | engine → I/O | one latest value | the engine skips the frame and counts it in `dropped_snapshots`; readers always get the newest | **Verified** |
-| **Report ring**: lifecycle steps, execution reports, control acks, generation marks, verdicts | engine → I/O | the last 65,536 records, numbered | a reader that falls behind gets a `gap` and a full state; the engine overwrites the oldest | **Verified**; the engine's publish takes locks that readers and admitting I/O threads also hold briefly ([Q3](README.md#open-questions-and-known-gaps)) |
-| **Command log** | engine → writer thread | 4,096 records | above half full, the engine holds market work until the writer catches up; once the queue fills or a write fails, the log is failed and commands are refused with `log_unavailable` | **Verified** |
+| **Chart history**: the generation's closed one-second candles and latest 512 trades, for `/api/history` | engine → I/O | every second of the generation's days | the engine skips the copy, and the snapshot with it, counted as a dropped snapshot | **Implemented** |
+| **Report ring**: lifecycle steps, execution reports, control acks, generation marks, verdicts | engine → I/O; an admitting I/O thread also publishes each command's Received and Admitted (or RejectedAtAdmission) records | the last 65,536 records, numbered | a reader that falls behind gets a `gap` and a full state; the engine overwrites the oldest | **Verified**; the engine's publish takes locks that readers and admitting I/O threads also hold briefly ([Q3](README.md#open-questions-and-known-gaps)) |
+| **Command log** | engine and admitting I/O threads → writer thread | 4,096 records | above half full, the engine holds market work until the writer catches up; once the queue fills or a write fails, the log is failed and commands are refused with `log_unavailable` | **Verified** |
 
-Every channel is allocated when the session starts, and none grows ([I9](README.md#the-invariants)). The chart's
-history of closed one-second candles, kept for clients that reconnect, is reserved for every second of the
-generation's days when it starts, about 4 MB a day.
+Every channel's slots are allocated when the session starts, and their number never grows
+([I9](README.md#the-invariants)). A record that carries a strategy's spec allocates its text as it is copied in, so a
+client attaching scripts could fill the ring's 65,536 records with up to about 3 GiB of sources
+([Q12](README.md#open-questions-and-known-gaps)). The chart's history of closed one-second candles, kept for clients
+that reconnect, is reserved for every second of the generation's days when it starts, about 4 MB a day.
 
 ## Commands and controls
 
 A **command** changes simulated trading (an order, a cancel, attaching or detaching a strategy). A **control** changes
 the replay (play, pause, step, speed, seek, restart, load, watch).
 
-- **One admission point.** Every connection's messages pass through the session's admission, which numbers them
-  (`command_seq`, `control_seq`) and refuses what cannot be accepted: a malformed message, a full queue, a failed log,
-  a viewer, a stale generation, a state that cannot take commands.
+- **One admission point.** Each connection first refuses what it can: a malformed message, a viewer's, a rate-limited
+  command, a control for an earlier generation. Everything else passes the session's admission, which numbers it
+  (`command_seq`, `control_seq`) and refuses a full queue, a failed log, a stale generation or a state that cannot take
+  commands.
 - **Boundaries.** The engine applies pending controls first, then advances the replay, then applies pending commands
   as one batch, in order, at the session's current exchange time. Every simulator event a batch creates runs after the
   whole batch, even at zero latency. A boundary is identified by (market events applied, exchange time, batch number).
@@ -102,16 +111,19 @@ the replay (play, pause, step, speed, seek, restart, load, watch).
 
 ### Strategies and manual orders in a session
 
-The session's event loop drives a **session strategy**: an adapter that holds either no strategy or one registered
-strategy ([D21](decisions.md#d21-strategies-are-plugins-behind-a-registry)), swapped at a command boundary. Manual orders do not go through the strategy interface; they go through the
-same order gateway that strategies use, so they meet the same risk checks, latency and fill rules. While a strategy is
-attached, manual orders are refused (one controller of the position at a time). The adapter also enforces an attached
-strategy's trading window, each day's session hours by default.
+The session's event loop drives a **session strategy**: an adapter that holds no strategy, one registered strategy
+([D21](decisions.md#d21-strategies-are-plugins-behind-a-registry)) or a Lua script
+([D22](decisions.md#d22-strategies-written-in-the-browser-are-sandboxed-lua-in-the-server)), swapped at a command
+boundary. Manual orders do not go through the strategy interface; they go through the same order gateway that
+strategies use, so they meet the same risk checks, latency and fill rules. While a strategy is attached, manual orders
+are refused (one controller of the position at a time). The adapter also enforces an attached strategy's trading
+window: each day's session hours by default for a Lab run and its Watch; the full day for a strategy attached to the
+terminal's own generations.
 
 | Capability | Status |
 |---|---|
 | Manual orders through the shared gateway | **Verified** |
-| Attaching and detaching a registered strategy over the protocol | **Implemented**; the page has no control for it |
+| Attaching and detaching a registered strategy, or a script with its source, over the protocol | **Implemented**; the page has no control for it |
 | Replaying a Lab run's strategy in the terminal (Watch) to a reproduced-or-not verdict | **Verified** |
 | A strategy written in the browser as a Lua script, run in the Lab and watched in the terminal ([D22](decisions.md#d22-strategies-written-in-the-browser-are-sandboxed-lua-in-the-server)) | **Verified**; an error in the terminal is not shown there |
 
@@ -119,8 +131,10 @@ strategy's trading window, each day's session hours by default.
 
 **Exchange time** is the time of the replayed market: it comes only from events, and it is what the engine, the
 simulator, the latencies and every record use. **Wall-clock time** is the real time of the machine: only the engine
-thread reads it to decide how far exchange time may advance (the I/O threads read it too, for timeouts and rate
-limits), and it never reaches a result.
+thread reads it to decide how far exchange time may advance (the I/O threads read it for timeouts and rate limits, and
+a script's sandbox for its 30 s limit a call), and it never reaches a result, except that a script call that runs past
+30 s of wall time fails its run
+([D22](decisions.md#d22-strategies-written-in-the-browser-are-sandboxed-lua-in-the-server)).
 
 | Speed | Exchange time advances | Notes |
 |---|---|---|
@@ -206,10 +220,11 @@ the screen at most once a frame, and never computes a fill or a position itself.
 | Time and sales | **Verified** |
 | Order ticket (post-only, IOC, market) with its own checks | **Verified** |
 | Positions, PnL and its curve | **Verified**; the fills list and the curve start empty after a reload ([limitations.md](../limitations.md#what-the-server-assumes)) |
-| Symbol selection over one or more days | **Verified** |
+| Symbol selection over one or more days (up to 32, in date order, not necessarily consecutive) | **Verified** |
 | Play, pause, step, speed, seek, restart | **Verified** |
 | Strategy-driven simulation in the terminal | **Partial**: Watch replays a Lab run; no attach control on the page |
 | Strategy Lab: run, compare, verify, export, watch | **Verified** |
+| Strategies page: a Lua editor, checked on save, its scripts offered in the Lab | **Verified** by an end-to-end test |
 | An engine strip: events a second, dropped snapshots, commands drained, the configured latencies, the session's state | **Implemented** |
 | A symbol browser and a fuller engine monitor | **Planned** (UI-3, not yet specified); a ranked symbol picker exists |
 | One session with several symbols, several users | **Out of scope** |

@@ -18,13 +18,15 @@ and the reproduction commands are in [performance.md](../performance.md); every 
 4. **Name the context.** A number is quoted with its configuration, input, machine, build and method
    ([I12](README.md#the-invariants)).
 5. **A faster structure is a hypothesis.** "This uses a faster data structure" is not a result. The claim is made by a
-   measurement on the real workload, and kept or rejected on it. One candidate (M2.03) was rejected before it was
+   measurement on the real workload, and kept or rejected on it. One candidate, reserving the per-book
+   `std::unordered_map`s up front (M2.03 in [`bench/RESULTS.md`](../../bench/RESULTS.md)), was rejected before it was
    built, on profile evidence; the ladder became the default only after its slots were widened to a cent, when it
    measured fastest.
 6. **Know the machine.** On the measurement machine (Apple M4, four performance and six efficiency cores), a
-   one-thread run that lands on an efficiency core runs about half as fast, and one matrix, most likely run in Low
-   Power Mode, took about 2.4 times the CPU time and was discarded. One matrix was discarded for exactly
-   that reason. Results from different sessions are compared only if they were interleaved.
+   one-thread run that lands on an efficiency core runs about half as fast, so the first matrix of the 2026-10-24
+   round, run one configuration after another, was replaced by an interleaved one; and a later matrix, most likely run
+   in Low Power Mode, took about 2.4 times the CPU time and was discarded. Results from different sessions are compared
+   only if they were interleaved.
 
 ## What is measured
 
@@ -72,15 +74,16 @@ thread the allocation-free engine is 15.3 % slower than the previous one: the po
 million allocations cost single-thread time, and the second thread more than pays for them. The list backend's
 numbers and the slice runs are in [performance.md](../performance.md).
 
-Only this machine has been measured. The same digests were produced on Linux (g++ in Docker) for a 256 MiB slice, but
-no Linux or x86 throughput is recorded.
+Only this machine has been measured. The same digests were produced on Linux (g++ in Docker) for the first 256 MiB of
+the 2019-12-30 day file. No throughput has been measured on another machine or on x86: the Linux logs' timings are of
+a Docker VM on the same M4, not benchmarks.
 
 ## Allocations
 
-The replay reserves everything before it starts: the order pool, the level pool, the order and level indices
-(open addressing), the ladder windows and the pipeline's ring, all sized from the run's capacity. A full structure stops
-the run with its name; nothing grows ([I10](README.md#the-invariants)). The full day peaks at 1,924,078 live orders
-against a default capacity of 4,194,304.
+The replay reserves everything before it starts: the order pool, the level pool and the order and level indices (open
+addressing), sized from the run's capacity; the ladder windows, one pair per registry slot; and the pipeline's
+65,536-event ring. A full structure stops the run with its name; nothing grows ([I10](README.md#the-invariants)). The
+full day peaks at 1,924,078 live orders against a default capacity of 4,194,304.
 
 The evidence is threefold: the counting allocator (0 over the full day, both threads); the heap's blocks and bytes,
 unchanged across the replay (on macOS; on Linux only the bytes, [Q9](README.md#open-questions-and-known-gaps)); and a
@@ -106,14 +109,16 @@ PnL, byte for byte, on every run ([I5](README.md#the-invariants)). It holds beca
 
 - no result reads a wall clock: all time in a result is exchange time from events (the replay loop reads a clock only
   to sample the cost per event, when asked);
-- all ordering is explicit: (exchange time, class, sequence), market first at ties;
+- all ordering is explicit: (timestamp, class, sequence), market first at ties;
 - prices, quantities and money are integers; no floating point enters a result;
 - no thread decides an order: the two-thread pipeline only decodes ahead, and the book thread applies in source
   order;
 - the interactive server applies commands at recorded boundaries, so wall-clock timing never reaches the engine.
 
 Documented exceptions: none in the engine. In the server, wall-clock timing decides which snapshots are published and
-which are dropped, which affects only what a client sees, never a digest.
+which are dropped, which affects only what a client sees, never a digest; and a script call that runs past 30 s of wall
+time fails its run ([D22](decisions.md#d22-strategies-written-in-the-browser-are-sandboxed-lua-in-the-server)), a net
+for work its instruction and memory budgets do not count.
 
 ### Digests
 
@@ -122,7 +127,7 @@ which are dropped, which affects only what a client sees, never a digest.
 | **Book digest** | one symbol's book: each live order's side, price, id, remaining quantity and sequence, side by side, best level first, front of the queue first, mixed byte by byte in a fixed byte order, so it does not depend on the host |
 | **Combined replay digest** | (symbol id, last sequence, book digest) over every book, in symbol-id order |
 | **Execution digest** | the simulator's counters and the resting shadow orders |
-| **Portfolio digest** | every fill booked, in order, then position, cash, PnL, fees, drawdown and open orders |
+| **Portfolio digest** | position, cash, realised and unrealised PnL, fees, drawdown and open orders, then the digest of every fill booked, in order |
 
 Sessions and Lab runs record the book, execution and portfolio digests; the CLI's backtest prints the book digest
 ([event-and-execution-model.md](event-and-execution-model.md#the-portfolio)).
@@ -133,7 +138,7 @@ Sessions and Lab runs record the book, execution and portfolio digests; the CLI'
 |---|---|---|
 | The combined digest equal across list and ladder, one thread and two, and the previous engine | the configurations and the optimisations changed no result | that the result is right: with every book empty at the close, it fingerprints each symbol's adds and replaces ([Q2](README.md#open-questions-and-known-gaps)) |
 | A backtest's book digest equal to a plain replay's | simulation did not change history ([I3](README.md#the-invariants)) | |
-| The same digests from Linux/g++ and macOS/clang (AAPL and every symbol on the 256 MiB slice, whose books are still live at its end) | the result does not depend on the compiler, library or host | |
+| The same digests from Linux/g++ and macOS/clang (AAPL and every symbol on the first 256 MiB of the 2019-12-30 day file, whose books are still live at its end) | the result does not depend on the compiler, library or host | |
 | A Lab run verified, or watched, to the same execution and portfolio digests | the run reproduces fill by fill on this build and input | anything, if the build differs: the verdict is then "different code", not a pass |
 | A session reproduced from its command log | an interactive session is as reproducible as a backtest | |
 
@@ -160,6 +165,7 @@ The server and the UI must not slow or change the headless engine ([I8](README.m
 
 ## The UI's own measurement
 
-A browser test measures where the page's time goes while it watches a market maker's run at Max: about 14,000
-WebSocket messages a second, 60 frames a second, no frame over 50 ms, the socket handler at 1.8 % of the main thread
-([ui.md](../ui.md#measuring-the-page)). That measures the page; it says nothing about the engine.
+A browser test measures where the page's time goes while it watches a market maker's run at Max (replay as fast as the
+server can): about 14,000 WebSocket messages a second, 60 frames a second, no frame over 50 ms, the socket handler at
+1.8 % of the main thread ([ui.md](../ui.md#measuring-the-page)). That measures the page; it says nothing about the
+engine.

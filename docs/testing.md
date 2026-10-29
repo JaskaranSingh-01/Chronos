@@ -4,12 +4,12 @@
 
 | Suite | Count | What |
 |---|---|---|
-| `simulator_tests` | 518 pass, 6 skip | the engine: types, ITCH framing and decoding, sources, the book, pools and indices, the ladder, the pipeline, the event loop, the fill model, the portfolio, the strategies and their registry, the CLI's arguments |
-| `chronos_server_tests` | 176 | the server: protocol schemas, peers and resync, sessions and generations, the command log and its reproduction, the store's builder and reader, the Lab, Watch, scripts written in the browser and their sandbox, security |
+| `simulator_tests` | 518 pass, 6 skip | the engine: types, ITCH framing and decoding, sources, the book, pools and indices, the ladder, the pipeline, the event loop, the fill model, the portfolio, the strategies and their registry, the per-symbol store's index, builder and reader and its equivalence with the day file, the CLI's arguments |
+| `chronos_server_tests` | 176 | the server: protocol schemas, peers and resync, sessions and generations, the command log and its reproduction, the day library, its store builds and the day chain, the Lab, Watch, scripts written in the browser and their sandbox, security |
 | `alloc_counter_test` | 3 | the counting `operator new` the replay's zero-allocation figure relies on |
 | CLI tests | 19 | `simulator` and `chronos-serve` run as processes: exit codes, usage, a store shared between them |
 | Vitest (`web/`) | 126 | the stores' reducers, candles and fill marks, the depth ladder, the PnL curve, symbol matching, order checks, the Lab's model and formatting |
-| Playwright (`web/e2e/`) | 14, plus 2 measurement specs | the terminal and the Lab in Chromium against a real `chronos-serve` |
+| Playwright (`web/e2e/`) | 14, plus 2 measurement specs | the terminal, the Strategies page and the Lab in Chromium against a real `chronos-serve` |
 
 `ctest` runs 723 tests: every GoogleTest case, the CLI tests and a build-info test. Five of the 6 skips are the
 real-data tests, which need a day file; the sixth is the conformance suite's error check, which does not apply to
@@ -30,11 +30,12 @@ cmake -S . -B build && cmake --build build -j && ctest --test-dir build
   limits that its defaults can trade under), two identical runs over a synthetic market, and the history digest of a
   plain replay.
 - **A script behaves like the plugin it ports.** `ScriptStrategyTest` runs the imbalance taker written in Lua beside the
-  C++ plugin over a synthetic market and asserts the same loop report, fills, PnL, execution counters and stats; on
-  SPY's full day the two made the same 48,643 fills and digests. It also checks the sandbox (no `io`, `os`, `load` or
-  collector), that table order, `math.random` and `table.sort` repeat across Lua states, that no address reaches a
-  script, the instruction, allocation and memory budgets (which a `pcall` cannot catch), the caps on timers, orders,
-  cancels and params, and every error naming its line.
+  C++ plugin over a synthetic market and asserts the same loop report, fills, PnL, execution counters and stats. It
+  also checks the sandbox (no `io`, `os`, `load` or collector), that table order, `math.random` and `table.sort` repeat
+  across Lua states, that no address reaches a script, the instruction, allocation and memory budgets (which a `pcall`
+  cannot catch), the caps on timers, orders, cancels and params, and every error naming its line. Separately, run
+  through the Lab on SPY's full day, the two made the same 48,643 fills and digests (recorded in the message of commit
+  `b2b9ff7`).
 - **A script's run reproduces from its own source.** `WatchTest` watches a script's Lab run to `reproduced`;
   `ServerTest` verifies one after its script was edited.
 - **The book against a model.** `BookModelTest` applies a random operation stream to the list, to the ladder at two
@@ -51,16 +52,19 @@ cmake -S . -B build && cmake --build build -j && ctest --test-dir build
 - **The real day.** The full replay of 2019-12-30, every symbol: 264,469,515 events, 0 rejections, every book empty at
   the end, invariants checked every 1,024 events (258,271 checks), the same digest in every configuration.
 - **Across platforms.** The Docker image (Linux, g++ 14) and the macOS build (Apple clang 17) give the same digests on
-  the same file: `7f1e922654415cf3` for AAPL on the slice and `b00db289f7c388b2` for all its 6,529,870 events.
+  the same file, the first 256 MiB of the 2019-12-30 day file (the slice of
+  [market-data.md](market-data.md#getting-the-data)): `7f1e922654415cf3` for AAPL and `b00db289f7c388b2` for all its
+  6,529,870 events.
 
 ### Real-data tests
 
 ```bash
-CHRONOS_ITCH_FILE=data/itch/12302019.NASDAQ_ITCH50.first-256MiB.bin ./build/simulator_tests --gtest_filter='ItchRealDataTest.*:BacktestDeterminismTest.*'
+CHRONOS_ITCH_FILE=data/itch/12302019.NASDAQ_ITCH50.first-256MiB.bin ./build/simulator_tests --gtest_filter='ItchRealDataTest.*:BacktestDeterminismTest.*:StoreRealDataTest.*'
 ```
 
 `CHRONOS_ITCH_SYMBOL` defaults to `AAPL` and `CHRONOS_ITCH_DATE` to `2019-12-30`. Without `CHRONOS_ITCH_FILE` they skip.
-Use the slice: these tests read the file several times.
+Use the slice: these tests read the file several times. `StoreRealDataTest` builds the day's store in `TMPDIR`, which
+needs about a third of the file's size free.
 
 ## Sanitizers
 
@@ -72,7 +76,8 @@ cmake -S . -B build/ubsan -DCHRONOS_SANITIZE=undefined && cmake --build build/ub
 ```
 
 On macOS 27, AddressSanitizer and ThreadSanitizer hang at process startup, so they run on Linux, in CI: ASan with UBSan
-under g++, and TSan under clang over the server's tests and the replay's SPSC ring and two-thread pipeline.
+under g++, and TSan under clang over `chronos_server_tests` and all of `simulator_tests`, the replay's SPSC ring and
+two-thread pipeline among them.
 
 ## CI
 
@@ -85,7 +90,7 @@ under g++, and TSan under clang over the server's tests and the replay's SPSC ri
 | `linux-clang-debug-ubsan`, `macos-debug-ubsan` | Debug under UBSan |
 | `format` | `scripts/check-format.sh`: every C++ file against `.clang-format`, clang-format 20.1.8 |
 | `isolation` | `scripts/check-isolation.sh` (the engine includes no server or web code, and links only the standard library) and `scripts/check-hot-path.sh` (no allocator or growing container on the replay path) |
-| `server-tsan` | ThreadSanitizer over `chronos_server_tests` and the replay's ring and pipeline tests |
+| `server-tsan` | ThreadSanitizer over `chronos_server_tests` and `simulator_tests` (which include the replay's ring and pipeline tests) |
 | `web` | typecheck, Vitest, build, then Playwright against a Release `chronos-serve` |
 
 Locally the build has 0 warnings with `-Wall -Wextra -Wpedantic` under Apple clang 17 (RelWithDebInfo and Debug) and

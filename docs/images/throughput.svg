@@ -1,0 +1,65 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 312" width="760" height="312" role="img" aria-labelledby="t d">
+  <title id="t">Full-day replay throughput by book and threads</title>
+  <desc id="d">Events a second, median of 3 full-day runs of NASDAQ 2019-12-30 on an Apple M4: ladder with 2 threads (the default) 4.89 million; list with 2 threads 4.62 million; ladder with 1 thread 3.39 million; list with 1 thread 3.27 million. The first, allocating engine (commit b6f3517) did 4.00 million.</desc>
+  <style>
+    svg { --surface: #fcfcfb; --ink: #0b0b0b; --ink2: #52514e; --muted: #898781; --grid: #e1e0d9; --axis: #c3c2b7; --accent: #2a78d6; --rest: #898781; }
+    @media (prefers-color-scheme: dark) {
+      svg { --surface: #1a1a19; --ink: #f0efec; --ink2: #c3c2b7; --muted: #898781; --grid: #2c2c2a; --axis: #383835; --accent: #3987e5; --rest: #898781; }
+    }
+    text { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, Helvetica, Arial, sans-serif; }
+    .bg { fill: var(--surface); }
+    .title { fill: var(--ink); font-size: 16px; font-weight: 600; }
+    .sub { fill: var(--ink2); font-size: 12px; }
+    .cat { fill: var(--ink2); font-size: 12.5px; text-anchor: end; }
+    .cat.on { fill: var(--ink); font-weight: 600; }
+    .val { fill: var(--ink2); font-size: 12.5px; font-variant-numeric: tabular-nums; }
+    .val.on { fill: var(--ink); font-weight: 600; }
+    .tick { fill: var(--muted); font-size: 11px; text-anchor: middle; font-variant-numeric: tabular-nums; }
+    .ref { fill: var(--ink2); font-size: 11.5px; text-anchor: middle; }
+    .note { fill: var(--muted); font-size: 11px; }
+    .grid { stroke: var(--grid); stroke-width: 1; }
+    .axis { stroke: var(--axis); stroke-width: 1; }
+    .base { stroke: var(--ink2); stroke-width: 1.5; stroke-dasharray: 4 3; }
+    .bar { fill: var(--rest); }
+    .bar.on { fill: var(--accent); }
+  </style>
+  <rect class="bg" x="0" y="0" width="760" height="312" rx="8"/>
+  <text class="title" x="24" y="34">Full-day replay throughput</text>
+  <text class="sub" x="24" y="54">Events a second, millions: NASDAQ 2019-12-30, every symbol (264.5 M events), Apple M4, median of 3</text>
+
+  <!-- x: 232 + value(M) * 87.27; rows centred at 110, 150, 190, 230 -->
+  <line class="grid" x1="319.27" y1="86" x2="319.27" y2="254"/>
+  <line class="grid" x1="406.55" y1="86" x2="406.55" y2="254"/>
+  <line class="grid" x1="493.82" y1="86" x2="493.82" y2="254"/>
+  <line class="grid" x1="581.09" y1="86" x2="581.09" y2="254"/>
+  <line class="grid" x1="668.36" y1="86" x2="668.36" y2="254"/>
+  <line class="axis" x1="232" y1="86" x2="232" y2="254"/>
+  <text class="tick" x="232" y="272">0</text>
+  <text class="tick" x="319.27" y="272">1 M</text>
+  <text class="tick" x="406.55" y="272">2 M</text>
+  <text class="tick" x="493.82" y="272">3 M</text>
+  <text class="tick" x="581.09" y="272">4 M</text>
+  <text class="tick" x="668.36" y="272">5 M</text>
+
+  <!-- the first engine, b6f3517: 3,999,129 events/s -->
+  <line class="base" x1="581.01" y1="80" x2="581.01" y2="254"/>
+  <text class="ref" x="581.01" y="74">first engine (b6f3517): 4.00 M</text>
+
+  <!-- bars, 24 px, rounded at the data end only -->
+  <path class="bar on" d="M232,98 h422.39 a4,4 0 0 1 4,4 v16 a4,4 0 0 1 -4,4 h-422.39 z"/>
+  <path class="bar" d="M232,138 h399.40 a4,4 0 0 1 4,4 v16 a4,4 0 0 1 -4,4 h-399.40 z"/>
+  <path class="bar" d="M232,178 h291.47 a4,4 0 0 1 4,4 v16 a4,4 0 0 1 -4,4 h-291.47 z"/>
+  <path class="bar" d="M232,218 h280.99 a4,4 0 0 1 4,4 v16 a4,4 0 0 1 -4,4 h-280.99 z"/>
+
+  <text class="cat on" x="220" y="114.5">Ladder, 2 threads (default)</text>
+  <text class="cat" x="220" y="154.5">List, 2 threads</text>
+  <text class="cat" x="220" y="194.5">Ladder, 1 thread</text>
+  <text class="cat" x="220" y="234.5">List, 1 thread</text>
+
+  <text class="val on" x="666.39" y="114.5">4.89 M</text>
+  <text class="val" x="643.40" y="154.5">4.62 M</text>
+  <text class="val" x="535.47" y="194.5">3.39 M</text>
+  <text class="val" x="524.99" y="234.5">3.27 M</text>
+
+  <text class="note" x="24" y="298">The default is 22 % faster than the first engine for 65 % more CPU; on one thread the preallocated pools cost ~15 %.</text>
+</svg>

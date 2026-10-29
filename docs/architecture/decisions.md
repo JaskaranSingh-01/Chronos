@@ -12,9 +12,10 @@ consequences, what a future change must preserve, and the evidence still missing
 
 The approved designs these come from are the project's design specifications (architecture, 2026-10-09, with the
 event contract revision of 2026-10-12; UI, 2026-10-15; Strategy Lab, 2026-10-18; per-symbol store, 2026-10-21; engine
-performance, 2026-10-24; ORB, 2026-10-27), kept outside this repository. This file is the record that ships with the
-code. D1 to D4 keep the numbers the architecture specification gave them, which [backtesting.md](../backtesting.md)
-also uses; the rest are numbered here. Where an "Alternatives" entry says nothing was recorded, none was.
+performance, 2026-10-24; ORB, 2026-10-27), kept outside this repository. D21 and D22 (2026-10-29) are recorded here
+without a separate design specification. This file is the record that ships with the code. D1 to D4 keep the numbers
+the architecture specification gave them, which [backtesting.md](../backtesting.md) also uses; the rest are numbered
+here. Where an "Alternatives" entry says nothing was recorded, none was.
 
 | # | Decision | Status |
 |---|---|---|
@@ -27,7 +28,7 @@ also uses; the rest are numbered here. Where an "Alternatives" entry says nothin
 | [D7](#d7-the-order-book-representation) | The order-book representation | implemented; a bitmap over the ladder is proposed |
 | [D8](#d8-order-storage-preallocated-fixed-capacity) | Order storage: preallocated, fixed capacity | implemented |
 | [D9](#d9-a-separate-chronos-serve-executable) | A separate `chronos-serve` executable | implemented |
-| [D10](#d10-the-engine-thread-owns-the-session-channels-are-bounded) | The engine thread owns the session; channels are bounded | implemented, with two known gaps |
+| [D10](#d10-the-engine-thread-owns-the-session-channels-are-bounded) | The engine thread owns the session; channels are bounded | implemented, with three known gaps |
 | [D11](#d11-determinism-digests-and-reproduction) | Determinism, digests and reproduction | implemented; a rolling digest is proposed |
 | [D12](#d12-benchmark-isolation-and-the-evidence-rule) | Benchmark isolation and the evidence rule | implemented |
 | [D13](#d13-symbol-and-day-scope) | Symbol and day scope | implemented |
@@ -38,6 +39,8 @@ also uses; the rest are numbered here. Where an "Alternatives" entry says nothin
 | [D18](#d18-backward-seek-by-restart-and-fast-forward) | Backward seek by restart and fast-forward | implemented |
 | [D19](#d19-a-second-real-source-lobster) | A second real source: LOBSTER | accepted, not built |
 | [D20](#d20-retire-the-pre-m1-pipeline-and-its-matching-engine) | Retire the pre-M1 pipeline and its matching engine | implemented |
+| [D21](#d21-strategies-are-plugins-behind-a-registry) | Strategies are plugins behind a registry | implemented |
+| [D22](#d22-strategies-written-in-the-browser-are-sandboxed-lua-in-the-server) | Strategies written in the browser are sandboxed Lua in the server | implemented |
 
 ---
 
@@ -92,13 +95,13 @@ resting the rest was considered; a marketable day order is rejected instead (pos
 ## D3. One deterministic, step-wise event loop
 
 **Status:** implemented (the loop, and its step-wise form in commit `05623c2`). Running the headless replay through it
-with a null strategy is accepted (task M3.07) and not built.
+with a null strategy is accepted (roadmap task M3.07) and not built.
 
 **Context.** A backtest needs one order of events that never depends on a clock. The original loop then pulled the
 next market event before running due simulator events, so nothing outside it could advance time between market events:
 an interactive session could not pace, pause or deliver an order on a quiet symbol.
 
-**Decision.** One loop merges the market stream with the simulator's own events in (exchange time, class, sequence)
+**Decision.** One loop merges the market stream with the simulator's own events in (timestamp, class, sequence)
 order, market first at a tie, and reads no clock. It exposes peek, advance-to, step and finish, and its run is built
 from them, so a headless backtest and a paced session run the same code. Simulator events at a market event's exact
 time run after every market event at that time.
@@ -166,11 +169,12 @@ command boundary.
 **Alternatives.** The UI design allowed virtual dispatch in the server's adapter, as cheap enough at UI speed. The first
 implementation used a closed set of types instead, which D21 replaced.
 
-**Consequences.** A strategy cannot change history, read a wall clock, or see an event before the book has applied it
-([I6](README.md#the-invariants)). Adding a strategy means adding one file ([D21](#d21-strategies-are-plugins-behind-a-registry)). Manual orders
-from the terminal do not pass through the strategy interface: there is no "UI bridge" strategy. They go through the
-same order gateway, so they meet the same risk checks, latency and fill rules, and the command log records them as
-commands with their own lifecycle.
+**Consequences.** A strategy is given read-only state and no clock (a script's sandbox enforces the latter, a C++
+plugin keeps it as a rule), and cannot see an event before the book has applied it ([I6](README.md#the-invariants)).
+Adding a strategy means adding one file ([D21](#d21-strategies-are-plugins-behind-a-registry)). Manual orders from
+the terminal do not pass through the strategy interface: there is no "UI bridge" strategy. They go through the same
+order gateway, so they meet the same risk checks, latency and fill rules, and the command log records them as commands
+with their own lifecycle.
 
 **Preserve.** Strategies get read-only state and act only through the gateway.
 
@@ -226,35 +230,40 @@ the standard library; CI checks that nothing in the engine includes server or we
 
 ## D10. The engine thread owns the session; channels are bounded
 
-**Status:** implemented, with two known gaps.
+**Status:** implemented, with three known gaps.
 
 **Decision.** One engine thread per session owns its book, simulator, portfolio and strategy. The I/O threads reach it
 only through bounded admission queues (commands and controls, refused when full), a latest-value snapshot slot (the
-engine skips a frame rather than wait), a numbered report ring (readers that fall behind resync), and a bounded log
-queue. The engine only try-locks the admission queues and the snapshot slot; the other locks it shares are held by
-other threads for short, bounded copies, never across network or disk I/O. Queues, slots and rings are allocated at
-session start.
+engine skips a frame rather than wait), a latest-value chart-history slot (the engine skips it rather than wait), a
+numbered report ring (readers that fall behind resync), and a bounded log queue; admitting I/O threads also publish
+each command's admission records into the ring and the log queue. While it works the engine only try-locks the
+admission queues and the snapshot and history slots; between ticks it takes the admission lock to sleep on it. That
+lock and the others it shares are held by other threads for short, bounded copies, never across network or disk I/O.
+Queues, slots and rings are allocated at session start.
 
 **Alternatives.** A lock-free triple buffer for snapshots, deferred: a mutex slot the engine only try-locks was the
 simple, proven option for the first version, to be replaced only if a measurement shows the engine waiting.
 
-**Consequences.** A slow client loses snapshots, not correctness. Two gaps: the engine can wait briefly on a lock
-another thread holds ([Q3](README.md#open-questions-and-known-gaps)), and a client that stops reading grows its own
-send buffer in the server ([Q4](README.md#open-questions-and-known-gaps)).
+**Consequences.** A slow client loses snapshots, not correctness. Three gaps: the engine can wait briefly on a lock
+another thread holds ([Q3](README.md#open-questions-and-known-gaps)), a client that stops reading grows its own send
+buffer in the server ([Q4](README.md#open-questions-and-known-gaps)), and a record that carries a script's source makes
+the ring's memory far larger than its fixed fields ([Q12](README.md#open-questions-and-known-gaps)).
 
 **Preserve.** [I7](README.md#the-invariants), [I9](README.md#the-invariants).
 
 **Evidence still required.** A measurement of the engine's waits under a slow reader and heavy admission; a bound on
-a client's send buffer.
+a client's send buffer, and on the text a channel's records may hold.
 
 ## D11. Determinism, digests and reproduction
 
 **Status:** implemented. A rolling digest is proposed.
 
-**Decision.** No wall clock in any result; explicit ordering; integer arithmetic. Digests of the book, the execution
-state and the portfolio, the last covering every fill in order. Every interactive session writes a command log with
-the build and each input's hash; every Lab run records its build, inputs and settings, and can be verified or watched
-again to the same digests, or is reported as run on different code or changed input.
+**Decision.** No wall clock in any result, except that a script call that runs past 30 s of wall time fails its run
+([D22](#d22-strategies-written-in-the-browser-are-sandboxed-lua-in-the-server)); explicit ordering; integer arithmetic.
+Digests of the book, the execution state and the portfolio, the last covering every fill in order. Every interactive
+session writes a command log with the build and each input's hash; every Lab run records its build, inputs and
+settings, and can be verified or watched again to the same digests, or is reported as run on different code or changed
+input.
 
 **Alternatives.** The Lab's first portfolio digest hashed the totals only; it was replaced (commit `f45ac6a`) by one
 over every fill in order, since two different fill sequences can share their totals.
@@ -281,8 +290,9 @@ correctness gate; defaults are chosen by a written selection rule.
 
 **Decision.** A replay covers one symbol, a list or all symbols of one day, with one book per symbol over shared
 storage. A backtest trades one symbol: in the CLI over one day, in the server (the terminal and the Lab) over one or
-more consecutive days played as one stream with a Clear between days. Several venues, or several traded symbols in one
-run, are out of scope; a time-ordered merge of sources is planned for multi-venue replay.
+more days (up to 32, in date order, not necessarily consecutive) played as one stream with a Clear between days.
+Several venues, or several traded symbols in one run, are out of scope; a time-ordered merge of sources is planned for
+multi-venue replay.
 
 **Consequences.** The portfolio is single-symbol. Cross-symbol strategies are not possible.
 
@@ -290,9 +300,10 @@ run, are out of scope; a time-ordered merge of sources is planned for multi-venu
 
 **Status:** implemented. Supersedes the first architecture's non-goal "multi-threading".
 
-**Decision.** The engine's state is owned by one thread. For the headless replay only, a reader thread decodes ahead
-into a single-producer single-consumer ring and the book thread applies in source order, giving the same books.
-Sessions and backtests stay on one thread each.
+**Decision.** The engine's state is owned by one thread. In the CLI (`simulator replay` and `simulator backtest` with
+`--threads 2`, the default), a reader thread decodes ahead into a single-producer single-consumer ring, and the replay
+loop or the event loop applies in source order on the other thread, giving the same books. The server's sessions and
+Lab runs decode and apply on one thread each.
 
 **Rationale.** Measured: +44 % throughput on the full day for +37 % CPU, with identical digests
 ([performance-and-determinism.md](performance-and-determinism.md#the-recorded-baseline)).
@@ -380,10 +391,11 @@ limits and results; the Lab's types. Every new strategy would repeat that.
 
 **Decision.** A strategy is a plugin: one file in `strategies/` that registers it with its name, label, summary,
 params (each a field of its params struct, with bounds and help), default risk limits, and optionally how to build it,
-its stats and a check of its params against the limits. The registry is the only list of strategies: the CLI's
-`--strategy` and `--param`, the server's decoder and `/api/strategies`, the command log, the Lab's results and the
-Lab's form all read it. A strategy runs behind `AnyStrategy`, whose callbacks are virtual. Every plugin is compiled
-into an object library linked into each executable, so its registration runs at start-up.
+its stats and a check of its params against the limits. The registry is the only list of compiled strategies: the
+CLI's `--strategy` and `--param`, the server's decoder and `/api/strategies`, the command log, the Lab's results and
+the Lab's form all read it. A strategy runs behind `AnyStrategy`, whose callbacks are virtual. Every plugin is compiled
+into an object library linked into `simulator`, `chronos-serve` and the two test executables, so its registration runs
+at start-up.
 
 **Alternatives.**
 
@@ -402,12 +414,14 @@ the market maker's name is `market_maker` everywhere. A new strategy needs a reb
 `StrategyRegistryTest` runs every plugin, so a new one is checked for determinism and for leaving history alone with
 no test of its own.
 
-**Preserve.** Nothing outside a plugin names a strategy. A plugin includes only the engine
-(`scripts/check-isolation.sh` scans `strategies/`).
+**Preserve.** Nothing outside a plugin depends on a particular strategy; only two defaults name one (the CLI's
+`--strategy`, `imbalance`, and the Lab form's first choice, `market_maker`, which falls back to the first listed). A
+plugin includes no server or web code (`scripts/check-isolation.sh` scans `strategies/`).
 
 ## D22. Strategies written in the browser are sandboxed Lua in the server
 
-**Status:** implemented (2026-10-29). Supersedes the overview's "in-browser strategy scripting" non-goal.
+**Status:** implemented (2026-10-29). Supersedes the non-goal "in-browser strategy scripting", which the overview
+listed until this decision removed it.
 
 **Context.** The user wants to write strategies in the UI as well as in C++, and to know the rules before writing or
 testing one there. A strategy from the browser runs on the server's threads, next to the engine, so it must neither
@@ -433,9 +447,11 @@ into the server only: the engine library stays standard-library only ([I8](READM
 
 **Consequences.** A script costs about 230 ns an event more than the same logic as a plugin (SPY's full day: 762 ms
 against 272 ms, medians of five interleaved runs), and a Lua port of the imbalance taker makes the plugin's exact
-fills, PnL and digests there. Saved runs carry their scripts, so a run file can be up to 48 KiB larger. A script runs
-only in the server, not the CLI. In the terminal a script's error stops it silently. The order `pairs` visits tables or functions
-used as keys still depends on addresses; the guidelines tell a script not to rely on it. A script loses Lua's
-patterns, `xpcall`, finalizers and `table.move`.
+fills, PnL and digests there. Saved runs carry their scripts, so a run file can be up to 48 KiB larger, and so can a
+report-ring record of an attach ([Q12](README.md#open-questions-and-known-gaps)). A script runs only in the server, not
+the CLI. In the terminal a script's error stops it silently. A script call that runs past 30 s of wall time fails its
+run: the one place a wall clock can decide a result ([I5](README.md#the-invariants)). The order `pairs` visits tables
+or functions used as keys still depends on addresses; the guidelines tell a script not to rely on it. A script loses
+Lua's patterns, `xpcall`, finalizers and `table.move`.
 
 **Preserve.** A run reproduces from what it saved: never run a run's strategy from the store's current copy.

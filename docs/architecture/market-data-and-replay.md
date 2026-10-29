@@ -1,8 +1,8 @@
 # Market data and replay
 
 How a recorded feed becomes historical market state, and what each stage promises the next. The terms are defined in
-[glossary.md](glossary.md); the reference details (byte layouts, the store's file format, download commands) are in
-[market-data.md](../market-data.md).
+[glossary.md](glossary.md); the reference details (the event's fields, the ITCH mapping, the store's layout, download
+commands) are in [market-data.md](../market-data.md).
 
 ## The pipeline
 
@@ -59,7 +59,7 @@ Every reader emits the same fixed-size event. Its meaning:
 | **Replace** | a resting order was withdrawn and a new one, with a new id, price and quantity, now rests behind the orders at its price |
 | **Trade** | a trade printed against no displayed order (hidden liquidity); it changes no order |
 | **Status** | the symbol's trading state changed (trading, halted, paused, quotation only) |
-| **Clear** | the book is emptied: emitted between consecutive days, never by a feed message |
+| **Clear** | the book is emptied: emitted between one day of a multi-day run and the next, never by a feed message |
 | **Modify** | reserved for a future source; the book rejects it as unsupported |
 
 [event-and-execution-model.md](event-and-execution-model.md) gives each type's effect on the book.
@@ -164,7 +164,7 @@ and result so that a decoding error, which typically shows as unknown orders or 
 |---|---|---|
 | Replay | one symbol, a list, or every symbol of a day; one book per symbol over shared storage | **Verified** (every symbol of the full day) |
 | CLI backtest | one symbol, one day | **Verified** |
-| Session, Lab run | one symbol, one or more consecutive days | **Implemented** |
+| Session, Lab run | one symbol, one or more days (up to 32, in date order, not necessarily consecutive) | **Implemented** |
 | Several venues merged by time | — | **Planned** (a k-way merge of sources by time) |
 | Several symbols in one backtest or session | — | **Out of scope** |
 
@@ -172,7 +172,7 @@ and result so that a decoding error, which typically shows as unknown orders or 
 
 Reading one symbol's day from the day file means framing all 8.25 GB of it. The store, built once per day by the
 server (about a minute a day), keeps one compressed file per symbol, holding that symbol's segment of each day, so a
-one-symbol replay reads about 1 % of the day (for AAPL).
+one-symbol replay reads about 0.6 % of the day (for AAPL; 17 MB as stored).
 
 Its contract:
 

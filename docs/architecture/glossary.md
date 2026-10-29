@@ -36,10 +36,20 @@ invariant.
 **Generation.** In the server, one replay of one symbol over its days from the start: a fresh book, simulator,
 portfolio and strategy. A restart, a backward seek, a symbol load or a Watch starts a new one.
 
-**Day chain.** Several consecutive days of one symbol played as one stream, with a clear between days.
+**Day chain.** Several days of one symbol, in date order, played as one stream, with a clear between days. A run in the
+server covers one or more days (up to 32, in date order, not necessarily consecutive).
 
 **Per-symbol store.** The server's derived copy of each day, one compressed file per symbol, so one symbol's day can be
 read without reading the whole day file.
+
+**Segment.** One symbol's messages of one day in the per-symbol store, compressed and hash-checked as it is read. Its
+hash is the day's identity in a Lab run.
+
+**System Events.** The ITCH `S` messages that mark the phases of a trading day; `Q` starts and `M` ends market hours.
+The server reads each day's regular session from them, and takes 09:30-16:00 ET for a day that lacks either.
+
+**LOBSTER.** A research dataset of NASDAQ limit-order-book messages with a book snapshot after each; the planned second
+source and correctness reference ([D19](decisions.md#d19-a-second-real-source-lobster)).
 
 ## Trading and execution
 
@@ -53,6 +63,18 @@ strategy sees. A simulated fill is never a trade in this sense; it is drawn on t
 **Strategy order** (or **simulated order**, **our order**). An order sent by a strategy, or by a person at the
 terminal, through the order gateway. It exists only in the simulation and never enters the historical book.
 
+**IOC** (immediate or cancel). A simulated order that, on arrival, fills what the visible opposite levels offer up to
+its price, best first, as taker, and expires the rest. Its fills remove no historical liquidity.
+
+**Post-only order** (or **day order**). The simulated order that rests: rejected (`would_cross`) if it would take
+liquidity on arrival, else it joins the back of its price's visible queue as a shadow order until it fills, is
+cancelled, or expires at the day's Clear.
+
+**Maker, taker.** A fill's liquidity: maker for a resting order filled by a fill rule, at its own price; taker for an
+IOC's fill at the book's price. Fees are per share, set separately for each; a negative maker fee is a rebate.
+
+**Touch.** The best bid and the best ask. A long position is marked at the bid, a short one at the ask.
+
 **Shadow order.** A simulated day order resting in the execution simulator: its price, remaining quantity, and its
 place in the historical queue (the quantity ahead of it).
 
@@ -64,13 +86,18 @@ Chronos has none for historical orders: the historical book only records what th
 thing is the execution simulator, which decides only simulated fills.
 
 **Strategy plugin.** A file in `strategies/` that registers one strategy: its name, params, default risk limits and
-stats. Built into every executable; nothing else names a strategy.
+stats. Linked into `simulator`, `chronos-serve` and the tests; apart from two defaults (the CLI's `imbalance`, the Lab
+form's `market_maker`), nothing else names a strategy.
 
 **Script** (or **strategy script**). A strategy written in the browser: Lua source saved by the server and run in a
 sandbox; its strategy name is `script:` and its own name. A run keeps a copy of its source.
 
-**Strategy registry.** The one list of strategies, sorted by name, from which the CLI, the server and the Lab learn
-each strategy's params and build it.
+**Strategy registry.** The one list of compiled strategies (plugins), sorted by name, from which the CLI, the server
+and the Lab learn each one's params and build it; the server offers saved scripts beside it.
+
+**Trading window.** The hours an attached strategy may trade: each day's regular session from its System Events
+(`regular`, a Lab run's default), or the full day (`full_day`, the terminal's). Outside it the strategy sees no market
+event; at each close its resting orders are cancelled and the gateway refuses its orders until the next session opens.
 
 **Execution simulator.** The component that holds shadow orders and decides their fills by the fill rules as market
 events arrive, fills IOC orders against the visible book on arrival, and emits execution reports.
@@ -107,12 +134,15 @@ would not allow; counted as a check on the model.
 the simulator's own scheduled events. All ordering, latencies and records use it.
 
 **Wall-clock time.** The real time of the machine. The server's engine thread reads it to pace an interactive replay,
-its I/O threads for timeouts and rate limits, and the replay loop to sample the cost per event when asked; it never
-affects a result.
+its I/O threads for timeouts and rate limits, the Lab worker to time a run, the replay loop to sample the cost per
+event when asked, and a script's sandbox to stop a call after 30 s. It never affects a result, except that a script
+call that runs past 30 s of wall time fails its run
+([D22](decisions.md#d22-strategies-written-in-the-browser-are-sandboxed-lua-in-the-server)).
 
 **Event loop.** The single-threaded loop that merges one symbol's market events with the simulator's events (order and
-cancel arrivals, report deliveries, timers) in (exchange time, class, sequence) order, and drives the simulator, the
-book, the portfolio and the strategy. It can run to the end or be stepped.
+cancel arrivals, report deliveries, timers) in (timestamp, class, sequence) order, where the class is 0 for a market
+event, 1 for a simulator event and 2 for a manual command, and drives the simulator, the book, the portfolio and the
+strategy. It can run to the end or be stepped.
 
 **Replay loop.** The headless loop that applies market events to one or many books with no simulation.
 
@@ -139,6 +169,12 @@ older ones are dropped, not queued.
 that clients read and resume from.
 
 ## Evidence
+
+**Verify.** Re-running a saved Lab run on the server's current build over its days as the store holds them now, and
+reporting reproduced (the same digests), mismatch, different code or input changed.
+
+**Watch.** Replaying a saved Lab run in the Trading Terminal, as a new generation with the run's settings, at any pace,
+ending in the same verdict as Verify.
 
 **State digest** (or **digest**). A 64-bit hash of a state, computed in a fixed byte order so that it does not depend
 on the host: of a book, of all books of a replay, of the execution state, or of the portfolio with every fill in order.

@@ -1,6 +1,6 @@
 # chronos-serve: sessions, the Strategy Lab and the protocol
 
-`chronos-serve` serves the Trading Terminal and the Strategy Lab ([ui.md](ui.md)) from one process:
+`chronos-serve` serves the Trading Terminal, the Strategy Lab and the Strategies page ([ui.md](ui.md)) from one process:
 
 ```bash
 ./build/chronos-serve --data data/itch --date 2019-12-30     # then open http://127.0.0.1:8080/
@@ -15,20 +15,42 @@ about a minute a day, before it is served. Every option is in [cli.md](cli.md#ch
 The server runs one interactive session: a `ReplaySession` on a thread of its own (`SessionRunner`), the only thread in
 the process that paces a replay by a clock.
 
-- **Generations.** Loading a symbol (and its days) starts a new generation: a fresh `EventLoop` over that symbol's
-  segments, paused before its first event. Every message carries the session id and the generation, so a client never
-  confuses an old generation's data with the new one's; a command stamped with an old generation is refused
-  (`stale_generation`).
+- **Generations.** Loading a symbol (and its days), a restart, a backward seek or a Watch starts a new generation: a
+  fresh `EventLoop` over that symbol's segments (its share of each day in the store), paused before its first event.
+  Every message carries the session id and the generation, so a client never confuses an old generation's data with the
+  new one's; a command stamped with an old generation is refused (`stale_generation`).
 - **Controls.** Play, pause, step N events, speed (1×, 10×, 100× or Max), seek to an exchange time (the replay runs
   forward to it at full speed, sending `progress`), cancel a seek, restart, load a symbol, and watch a Lab run.
 - **Orders.** Post-only, IOC and market orders go through the backtests' `ExecutionSimulator`: 50 µs to arrive, 50 µs
   for each report, a place in the L3 queue. A market order is an IOC limited to 1 % beyond the best opposite price,
-  rounded to the cent. A price off the cent grid at $1 or more is rejected (`off_tick`), as Reg NMS Rule 612 requires.
-  Limits: 10,000 shares of position, 1,000 shares an order, 16 open orders.
-- **A strategy in the session.** `attach` runs a registered strategy against the live replay from the next event, and
-  `detach` stops it; each cancels whatever rests first. Manual orders are refused while one is attached.
+  rounded down to the price grid (a cent at $1 or more). A price off the cent grid at $1 or more is rejected
+  (`off_tick`), as Reg NMS Rule 612 requires. Limits: 10,000 shares of position, 1,000 shares an order, 16 open orders.
+- **A strategy in the session.** `attach` runs a registered strategy, or a script (`script:<name>` with its `source`),
+  against the live replay from the next event, and `detach` stops it; each cancels whatever rests first. Manual orders
+  and cancels are refused (`not_ready`) while one is attached.
 - **One controller.** The first tab to connect controls the session; any other is a viewer that sees everything and
   sends nothing, and is told why.
+
+A manual order, from the ticket to its fill:
+
+```mermaid
+sequenceDiagram
+    participant B as Browser
+    participant IO as I/O thread
+    participant E as Engine thread
+    participant W as Log writer
+    B->>IO: order, stamped with its generation
+    Note over IO: schema, controller, rate limit
+    IO->>E: admitted: numbered (command_seq), its line queued for the log
+    IO->>W: the admitted line
+    W-->>IO: written and flushed
+    IO-->>B: ack (command_seq, persisted)
+    Note over E: applies it at the next boundary of the replay
+    E-->>IO: reports through the ring: accepted, fill, ...
+    IO-->>B: report, numbered (seq)
+    E-->>IO: the latest snapshot, up to 30 a second
+    IO-->>B: snapshot
+```
 
 ### The command log
 
@@ -62,11 +84,12 @@ have applied it), and every later command is refused, so the log replays the ses
 The Lab runs backtests on a worker thread of its own, one at a time with up to 8 waiting, while the terminal plays: a
 registered strategy over one symbol and one or more days, at full speed.
 
-- **A run** is posted as `{"symbol":"SPY","days":["2019-12-30"],"strategy":"market_maker"}`. Every other key takes
-  `simulator backtest`'s default: `params`, `latency` (`order_ns`, `report_ns`), `fees` (`maker`, `taker`, in ticks a
-  share), `limits` and `window`. The window is `"regular"` by default, so a strategy trades only inside each day's feed
-  session, from its own 'Q' to its 'M' System Event (09:30-16:00 when a file lacks them); `"full_day"` trades the whole
-  file. A one-day, full-day run with the defaults gives `simulator backtest`'s PnL, fills and fill attribution.
+- **A run** is posted as `{"symbol":"SPY","days":["2019-12-30"],"strategy":"market_maker"}`. Every other key is
+  optional: `params`, `latency` (`order_ns`, `report_ns`), `fees` (`maker`, `taker`, in ticks a share) and `limits` take
+  `simulator backtest`'s defaults. `window` is `"regular"` by default, so a strategy trades only inside each day's feed
+  session, from its own 'Q' to its 'M' System Event (ITCH's start and end of market hours; 09:30-16:00 when a file lacks
+  them); `"full_day"` trades the whole file, as `simulator backtest` does. A one-day, full-day run with the defaults
+  gives `simulator backtest`'s PnL, fills and fill attribution.
 - **Strategies written in the browser**: Lua scripts saved from the Strategies page, `strategy-scripts/<name>.lua` in
   the working directory, run in a sandbox ([strategies.md](strategies.md#a-strategy-written-in-the-browser)). A run of
   `script:<name>` copies the script's source into its spec, so Verify and Watch run the copy, whatever happened to the
@@ -99,7 +122,7 @@ registered strategy over one symbol and one or more days, at full speed.
 | `GET /api/history?session_id=&generation=&from_ts=` | a generation's 1 s candles and trades from `from_ts` on |
 | `GET /api/sessions/<id>/log` | a session's command log |
 | `GET /api/strategies` | the strategies, their labels, params, defaults and caps, then each saved script that loads; the windows, `max_days` and `max_queued` |
-| `GET /api/scripts` | the strategies written in the Lab: each one's name, whether it loads, and why not |
+| `GET /api/scripts` | the strategies written on the Strategies page: each one's name, whether it loads, and why not |
 | `GET /api/scripts/<name>` | a script's source and what loading it finds: its summary, params and limits, or its error |
 | `PUT /api/scripts/<name>` | saves `{"source"}` (48 KiB at most), even one that does not load, and answers as `GET` does; 409 past 200 scripts |
 | `DELETE /api/scripts/<name>` | deletes a script; runs keep their copies of it |
@@ -108,7 +131,7 @@ registered strategy over one symbol and one or more days, at full speed.
 | `GET /api/backtests/<id>` | the whole run: spec, provenance, results |
 | `POST /api/backtests/<id>/cancel` | cancels a queued or running run; 409 once it has ended |
 | `DELETE /api/backtests/<id>` | removes a run and its file; a running one stops and is never saved |
-| `POST /api/backtests/<id>/verify` | re-runs a completed run and records the verdict; 409 if partial, if a day's segment changed, or if recorded before the per-symbol store |
+| `POST /api/backtests/<id>/verify` | re-runs a completed run and records the verdict: 202 `{"id"}`; 409 `not_completed` (not completed, or partial), `input_changed` (a day's segment changed), `other_settings` (recorded under another `--allow-truncated-tail`) or `before_store` (recorded before the per-symbol store); 429 when 8 wait |
 | `GET /ws` | the WebSocket |
 
 ## The WebSocket protocol
@@ -121,11 +144,11 @@ arrays, to keep snapshots small: level `[price, quantity, orders]`, trade `[ts, 
 
 | `type` | Carries |
 |---|---|
-| `hello` | the protocol version (2), the session id, the generation, this tab's role (`controller` or `viewer`), the scales |
+| `hello` | the protocol version (2), the session id, the generation, this tab's role (`controller` or `viewer`), the price and quantity scales, the session's fees and risk limits |
 | `state` | a full snapshot, sent on connect and on a new generation: book, trades, candles, our orders and account, the generation's spec and days, the run it watches, metrics |
 | `snapshot` | the same, up to 30 a second while the replay moves |
-| `report` | `kind`: `execution` (accepted, rejected, fill with its rule and queue ahead at entry, cancelled, cancel_rejected, expired), `lifecycle` (a command's steps), `generation_start`, `generation_end`, `reproduced` (a Watch's verdict); each with a `seq` |
-| `ack` | a control's or command's acceptance, with its `seq` |
+| `report` | `kind`: `execution` (accepted, rejected, fill with its fill-model rule ([backtesting.md](backtesting.md#d2-the-fill-model)) and queue ahead at entry, cancelled, cancel_rejected, expired), `lifecycle` (a command's steps), `generation_start`, `generation_end`, `reproduced` (a Watch's verdict); each with a `seq` |
+| `ack` | a control applied: its `control`, `control_seq`, the session's `state` and its report `seq`; or a command whose admitted line is in the log: its `command_seq` and `persisted` (`flushed`, or `fsynced` with `--fsync`) |
 | `gap` | reports `from`-`to` fell out of the ring before this client read them |
 | `progress` | a running seek's exchange time |
 | `error` | a refusal: `code`, `message`, and the client id or command seq it answers |
@@ -150,11 +173,13 @@ A local tool, still defensive:
 
 - It binds `127.0.0.1` by default. Any other `--host` needs a token (`--token`, or one is made and printed once):
   `/api` wants `Authorization: Bearer <token>`, and a WebSocket's first message is `auth`.
-- Without a token, `/api` and the WebSocket answer only requests whose `Host` is `127.0.0.1` or `localhost`, so a
-  DNS-rebinding page cannot reach them. A WebSocket is accepted only from the page this server served: its `Origin`
-  must be `http://<Host>`, or with a token also `https://<Host>`, for a TLS reverse proxy in front.
-- A POST or DELETE must be `Content-Type: application/json` (else 415) and carry the `Origin` of the page this server
-  served (else 403), so no other site can queue or delete a run. A body over 64 KiB closes the connection.
+- Without a token, `/api` and the WebSocket answer only requests whose `Host` is `127.0.0.1:<port>` or
+  `localhost:<port>`, this server's port, so a DNS-rebinding page cannot reach them. A WebSocket is accepted only from
+  the page this server served: its `Origin` must be `http://<Host>`, or with a token also `https://<Host>`, for a TLS
+  reverse proxy in front.
+- A POST, PUT or DELETE must be `Content-Type: application/json` (else 415) and carry the `Origin` of the page this
+  server served (else 403), so no other site can queue or delete a run, or save or delete a script. A body over 64 KiB
+  closes the connection.
 - Session and run ids are the UTC time and 64 random bits, never derived from input.
 - The token guards trading, not availability: behind anything public, put a buffering reverse proxy in front.
 

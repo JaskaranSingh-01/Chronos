@@ -6,8 +6,9 @@ Chronos is an event-driven historical market simulator in C++20. It reads an exc
 (NASDAQ TotalView-ITCH 5.0), rebuilds the full order book of every symbol message by message, and runs trading
 strategies against that rebuilt book. A strategy's orders wait in the real historical queue and are filled by explicit
 rules, without the historical market ever being changed by them. Every run is deterministic and can be reproduced and
-verified. A local server, `chronos-serve`, puts the same engine behind a browser: a Trading Terminal to replay and
-trade by hand, and a Strategy Lab to run, compare and verify backtests.
+verified. A local server, `chronos-serve`, puts the same engine behind a browser: the Trading Terminal to replay and
+trade by hand, the Strategy Lab to run, compare and verify backtests, and the Strategies page to write strategies as
+Lua scripts.
 
 ## The problem it addresses
 
@@ -41,9 +42,9 @@ strategies are deliberately simple ([Scope](#scope-and-non-goals)).
 
 1. **Replay and check a day.** Rebuild the book of one, several or all symbols of a day file, and report events,
    rejections, invariant checks, digests and timing.
-2. **Backtest a strategy.** Run a registered strategy, or one written in the browser, over one symbol, for one day from
-   the CLI or one or more consecutive days from the server, and get fills with the rule that produced each, PnL,
-   drawdown and fill attribution.
+2. **Backtest a strategy.** Run a registered strategy over one symbol for one day from the CLI, or a registered strategy
+   or one written in the browser over one or more days (up to 32, in date order, not necessarily consecutive) from the
+   server, and get fills with the rule that produced each, PnL, drawdown and fill attribution.
 3. **Trade by hand.** Replay a symbol in the browser at 1×, 10×, 100× or as fast as possible, pause, step, seek, and
    place post-only, IOC or market orders that join the historical queue.
 4. **Run and verify experiments.** Queue backtests from the browser, compare two runs, verify a saved run reproduces
@@ -68,9 +69,9 @@ questions, not missing core pieces. The statuses use the words defined in [READM
 | Strategies as plugins: one file each in `strategies/`, offered by the CLI, the server and the Lab with no other change | **Verified** (every plugin run by `StrategyRegistryTest`; the same fills before and after the move) |
 | Four strategies: a market maker, an imbalance taker, an opening range breakout, the plugin guide's example | **Implemented** (toys by design) |
 | Strategies written in the browser: Lua scripts in a sandbox, checked on save, run in the Lab and Watch, reproduced from the source each run keeps | **Verified** (a Lua port of the imbalance taker makes the C++ plugin's exact fills; a run verifies after its script is edited) |
-| Multi-day runs over consecutive days of one symbol, in the server (the terminal and the Lab); the CLI runs one day | **Implemented** |
+| Multi-day runs over several days of one symbol, in the server (the terminal and the Lab); the CLI runs one day | **Implemented** |
 | `chronos-serve`: an interactive session, a command log that reproduces it, an HTTP and WebSocket API | **Verified** (reproduction from the log is tested) |
-| The Trading Terminal and the Strategy Lab in the browser | **Verified** (end-to-end tests against a real server) |
+| The Trading Terminal, the Strategy Lab and the Strategies page in the browser | **Verified** (end-to-end tests against a real server) |
 | One-command start in Docker | **Implemented** |
 | A LOBSTER adapter, with a per-message check of the book against LOBSTER's own | **Planned** |
 | A k-way merge of several sources by time, for multi-venue replay | **Planned** |
@@ -78,7 +79,7 @@ questions, not missing core pieces. The statuses use the words defined in [READM
 | Regulatory sell fees (SEC Section 31, FINRA TAF) | **Planned** |
 | Faster new-level placement (the largest share of the book thread's time) | **Planned** |
 | An engine monitor and a symbol browser in the UI (UI-3, not yet specified) | **Partial**: an engine strip shows the event rate, dropped snapshots and the configured latencies; a ranked symbol picker, no browser |
-| CSV input in the CLI | **Planned**, an open question |
+| CSV input in the CLI | **Planned** |
 
 ## Non-functional requirements
 
@@ -97,7 +98,7 @@ questions, not missing core pieces. The statuses use the words defined in [READM
 
 In scope: L3 (per-order) equity data, one venue per run, NASDAQ ITCH 5.0 as the real format, simulated IOC,
 post-only and (in the terminal) protected market orders, constant latencies, per-share fees, C++
-strategy plugins, a local single-user server.
+strategy plugins and Lua strategy scripts run in the server's sandbox, a local single-user server.
 
 Out of scope, by decision:
 
@@ -126,7 +127,8 @@ flowchart LR
     ST --> ER[Engine round:<br/>zero allocations, ladder, SPSC]
     ER --> ORB[Ladder a cent apart,<br/>ORB strategy]
     ORB --> DK[Docker, docs,<br/>UI redesign]
-    DK --> NEXT[Planned: LOBSTER, merge,<br/>regulatory fees, faster levels, UI-3]
+    DK --> SP[Strategy plugins<br/>and browser scripts]
+    SP --> NEXT[Planned: LOBSTER, merge,<br/>regulatory fees, faster levels, UI-3]
 ```
 
 A milestone is **done** when each of its completion criteria has evidence; where one does not, the row says which.
@@ -135,7 +137,7 @@ A milestone is **done** when each of its completion criteria has evidence; where
 |---|---|---|
 | **M1** Source-agnostic replay core | every source passes the conformance suite; a full NASDAQ day replays with 0 rejections, passing invariants and no crossed book while trading in regular hours | **Done** for ITCH and CSV; the LOBSTER adapter and its book check are **planned** |
 | **M2** Performance baseline | reproducible numbers on a stated machine and commit; every optimisation justified by a profile with before and after numbers | **Done**; continued by the engine round |
-| **M3** Strategy layer | a market maker runs over a real day and reports fills, position, PnL, fees and drawdown; two runs are identical | **Done** except two tasks, both **planned**: regulatory fees (M3.13) and the replay through the event loop (M3.07) |
+| **M3** Strategy layer | a market maker runs over a real day and reports fills, position, PnL, fees and drawdown; two runs are identical | **Done** except two tasks, both **planned**: regulatory fees and the replay through the event loop (roadmap tasks M3.13 and M3.07) |
 | **M4** Packaging | CLI, CI with sanitizers and formatting, a README | **Done**; the multi-source merge is **planned** |
 | **UI-1** Trading Terminal | headless digests unchanged and headless performance within run-to-run spread; the UI never blocks the engine; a session reproduces from its log; one command starts it | **Done** (2026-10-15 to 2026-10-18), but for the performance criterion, which is partly shown ([A27](testing-and-acceptance.md#the-server-and-the-ui)) |
 | **UI-2** Strategy Lab and multi-day data | runs with states, provenance, cancel and memory bounds; Watch and Verify reproduce runs by digest | **Done** (2026-10-18 to 2026-10-20) |

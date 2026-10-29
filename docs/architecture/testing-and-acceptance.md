@@ -21,10 +21,9 @@ CI jobs are in [testing.md](../testing.md).
 | **Performance** | throughput, cost per event, allocations, memory, against a previous build | `bench/run.sh` full-day and slice runs, micro-benchmarks, a profile, a written selection rule ([performance-and-determinism.md](performance-and-determinism.md)) |
 | **Real data** | every symbol of a real day applies with 0 rejections; backtests on it are identical; every store segment replays to the day file's book | tests that run when a day file is given (skipped otherwise, and in CI, which has no market data); the recorded full-day correctness runs |
 
-Every sanitized build aborts on the first report, so a passing sanitized test is a clean one. On the day this
-document was written (2026-10-28), at commit `9f6b138`, `ctest` ran 698 tests: 692 passed and 6 were skipped (five
-real-data tests without a day file, and one conformance check that does not apply to the in-memory source). With the
-strategy plugins and scripts (2026-10-29), `ctest` ran 723: 717 passed and the same 6 were skipped.
+Every sanitized build aborts on the first report, so a passing sanitized test is a clean one. At commit `b2b9ff7`
+(2026-10-29), `ctest` runs 723 tests: 717 pass and 6 are skipped (five real-data tests without a day file, and one
+conformance check that does not apply to the in-memory source).
 
 ## Acceptance criteria
 
@@ -53,14 +52,14 @@ named), **Pending** (not yet built or measured).
 | A11 | Each fill rule, the trade-price guard, the IOC sweep and the ordering at a tie behave as specified | **Pass** | the worked-example tests |
 | A12 | No look-ahead: an order sent on an event arrives no earlier than the order latency after it | **Pass** | loop tests with latencies, including across a quiet period |
 | A13 | The fill rules are FIFO-consistent on real data | **Partial** | 0 anomalies in the SPY market maker's full day at `a5ed53b` (2026-10-13), recorded in [backtesting.md](../backtesting.md); not re-run since the off-grid rule, and no test asserts it |
-| A14 | Fill rates and PnL are reported with rule (c) on and off, and across latencies | **Pending** | [Q1](README.md#open-questions-and-known-gaps) |
+| A14 | Fill rates and PnL are reported with the crossing-order fill rule ([rule (c)](event-and-execution-model.md#the-fill-rules)) on and off, and across latencies | **Pending** | [Q1](README.md#open-questions-and-known-gaps) |
 
 ### Determinism and reproduction
 
 | # | Criterion | Status | Evidence |
 |---|---|---|---|
 | A15 | Repeated runs on the same input, configuration and build give the same digests | **Pass** | the determinism tests; golden digests; the full-day digest across configurations |
-| A16 | The same digests on different compilers and hosts | **Pass** for Linux/g++ against macOS/clang on the 256 MiB slice | [testing.md](../testing.md#how-correctness-is-checked) |
+| A16 | The same digests on different compilers and hosts | **Pass** for Linux/g++ against macOS/clang on the first 256 MiB of the 2019-12-30 day file | [testing.md](../testing.md#how-correctness-is-checked) |
 | A17 | An interactive session reproduces from its command log, digest for digest | **Pass** | the command-log reproduction tests |
 | A18 | A Lab run reproduces on Verify and Watch, every fill in order; a run on other code or changed input says so | **Pass** | the Lab and Watch tests |
 | A19 | The digest proves prices, not only counts, at the end of a day | **Pending** | a rolling digest is proposed ([Q2](README.md#open-questions-and-known-gaps)) |
@@ -69,7 +68,7 @@ named), **Pending** (not yet built or measured).
 
 | # | Criterion | Status | Evidence |
 |---|---|---|---|
-| A20 | A session that drives the event loop gives the same loop report, book and portfolio as the headless run of the same strategy | **Pass** | a session test against the headless loop; a Lab backtest equals the CLI's backtest for every strategy |
+| A20 | A session that drives the event loop gives the same loop report, book and portfolio as the headless run of the same strategy | **Pass** | a session test against the headless loop; a Lab backtest equals the headless `EventLoop` run for the market maker, the imbalance taker and the ORB (`BacktestTest`) |
 | A21 | A slow or stalled client does not block the engine or other clients | **Pass** | an in-process server test with a client that stops reading; see [Q3](README.md#open-questions-and-known-gaps) |
 | A22 | Ordering at one timestamp is market, then simulator, then command; a command batch's zero-latency orders run after the whole batch | **Pass** | session ordering tests |
 | A23 | A full command queue, a failed log, a stale generation, a viewer, a rate limit and a malformed message each get their defined refusal | **Pass** | peer and server tests |
@@ -96,10 +95,10 @@ named), **Pending** (not yet built or measured).
 |---|---|---|---|
 | A35 | A strategy added as one file is offered by the CLI, the server and the Lab with no other change | **Pass** | `strategies/trend_taker.cpp` was added alone and runs from `--strategy`, `/api/strategies` and the Lab's form |
 | A36 | Every plugin is deterministic and leaves the history digest of a plain replay | **Pass** | `StrategyRegistryTest`, over every registered strategy |
-| A37 | Moving the strategies behind the registry changes no result | **Pass** | the same fills, PnL and books for the three strategies on AAPL and the market maker on SPY, 2019-12-30; the golden digests unchanged |
-| A38 | A strategy written in the browser makes the fills the same logic makes as a plugin | **Pass** | `ScriptStrategyTest` on a synthetic market; the Lab on SPY's full day: the same 48,643 fills, PnL and digests |
+| A37 | Moving the strategies behind the registry changes no result | **Pass** | the same fills, PnL and books for the market maker, the imbalance taker and the ORB on AAPL, and the market maker on SPY, 2019-12-30, checked when they moved behind the registry (recorded in the message of commit `4d46c38`); the golden digests unchanged |
+| A38 | A strategy written in the browser makes the fills the same logic makes as a plugin | **Pass** | `ScriptStrategyTest` on a synthetic market; the Lab on SPY's full day: the same 48,643 fills, PnL and digests (recorded in the message of commit `b2b9ff7`) |
 | A39 | A script's run reproduces from its own source, after the script changes | **Pass** | `ServerTest` verifies a run after its script is edited; `WatchTest` watches a script's run to reproduced |
-| A40 | A script cannot reach files, the clock or the network, and a runaway stops at the same place each run | **Pass** | `ScriptStrategyTest`: the missing libraries, fixed seeds across states, the instruction and memory budgets |
+| A40 | A script cannot reach files, the clock or the network, and a runaway caught by its instruction or memory budget stops at the same place each run (a script call that runs past 30 s of wall time fails its run, [D22](decisions.md#d22-strategies-written-in-the-browser-are-sandboxed-lua-in-the-server)) | **Pass** | `ScriptStrategyTest`: the missing libraries, fixed seeds across states, the instruction and memory budgets |
 | A41 | Writing, checking, running and deleting a strategy works in the browser | **Pass** | the Playwright test of the Strategies page and the Lab |
 
 ## What a new change must pass

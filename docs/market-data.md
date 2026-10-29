@@ -1,5 +1,20 @@
 # Market data: events, sources and the per-symbol store
 
+```mermaid
+flowchart LR
+    FILE[("ITCH 5.0 day file<br/>MMDDYYYY.NASDAQ_ITCH50.bin")]
+    READER["ItchMessageReader<br/>frames the messages"]
+    FILE -->|"mmap"| READER
+    FILE -->|"chronos-serve, once a day"| BUILD["StoreBuilder<br/>splits it by symbol"]
+    BUILD --> STORE[("Per-symbol store<br/>one .itch.zst per symbol, index.tsv")]
+    STORE -->|"one symbol's segment,<br/>hash-checked"| READER
+    READER --> SRC["ItchSource<br/>decodes, filters symbols"]
+    SRC --> EV["MarketEvent<br/>48 bytes"]
+    CSV["CsvSource"] --> EV
+    VEC["VectorSource (tests)"] --> EV
+    EV --> USE["the book, the replay loop, the event loop"]
+```
+
 ## One event type for every source
 
 Every source emits `MarketEvent`, 48 bytes:
@@ -59,14 +74,14 @@ The download is 3,524,013,057 bytes (on 2026-10-13), and the `.bin` 8,251,407,90
 Chronos maps the uncompressed file; it does not read gzip. `data/` is in `.gitignore`: market data is never committed
 or redistributed here.
 
-An optional slice, the first 256 MiB, for quick runs and the real-data tests:
+An optional slice, the first 256 MiB of the 2019-12-30 day file, for quick runs and the real-data tests:
 
 ```bash
 head -c 268435456 data/itch/12302019.NASDAQ_ITCH50.bin > data/itch/12302019.NASDAQ_ITCH50.first-256MiB.bin
 ```
 
-It covers 04:00 to 09:30:10 ET, so it is pre-market only, and its last message is cut, so pass
-`--allow-truncated-tail`.
+Its events run from 03:09 ET (the pre-open trading actions; orders from 04:00) to 09:30:10 ET, so it is pre-market
+only, and its last message is cut, so pass `--allow-truncated-tail`.
 
 ## The per-symbol store
 
@@ -81,8 +96,9 @@ own.
 - **Size.** About a third of the days it holds: 2.8 GiB for 2019-12-30. A build needs free space of at least 60 % of
   its day file; a day without it, or whose build fails, is skipped with a reason on stderr.
 - **Reads.** Every replay of a symbol, the terminal's, a Lab run's, Verify's and Watch's, and `simulator --store`,
-  reads only that symbol's segments: AAPL's day is about 1 % of the file. A segment is checked as it is read (its
-  range, each zstd frame's checksum and its hash), and a damaged one fails naming the symbol and day.
+  reads only that symbol's segments: AAPL's day is about 0.6 % of the file (46 MB of its 8.25 GB, 17 MB as stored).
+  A segment is checked as it is read (its range, each zstd frame's checksum and its hash), and a damaged one fails
+  naming the symbol and day.
 - **Versions.** Each day file's XXH3-128 hash, and the regular hours its own System Events set, are kept in
   `runs/fingerprints.json`. A day file that changes is built again; the Lab's runs record each segment's hash, so a
   change to one symbol's segment does not disturb another's runs.

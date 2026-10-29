@@ -5,6 +5,9 @@ slots are now a cent apart (`ladder_step(price_scale)`, 100 units at ITCH's four
 $2.56, and a price off the cent grid is placed by the list's walk. Measured as in the engine round below, ladder × 2
 is now the fastest configuration and the default.
 
+Mn.nn (M1.32, M2.02 to M2.12) are the project's internal milestone numbers, and "spec §" its internal design notes;
+neither is in this repository.
+
 ## The record
 
 | | |
@@ -14,6 +17,7 @@ is now the fastest configuration and the default.
 | Compiler, build | Apple LLVM 17.0.0 (clang-1700.0.13.5), CMake `Release` (`-O3 -DNDEBUG`) |
 | Machine | Apple M4 (4 performance + 6 efficiency cores), 16 GiB, Darwin 27.0.0, on AC power, Low Power Mode off |
 | Input | `data/itch/12302019.NASDAQ_ITCH50.bin`, as in the engine round |
+| Events | 264,469,515 on the full day (03:09:14 to 20:00:00 ET) and 6,529,870 on the slice: 8,976 and 8,911 more than the 2026-10-13 counts below, the Status events of ITCH `H` messages and of the start-of-system-hours halts |
 | Capacity | `--capacity` 4,194,304, the `--all` default |
 | Cache | no purge; about 500,000 major faults in every full-day run |
 
@@ -24,6 +28,8 @@ is now the fastest configuration and the default.
 | `results/2026-10-27-4e274da-dirty-quiet-matrix.md` | its medians side by side |
 | `results/2026-10-27-4e274da-dirty-interleaved-*/` and `-matrix.md` | a first interleaved matrix earlier that night, superseded (see Caveats) |
 | `results/2026-10-27-4e274da-dirty-ladder-2-bench/` | the default's 5 slice runs, micro-benchmarks and profile |
+| `results/2026-10-27-crossplatform/` | the slice on Linux/g++ 14 (Docker) and macOS/clang 17: the same AAPL and combined digests |
+| `results/2026-10-27-ui-lag/` | the page's time while it watches a run at Max ([docs/ui.md](../docs/ui.md#measuring-the-page)) |
 
 The commands are the engine round's below, with the load gate at 4 (`< 4` in `quiet()`) and these names:
 

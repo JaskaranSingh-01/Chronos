@@ -5,6 +5,23 @@ per symbol for a multi-symbol replay, every book sharing one `BookStorage`.
 
 ## Applying an event
 
+```mermaid
+flowchart LR
+    EV["MarketEvent<br/>Add, Execute, Cancel,<br/>Delete, Replace"] --> APPLY["MarketBook::apply<br/>the only mutator"]
+    APPLY -->|"order id"| OI["OrderIndex<br/>(book, id) → order"]
+    APPLY -->|"side, price"| LI["LevelIndex<br/>(book, side, price) → level"]
+    OI --> SIDE
+    LI --> SIDE
+    subgraph SIDE["Bids, best first"]
+        direction LR
+        P1["$289.31: orders<br/>200 · 100 · 64"]
+        P2["$289.30: orders<br/>300"]
+        P3["$289.29: orders<br/>64 · 100"]
+        P1 --- P2 --- P3
+    end
+    POOLS[("OrderPool, LevelPool<br/>reserved before the replay")] -.->|"every order and level"| SIDE
+```
+
 `MarketBook::apply(event)` is the book's only mutator. It returns an `ApplyResult`, and every rejection leaves the book
 unchanged:
 
@@ -102,9 +119,9 @@ regression check across code changes, not a proof of correctness; the invariants
 
 ## Tests
 
-- `MarketBookTest.RandomStreamKeepsInvariantsAndIsDeterministic`: 10,000 seeded random events of every type, valid and
-  invalid. The invariants hold after every event, a rejected event never changes the digest, and two runs end with the
-  same digest.
+- `MarketBookTest.RandomStreamKeepsInvariantsAndIsDeterministic`: 10,000 seeded random events of every type but
+  Status, valid and invalid. The invariants hold after every event, a rejected event never changes the digest, and
+  two runs end with the same digest.
 - `BookModelTest`: a randomised operation stream applied to the list, to the ladder at steps 1 and 4, and to a plain
   `std::map` reference model gives the same book after every operation.
 - `LadderTest`: every window transition (each edge, recentring, jumps, recycled levels, a refilled side, levels off the

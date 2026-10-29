@@ -33,6 +33,7 @@ function on_report(r)
   if r.type == "fill" then
     fills = fills + 1
     stat("Fills", fills)
+    log("fill", r.side, r.qty, "at", string.format("%.2f", dollars(r.price)))
   end
   if r.type ~= "accepted" and r.leaves == 0 then
     if r.id == bid_id then bid_id = nil elseif r.id == ask_id then ask_id = nil end
@@ -103,10 +104,11 @@ function Guide() {
           <code>closed</code>.
         </li>
         <li>
-          <b>Each call has a budget.</b> 10 million instructions, 1 GiB allocated, 30 s, 256 orders and cancels; 64 MiB
-          held, 64 timers pending. Past any of them the run stops with the line, and <code>pcall</code> cannot catch it.
-          <code>string.find</code> matches plain text; there are no patterns, <code>xpcall</code> or <code>__gc</code>.
-          The event and report tables are reused: copy a field to keep it.
+          <b>Each call has a budget.</b> 10 million instructions, 1 GiB allocated, 30 s, 256 orders and cancels, and 64
+          MiB held. Past any of them the run stops, naming the line (but for memory), and <code>pcall</code> cannot
+          catch it. <code>set_timer</code> refuses a 65th pending timer. <code>string.find</code> matches plain text;
+          there are no patterns, <code>xpcall</code> or <code>__gc</code>. The event and report tables are reused: copy
+          a field to keep it.
         </li>
         <li>
           <b>Save, then test.</b> Save loads the script and shows its params or its error. Then run it in the Strategy

@@ -1,7 +1,7 @@
 # Command-line reference
 
-Two binaries: `simulator`, the engine's CLI, and `chronos-serve`, the server behind the Trading Terminal and the
-Strategy Lab ([server.md](server.md)).
+Two binaries: `simulator`, the engine's CLI, and `chronos-serve`, the server behind the Trading Terminal, the
+Strategy Lab and the Strategies page ([server.md](server.md)).
 
 ## `simulator`
 
@@ -54,7 +54,7 @@ risk limits (default: the strategy's own, from its params):
 fees, per share in price ticks ($0.0001 for ITCH):
   --taker-fee-ticks N     paid when taking liquidity (default 0)
   --maker-fee-ticks N     paid when providing it; negative = rebate (default 0)
-a backtest's day is one session, 09:30-16:00 ET
+a backtest trades the whole file; its strategy is told one session, 09:30-16:00 ET
 
   -h, --help              print this help
   --version               print the commit, build type and compiler
@@ -150,14 +150,16 @@ Digest            7f1e922654415cf3
 ```
 
 The run also prints its configuration first, and `Elapsed`, `Memory` and `Ladder windows` lines last. With `--all`,
-it lists the 10 symbols with the most events and any symbol with rejections or orders left, then the combined digest.
+it lists the 10 symbols with the most events, then up to 40 others with rejections or orders left and a count of the
+rest, then the combined digest.
 
 ### `--json`
 
 `--json PATH` writes one JSON object with `"schema": 1` and the members `date`, `build` (commit, dirty flag, build type,
-compiler), `machine`, `input` (the file, its size and a fingerprint), `run` (the exact arguments), `result`, `time`,
-`memory` and `latency`; `backtest` adds a `backtest` member with its config, fills, fees, PnL, the strategy's
-`params` and its own `stats` (a price stat in ticks). `bench/summary.py` reads these files.
+compiler), `machine`, `input` (the file, its size and a fingerprint), `run` (the symbols, capacity, book, threads and
+invariant-check interval), `result`, `time`, `memory` and `latency`; `backtest` adds a `backtest` member with its
+config, fills, fees, PnL, the strategy's `params` and its own `stats` (a price stat in ticks). `bench/summary.py` reads
+these files.
 
 ## `chronos-serve`
 
@@ -170,7 +172,8 @@ usage: chronos-serve --data DIR [--date YYYY-MM-DD] [--host 127.0.0.1] [--port 8
 Serves an interactive replay of the days in DIR, the files named MMDDYYYY.NASDAQ_ITCH50.bin; the UI picks the
 symbol and its days. A new file is read once, about a minute a day, into the per-symbol store, which every
 replay of a symbol reads, and its hash kept in runs/fingerprints.json. Strategy Lab runs are kept in
-runs/<id>.json, in the working directory.
+runs/<id>.json and the strategies written on the Strategies page in strategy-scripts/<name>.lua, both in the
+working directory.
   --date YYYY-MM-DD       the starting day (default the latest)
   --store DIR             the per-symbol store (default DIR/store), about a third the size of its days;
                           one chronos-serve at a time uses it

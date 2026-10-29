@@ -2,7 +2,8 @@
 
 A backtest replays one symbol's day through `EventLoop<Strategy>`. The strategy sees the historical L3 book after
 each event and sends orders; `ExecutionSimulator` fills them as a queue-position-aware exchange would, without ever
-touching the historical book.
+touching the historical book. The headings D1 to D3 are the decisions of those numbers in
+[architecture/decisions.md](architecture/decisions.md).
 
 ```bash
 ./build/simulator backtest data/itch/12302019.NASDAQ_ITCH50.bin --symbol SPY --date 2019-12-30 --strategy market_maker
@@ -17,14 +18,17 @@ touching the historical book.
   `ExecutionSimulator` as shadow orders and are never inserted into `MarketBook`. Historical orders are never matched
   against each other.
 - So a backtest leaves the same history digest as a plain replay of the same file, which `BacktestDeterminismTest`
-  asserts, on synthetic data always and on a real day when `CHRONOS_ITCH_FILE` is set.
+  asserts, on synthetic data always and on a real day when `CHRONOS_ITCH_FILE` is set. The digest hashes the orders
+  still resting, so it tells runs apart only while the book holds orders, as at the end of the slice below; after a
+  full day both are the empty book's `cbf29ce484222325`, and the real-day test rests on identical reports and 0
+  rejections.
 
 ## D3: one deterministic loop
 
-- `EventLoop<S>` merges the market stream with `SimQueue`, which holds only our events (`OrderArrive`,
-  `CancelArrive`, `ReportDeliver`, `Timer`). Events run in (timestamp, stream, sequence) order, and a tie goes to the
-  market event. That is pessimistic on purpose: an order that arrives at `t` queues behind every historical Add
-  stamped `t`.
+- `EventLoop<S>` merges the market stream with `SimQueue`, which holds only our events (`OrderArrive`, `CancelArrive`,
+  `ReportDeliver`, `Timer`). Events run in (timestamp, class, sequence) order, the class 0 for a market event and 1 for
+  ours, so a tie goes to the market event. That is pessimistic on purpose: an order that arrives at `t` queues behind
+  every historical Add stamped `t`.
 - Per market event, in this order:
   1. `ExecutionSimulator::on_market` on the pre-event book, because the fill rules need the historical order that the
      event references;
@@ -40,6 +44,27 @@ touching the historical book.
   of them. New timers are refused from then on.
 - The loop never reads a wall clock: the same input and flags give the same output, byte for byte.
 
+An order's life, end to end:
+
+```mermaid
+sequenceDiagram
+    participant S as Strategy
+    participant G as Gateway and Portfolio
+    participant X as ExecutionSimulator
+    participant M as Market events
+    S->>G: send(Buy, price, 100, Day)
+    G-->>S: RiskCheck::Accepted, or the limit it breaks
+    Note over G,X: order latency, 50 µs
+    G->>X: the order arrives and joins the back of the visible queue
+    loop every market event, before the book applies it
+        M->>X: (b) shares ahead trade or cancel: the queue ahead shrinks
+        M->>X: (a) (c) (d) a trade or a crossing order reaches it: it fills
+    end
+    Note over X,G: report latency, 50 µs
+    X->>G: the fill report is delivered and booked
+    G->>S: on_report(fill)
+```
+
 ## D2: the fill model
 
 From the comment in [`execution_simulator.hpp`](../include/simulator/sim/execution_simulator.hpp):
@@ -53,7 +78,8 @@ From the comment in [`execution_simulator.hpp`](../include/simulator/sim/executi
 - **Day orders are post-only.** One that would take liquidity is rejected (`WouldCross`). Otherwise it rests
   virtually: `anchor_sequence` = the book's last sequence and `ahead_quantity` = the visible quantity at its price, so
   every historical order already at that price is ahead of it.
-- **On each market event**, before the book applies it, for each of our resting orders `o`:
+- **On each market event**, before the book applies it, for each of our resting orders `o` (while the book is halted,
+  paused or quotation only, only rule (b) runs):
   - **(b)** an Execute, Cancel, Delete or Replace of a historical order ahead of `o` at `o`'s price shrinks
     `ahead_quantity`;
   - **(a)** an Execute of a historical order behind `o` at `o`'s price fills `o` at its price;
@@ -78,8 +104,8 @@ price. With the guard, the count is 0.
 - Money is integer: tick-shares ($0.0001) for ITCH, with `__int128` products. PnL is realised + unrealised − fees.
 - `Portfolio::fills_digest()` hashes every fill booked, in order: its time, order, side, price, quantity and
   liquidity. The Lab's Verify and Watch compare it, so a run reproduces fill by fill, not only in its totals.
-- Fees are per share in price ticks, maker and taker apart; a negative fee is a rebate (`--maker-fee-ticks -20` is a
-  $0.0020 rebate).
+- Fees are per share in price ticks, maker and taker apart; a negative maker fee is a rebate (`--maker-fee-ticks -20`
+  is a $0.0020 rebate); the taker fee is 0 or more.
 - `Portfolio::reserve` checks each order before it is sent, against `RiskLimits`: no larger than the largest order
   (by default the strategy's clip or quote size), at most `--max-open-orders` live, and a worst-case position (every
   open order on its side filled, this one included) within `--max-position`.
@@ -107,14 +133,15 @@ its own `max_position` (500 for the ORB, one `clip` for the trend taker), and on
 
 ### Opening range breakout (`Orb`)
 
-- **The range** is the high and low of every execution's price in the half-open interval [09:30, 09:30 +
-  `range_minutes`), from `StrategyContext::trade`, so executions of hidden size count too.
+- **The range** is the high and low of every execution's price in the half-open interval [open, open + `range_minutes`),
+  where the open is 09:30 in the CLI and the day's feed session in the Lab, from `StrategyContext::trade`, so executions
+  of hidden size count too.
 - **Entries.** On the first trade strictly above the high, an IOC buy at the ask for `clip` shares; strictly below the
   low, an IOC sell at the bid. One entry per direction a day; a direction is spent once the gateway accepts its entry.
   No reversal: a trade that stops a long does not also enter short.
-- **Stop and flatten.** A trade strictly through the other side of the range closes the position; a timer at 15:55
-  closes whatever is left. Closing orders are IOCs of at most `clip` shares, sent again on each market event until
-  the position is flat. A day starts by closing any position carried into it.
+- **Stop and flatten.** A trade strictly through the other side of the range closes the position; a timer 5 minutes
+  before the close (15:55 on a full day) closes whatever is left. Closing orders are IOCs of at most `clip` shares, sent
+  again on each market event until the position is flat. A day starts by closing any position carried into it.
 - **One order in flight**, and only while the book is trading and has a touch on the side it needs.
 - **Stats**: entries, stops, flattens, closing orders, risk rejects, days that never formed a range, and the shares
   requested, bought, sold and expired.
@@ -146,7 +173,7 @@ closing IOC expired unfilled and was sent again: flat at the end, a total PnL of
 | Run | Maker fills | Fill rate (of quoted shares) | FIFO anomalies | Total PnL |
 |---|---|---|---|---|
 | SPY market maker, full day, no fees | 12,843 | 19.69 % | 0 | −$2,726.78 |
-| SPY market maker, 256 MiB slice (pre-market), no fees | 143 (13,693 shares) | 3.65 % | 0 | $4.77 |
+| SPY market maker, the day's first 256 MiB (to 09:30:10), no fees | 143 (13,693 shares) | 3.65 % | 0 | $4.77 |
 
 Part of the slice run's output:
 
@@ -157,6 +184,7 @@ Execution
   fill rate        3.65% of 375000 shares quoted
   cancels          3612 done, 64 rejected (too late)
   would cross      1 rejected
+  not trading      0 rejected
   FIFO anomalies   0
 
 Fill attribution (maker fills/FIFO anomalies; crosses = first second of 09:30, 16:00)

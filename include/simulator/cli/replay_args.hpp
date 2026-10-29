@@ -61,7 +61,7 @@ inline constexpr std::string_view usage =
     "fees, per share in price ticks ($0.0001 for ITCH):\n"
     "  --taker-fee-ticks N     paid when taking liquidity (default 0)\n"
     "  --maker-fee-ticks N     paid when providing it; negative = rebate (default 0)\n"
-    "a backtest's day is one session, 09:30-16:00 ET\n"
+    "a backtest trades the whole file; its strategy is told one session, 09:30-16:00 ET\n"
     "\n"
     "  -h, --help              print this help\n"
     "  --version               print the commit, build type and compiler\n"

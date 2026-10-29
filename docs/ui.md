@@ -8,6 +8,9 @@ are React and TradingView's lightweight-charts.
 ./build/chronos-serve --data data/itch         # open http://127.0.0.1:8080/
 ```
 
+The README's [Using it](../README.md#using-it) walks through each page on numbered screenshots; this page describes
+every panel in full.
+
 ## The Trading Terminal
 
 ![The Trading Terminal watching a market maker's run on AAPL](images/terminal.png)
@@ -37,8 +40,9 @@ The page is a grid of square panels, every number in a monospace face:
   While a Lab run is watched the ticket is locked and says why.
 - **Account**, and under the ticket and the tape, **open orders** (with cancel), **fills** (with the rule that filled
   each and its queue ahead at entry) and each resting order's **queue** position.
-- **Engine strip** (bottom, on both pages). The replay's events a second, the snapshots this page skipped, the commands
-  the session drained, the simulated order and report latencies, and the session's symbol, generation and state.
+- **Engine strip** (bottom, on every page). The replay's events a second, the snapshots this page skipped, the commands
+  the session drained, the simulated order and report latencies, and the session's symbol, generation (a new replay,
+  started by each load, restart, backward seek or Watch) and state.
 
 ## The Strategy Lab
 
@@ -60,15 +64,17 @@ At `http://127.0.0.1:8080/#lab`, or through the switch in the top bar:
 - **Metrics** (top right): total PnL, fills, fill rate, max drawdown, fees and rebates, max |position|, then the
   strategy's own stats, each named after it (the ORB's entries, closing orders, range and shares, say). A failed or
   cancelled run's figures are marked partial.
-- **The run picked** (right): **Watch in Terminal**, **Verify**, **Export JSON**, **Edit as new**, **Cancel** and
-  **Delete**, and its provenance: the build, each day's hash, session source and size, the engine, the timings, the
-  digests and every verification.
+- **The run picked** (right): **Watch in Terminal**, **Verify**, **Export JSON**, **Edit as new**, **Cancel run** (while
+  it is queued or running) and **Delete**, and its provenance: the build, each day's hash, session source and size, the
+  engine, the timings, the digests and every verification.
 
 **Watch in Terminal** replays the run in the terminal, paced, at any speed, with the run's own fees and limits on the
 ticket, and says when the replay ends whether it reproduced. **Stop watching** loads the plain replay of the same symbol
 and days.
 
 ## The Strategies page
+
+![The Strategies page: the template, saved and checked, beside the guidelines](images/strategies.png)
 
 At `http://127.0.0.1:8080/#strategies`: strategies written in the browser as Lua scripts
 ([strategies.md](strategies.md#a-strategy-written-in-the-browser)).
@@ -82,7 +88,8 @@ At `http://127.0.0.1:8080/#strategies`: strategies written in the browser as Lua
 
 ## How the page is built
 
-- **One store per page**, outside React ([`store.ts`](../web/src/store.ts), [`lab.ts`](../web/src/lab.ts)). Each panel
+- **Two stores**, outside React: the terminal's ([`store.ts`](../web/src/store.ts)) and the Lab's
+  ([`lab.ts`](../web/src/lab.ts)), which the Strategies page shares. Each panel
   subscribes to its own slice through `useSyncExternalStore` with a selector that returns a stable reference, so a
   snapshot re-renders only the panels whose data changed.
 - **A pure reducer.** `apply(state, message)` folds each WebSocket message into the state; the tests drive it with plain
@@ -100,8 +107,9 @@ At `http://127.0.0.1:8080/#strategies`: strategies written in the browser as Lua
 ## Developing
 
 Vite serves `web/src` with hot reload. It proxies `/api` and `/ws` to `chronos-serve` and rewrites `Host` to
-`127.0.0.1:<port>`, and the `Origin` of the WebSocket and of the Lab's POSTs and DELETEs too when the page itself is on
-`localhost` or `127.0.0.1`: without a token, that is all `chronos-serve` accepts.
+`127.0.0.1:<port>`, and the `Origin` of the WebSocket and of every `/api` request too (the Lab's and the Strategies
+page's POSTs, PUTs and DELETEs among them) when the page itself is on `localhost` or `127.0.0.1`: without a token, that
+is all `chronos-serve` accepts.
 
 ```bash
 ./build/chronos-serve --data data/itch --date 2019-12-30 --port 8080
@@ -113,7 +121,7 @@ Vite serves `web/src` with hot reload. It proxies `/api` and `/ws` to `chronos-s
 From `web/`:
 
 ```bash
-npm run typecheck && npm test                  # Vitest: the stores, candles, order checks, the Lab and formatting
+npm run typecheck && npm test                  # Vitest: stores, candles, ladder, order checks, PnL, Lab, formatting
 npx playwright install chromium                # once
 npm run e2e                                    # builds web/dist, then Playwright against the build's two binaries
 ```
@@ -121,8 +129,9 @@ npm run e2e                                    # builds web/dist, then Playwrigh
 Each end-to-end test starts its own `chronos-serve` on small generated days, which `chronos-e2e-fixture` writes to a
 temp directory. They place an order and see it fill; drop the WebSocket in the middle of a restart and check that the
 terminal ends on the new generation and sends nothing stale; seek to a New York time; play across a night; connect to a
-server that wants a token; run, compare, verify, export and delete Lab runs; watch a run to its verdict; and edit a day
-file under a run to see Verify and Watch refuse a changed input but accept another symbol's change.
+server that wants a token; run, compare, verify, export and delete Lab runs; watch a run to its verdict; edit a day
+file under a run to see Verify and Watch refuse a changed input but accept another symbol's change; and write a
+strategy on the Strategies page, see Save check it, run it in the Lab with its stats and log, and delete it.
 
 ## Measuring the page
 
@@ -133,14 +142,14 @@ CHRONOS_BENCH_FILE=../data/itch/12302019.NASDAQ_ITCH50.bin npx playwright test b
 CHRONOS_LAG_FILE=../data/itch/12302019.NASDAQ_ITCH50.bin npx playwright test lag       # where the page's time goes
 ```
 
-`lag` plays a symbol at each speed, switches to the Lab and back while it plays, then runs the default strategy and
-watches it at Max. For each window it prints the WebSocket messages and bytes a second, the time the socket's handler
-took, the long tasks and the frame gaps. `CHRONOS_*_SYMBOL`, `_DATE`, `_STORE` and `_OUT` set the symbol, the day, a
-store to reuse and a file for the JSON summary.
+`lag` plays a symbol at each speed, switches to the Lab and back while it plays, then runs the Lab's default strategy,
+the market maker, and watches it at Max. For each window it prints the WebSocket messages and bytes a second, the time
+the socket's handler took, the long tasks and the frame gaps. `CHRONOS_*_SYMBOL`, `_DATE`, `_STORE` and `_OUT` set the
+symbol, the day, a store to reuse and a file for the JSON summary.
 
 On 2026-10-27, AAPL with the market maker:
 
-| Window | Before | Once a frame | Dense Pro |
+| Window | Before | Once a frame | Current layout |
 |---|---|---|---|
 | watching the run at Max: socket handler's share of the main thread | 66.7 % | 1.9 % | 1.8 % |
 | frames a second | 30.8 | 59.7 | 60.0 |
@@ -149,7 +158,8 @@ On 2026-10-27, AAPL with the market maker:
 | switching to the Lab while playing | one 96 ms task | none | none |
 
 Watching the run used to tell every listener of every message, and the chart then redrew every fill marker (a CPU
-profile put 51 % of the page's time in its `setMarkers`); switching to the Lab added the symbol list's 8,906 options
-one by one to a mounted list. The store now notifies once a frame, and the list mounts whole. The Dense Pro layout
-then draws a run's fills as one marker per candle and side, which takes the worst frame to 17 ms. One frame of about
-67 ms remains when a finished run's results first draw (its equity curve, up to 57,600 samples a series).
+profile put 51 % of the page's time in its `setMarkers`); switching to the Lab added the symbol list's 8,906 options one
+by one to a mounted list. The store now notifies once a frame, and the list mounts whole. The current layout (the
+redesign of commit `4e5b5b5`) then draws a run's fills as one marker per candle and side, which takes the worst frame to
+17 ms. One frame of about 67 ms remains when a finished run's results first draw (its equity curve, up to 57,600 samples
+a series).

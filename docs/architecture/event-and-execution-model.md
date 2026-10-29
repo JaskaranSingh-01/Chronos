@@ -41,18 +41,20 @@ strategy **read** the book. No arrow runs from the simulated path into the book.
 
 | Event | Effect on the book | Rejected (book unchanged) when |
 |---|---|---|
-| **Add** | a new order rests at its price, at the back of that price's queue | its id is already live; zero quantity; no room |
+| **Add** | a new order rests at its price, at the back of that price's queue | its id is already live; zero quantity |
 | **Execute** | the order's remaining quantity falls by the executed quantity; at zero it leaves the book. A partial execution keeps the order's place in the queue | unknown id; zero quantity; more than the remaining |
 | **Cancel** | the remaining quantity falls; the order keeps its place | unknown id; zero quantity; more than the remaining |
 | **Delete** | the order leaves the book | unknown id |
-| **Replace** | the old order leaves the book; a new one, with a new id, price and quantity on the same side, rests at the back of its price's queue | unknown old id; the new id is live or equals the old one; zero quantity; no room |
+| **Replace** | the old order leaves the book; a new one, with a new id, price and quantity on the same side, rests at the back of its price's queue | unknown old id; the new id is live or equals the old one; zero quantity |
 | **Trade** | none: a print against hidden liquidity | — |
 | **Status** | the book's trading state changes; a book that is not trading may be crossed | — |
 | **Clear** | every order leaves the book (between days) | — |
 | **Modify** | none | always (unsupported; no source emits it) |
 
-Any event naming a symbol other than the book's is rejected too. Every order carries an arrival sequence number, so its place among the orders at its price is exact. That queue is
-what the simulated path reads.
+Any event naming a symbol other than the book's is rejected too. An Add or Replace that finds no room also leaves the
+book unchanged, but it is a fatal failure, not a rejection: the run stops (`CapacityExhausted`). Every order carries an
+arrival sequence number, so its place among the orders at its price is exact. That queue is what the simulated path
+reads.
 
 ### The trade an event prints
 
@@ -94,8 +96,10 @@ sequenceDiagram
 
 1. **Send.** The gateway checks the order against the risk limits before anything else: no larger than the largest
    order allowed, no more open orders than allowed, and a worst-case position (every open order on its side filled,
-   this one included) within the position limit. A refused order never leaves the gateway. An accepted one gets an id
-   from the simulated id space, never a historical id, and is scheduled to arrive one **order latency** later.
+   this one included) within the position limit. A refused order never leaves the gateway. An accepted one gets the
+   gateway's next id (1, 2, 3, ... in each run) and is scheduled to arrive one **order latency** later. A simulated id
+   is looked up only among simulated orders, never in the historical book, so one equal to a historical order's id is
+   harmless.
 2. **Arrive.** The simulator checks the order against the book as it is at arrival:
 
    | Check | Rejected as |
@@ -113,7 +117,8 @@ sequenceDiagram
    - An **IOC order** walks the visible opposite levels, best first, while they cross its price, filling the smaller
      of what remains and each level's quantity at that level's price, as taker. Whatever is left expires. These fills
      remove nothing from the book ([no market impact](#what-the-model-leaves-out)).
-   - A **market order** (terminal only) is an IOC limited to 1 % beyond the best opposite price, rounded to the cent.
+   - A **market order** (terminal only) is an IOC priced 1 % beyond the best opposite price, the band rounded down to
+     the price grid; with no opposite price it is refused (`no_liquidity`).
 4. **Report.** Each outcome is an execution report: accepted, rejected (with a reason), fill (price, quantity,
    maker or taker, the rule that filled it, and the ahead quantity when it rested), cancelled, cancel rejected (too
    late) or expired. A report is delivered one **report latency** after it happened.
@@ -150,17 +155,18 @@ conservative: an order joins behind every order already at its price, and a tie 
 (a), (b) and (d) follow from a FIFO queue. Rule (c) is an assumption: it treats a historical order that posted at or
 through our price as one that would have traded with us, although it posted passively where our order did not exist,
 and might instead have been repriced or rejected (a post-only order, say). In the published SPY market-maker run on the
-256 MiB slice, rule (c) produced 106 of the 143 fills. No measurement yet shows fills and PnL with the rule turned off.
+first 256 MiB of the 2019-12-30 day file, rule (c) produced 106 of the 143 fills. No measurement yet shows fills and
+PnL with the rule turned off.
 
 ### Ordering and time
 
-Everything is ordered by (exchange time, class, sequence) ([I5](README.md#the-invariants)):
+Everything is ordered by (timestamp, class, sequence) ([I5](README.md#the-invariants)):
 
 | Class | What | Sequence |
 |---|---|---|
 | 0 | market event | source order |
 | 1 | simulator event: order arrival, cancel arrival, report delivery, timer | insertion order |
-| 2 | manual command (interactive sessions only) | command order |
+| 2 | manual command (interactive sessions only) | command order; after a Step that stops inside a timestamp, a batch applies before the rest of that timestamp's market events, and only its own simulator events wait for them |
 
 - At an equal time the market goes first, so an order arriving at `T` queues behind every historical add stamped `T`.
 - Simulator events at exactly a market event's time `T`, including zero-latency events that event creates, run after
@@ -172,10 +178,10 @@ Everything is ordered by (exchange time, class, sequence) ([I5](README.md#the-in
 
 ### Day boundaries
 
-Between consecutive days the stream carries a Clear. Every resting shadow order expires, as a day order does, and the
-book empties. The position and cash carry over; the opening range breakout closes a carried position at the start of
-the next day. An order still in flight at the Clear arrives on the new day and may rest there
-([Q11](README.md#open-questions-and-known-gaps)).
+A run in the server covers one or more days (up to 32, in date order, not necessarily consecutive). Between two days
+the stream carries a Clear. Every resting shadow order expires, as a day order does, and the book empties. The position
+and cash carry over; the opening range breakout closes a carried position at the start of the next day. An order still
+in flight at the Clear arrives on the new day and may rest there ([Q11](README.md#open-questions-and-known-gaps)).
 
 ## The portfolio
 
@@ -190,10 +196,11 @@ the next day. An order still in flight at the Clear arrives on the new day and m
 ## Strategies
 
 A strategy is called on three occasions: an applied market event, a report delivered to it, and a timer it set. Each
-call gets a read-only book and portfolio, the order gateway, and the trade the event printed, if any. A strategy cannot
-reach the book's writer, the simulator's state or any wall clock; the only time it sees is exchange time. In an
-interactive session the same boundary holds an
-attached registered strategy, or none; manual orders use the same gateway instead
+call gets a read-only book and portfolio, the order gateway, and the trade the event printed, if any. A strategy is
+given no way to reach the book's writer, the simulator's state or a wall clock; the only time it is given is exchange
+time. A script's sandbox enforces this; a C++ plugin keeps it as a rule, which `StrategyRegistryTest`'s repeated runs
+check only in effect. In an interactive session the same boundary holds an attached strategy (a registered one, or a
+script with its source), or none; manual orders use the same gateway instead
 ([web-terminal.md](web-terminal.md#strategies-and-manual-orders-in-a-session)).
 
 ## What the model leaves out
