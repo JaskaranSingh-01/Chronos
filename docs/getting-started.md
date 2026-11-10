@@ -11,13 +11,14 @@ Needs Docker with Compose. From the repository root:
 docker compose up
 ```
 
-The first run builds the image (a few minutes: the UI, then `chronos-serve`, `simulator` and `chronos-e2e-fixture` with
-g++ 14, Release). Open `http://localhost:8080/` and enter the token `chronos`. After pulling new code,
-`docker compose up --build` rebuilds the image; a plain `up` reuses the one it has.
+The first run builds the image (a few minutes: the UI, then `chronos-serve` and `simulator` with g++ 14, Release).
+Open `http://localhost:8080/` and enter the token `chronos`. After pulling new code, `docker compose up --build`
+rebuilds the image; a plain `up` reuses the one it has.
 
-- **No data needed to start.** With no ITCH day in `data/itch`, the container generates two small sample days (ACME and
-  ZETA, the end-to-end tests' fixture) and serves those: load `ACME`, play it, place an order, run the Lab's market
-  maker on it (+$3.00 over 6 fills).
+- **No download needed to start.** With no ITCH day in `data/itch`, the container serves the sample day in the
+  repository: AAPL, AMZN, NVDA and TSLA on 2019-12-30, every one of their messages
+  ([market-data.md](market-data.md#the-sample-day)). Load `AAPL`, play it, place an order, run the Lab's market maker
+  on it. It and its store sit apart from the real days' in the volume.
 - **The real day.** Download it into `data/itch` ([below](#get-the-data)) and run `docker compose up` again. The
   directory is mounted read-only; the first start builds each day into the per-symbol store
   ([market-data.md](market-data.md#the-per-symbol-store)), a third of its size and a few minutes a day in Docker on a
@@ -48,12 +49,14 @@ cmake -S . -B build                  # RelWithDebInfo unless CMAKE_BUILD_TYPE is
 cmake --build build -j
 ctest --test-dir build               # 723 tests
 (cd web && npm ci && npm run build)  # the UI, into web/dist
+gunzip -k sample/12302019.NASDAQ_ITCH50.bin.gz
+./build/chronos-serve --data sample  # the sample day; open http://127.0.0.1:8080/, type AAPL, press Enter
 ```
 
 ## Get the data
 
-NASDAQ publishes sample TotalView-ITCH 5.0 days at `https://emi.nasdaq.com/ITCH/Nasdaq ITCH/`. These docs use
-2019-12-30:
+The sample day covers four symbols. For every symbol, NASDAQ publishes sample TotalView-ITCH 5.0 days at
+`https://emi.nasdaq.com/ITCH/Nasdaq ITCH/`. These docs use 2019-12-30:
 
 ```bash
 mkdir -p data/itch

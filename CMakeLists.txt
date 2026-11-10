@@ -217,10 +217,12 @@ target_compile_definitions(crow_headers INTERFACE ASIO_STANDALONE ASIO_NO_DEPREC
 # Lua 5.4 (MIT), pinned, for the strategies written in the Strategy Lab (server/src/script_strategy.cpp): the core and
 # only the libraries the sandbox opens, compiled as C++ so a script's error unwinds through C++ frames as an exception;
 # lstate.c and ltablib.c through cmake/lua_*.cpp, without the clock's seeds of the string hash and table.sort's pivot.
-# Download only: Lua has no CMake files.
+# Download only: Lua has no CMake files. Debian's copy of the release tarball comes first, as www.lua.org is at times
+# unreachable and a configure then waits ~15 minutes for it; the hash is the same.
 FetchContent_Declare(
     lua
-    URL https://www.lua.org/ftp/lua-5.4.7.tar.gz
+    URL https://deb.debian.org/debian/pool/main/l/lua5.4/lua5.4_5.4.7.orig.tar.gz
+        https://www.lua.org/ftp/lua-5.4.7.tar.gz
     URL_HASH SHA256=9fbf5e28ef86c69858f6d3d34eccc32e911c1a28b4120ff3e84aaa70cfbf1e30
 )
 FetchContent_MakeAvailable(lua)

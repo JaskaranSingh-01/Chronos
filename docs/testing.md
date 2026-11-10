@@ -12,8 +12,8 @@
 | Playwright (`web/e2e/`) | 14, plus 2 measurement specs | the terminal, the Strategies page and the Lab in Chromium against a real `chronos-serve` |
 
 `ctest` runs 723 tests: every GoogleTest case, the CLI tests and a build-info test. Five of the 6 skips are the
-real-data tests, which need a day file; the sixth is the conformance suite's error check, which does not apply to
-`VectorSource`.
+real-data tests, which need a day file (CI gives them the sample day); the sixth is the conformance suite's error check,
+which does not apply to `VectorSource`.
 
 ```bash
 cmake -S . -B build && cmake --build build -j && ctest --test-dir build
@@ -59,11 +59,13 @@ cmake -S . -B build && cmake --build build -j && ctest --test-dir build
 ### Real-data tests
 
 ```bash
-CHRONOS_ITCH_FILE=data/itch/12302019.NASDAQ_ITCH50.first-256MiB.bin ./build/simulator_tests --gtest_filter='ItchRealDataTest.*:BacktestDeterminismTest.*:StoreRealDataTest.*'
+gunzip -k sample/12302019.NASDAQ_ITCH50.bin.gz
+CHRONOS_ITCH_FILE=$PWD/sample/12302019.NASDAQ_ITCH50.bin ctest --test-dir build -R RealData    # 5 tests, about 5 s
 ```
 
 `CHRONOS_ITCH_SYMBOL` defaults to `AAPL` and `CHRONOS_ITCH_DATE` to `2019-12-30`. Without `CHRONOS_ITCH_FILE` they skip.
-Use the slice: these tests read the file several times. `StoreRealDataTest` builds the day's store in `TMPDIR`, which
+The sample day ([market-data.md](market-data.md#the-sample-day)) holds AAPL's whole day; a full day file or the slice
+works too, but these tests read the file several times. `StoreRealDataTest` builds the day's store in `TMPDIR`, which
 needs about a third of the file's size free.
 
 ## Sanitizers

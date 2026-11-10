@@ -5,6 +5,8 @@ build
 compile_commands.json
 .DS_Store
 /data/
+/sample/*.bin
+/sample/store/
 /sessions/
 /runs/
 /strategy-scripts/

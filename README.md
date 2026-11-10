@@ -25,7 +25,7 @@ NASDAQ's public sample day, 2019-12-30: 8.25 GB, 268,744,780 messages, 8,906 sym
 | **Determinism** | the same counts and combined digest, `6897f945bcef75c2`, from list and ladder books, one thread and two, and the first engine (the books are empty at the close, so it fingerprints each symbol's adds and replaces); on the day's first 256 MiB, whose books are still live at its end, the same book digests from the Linux/g++ Docker image as from the macOS/clang build |
 | **Allocations** | 0 in the replay, counted by a replacement `operator new`, with the heap unchanged; CI checks the hot path |
 | **Per-event cost** | 204.7 ns mean; 191 / 447 / 863 ns at p50 / p99 / p99.9 of 1,024-event batch means (the book thread; the clock cannot time one event: see [performance](docs/performance.md#method)) |
-| **Tests** | 723 ctest tests (GoogleTest cases and the CLI's process tests; 6 skip, 5 of them for want of the day file), 126 Vitest, 14 Playwright end-to-end; CI on Linux (ASan, UBSan, TSan) and macOS (UBSan) |
+| **Tests** | 723 ctest tests (GoogleTest cases and the CLI's process tests; 6 skip, 5 of them for want of a day file, which CI runs on the sample day), 126 Vitest, 14 Playwright end-to-end; CI on Linux (ASan, UBSan, TSan) and macOS (UBSan) |
 
 ![Full-day replay throughput by book and threads: ladder with 2 threads, the default, 4.89 million events a second;
 list with 2 threads 4.62 million; ladder with 1 thread 3.39 million; list with 1 thread 3.27 million; the first engine
@@ -66,15 +66,15 @@ Chronos runs on macOS and Linux. Pick one of two paths:
 |---|---|---|
 | **Gives you** | the UI, the server and the CLI in one image | the CLI, the server, the UI, the tests and the benchmarks |
 | **Needs** | Docker with Compose v2 | CMake 3.20+; a C++20 compiler (tested with GCC 13, Clang 18 and Apple clang 17); Node 24 with npm, for the UI; git and curl |
-| **Disk, with one real day** | about 11 GB: the 8.25 GB day and its 2.8 GB store | the same, plus under 1 GB for the build |
+| **Disk** | about 160 MB with the sample day; about 11 GB with a real day, the 8.25 GB day and its 2.8 GB store | the same, plus under 1 GB for the build |
 
 ### With Docker
 
 1. Get the code: `git clone https://github.com/JaskaranSingh-01/Chronos.git && cd Chronos`.
-2. Optionally put a real day in `data/itch` ([below](#get-a-trading-day)). Without one, the image generates two small
-   sample days (ACME and ZETA) and serves those, so the UI opens at once.
+2. Optionally put a real day in `data/itch` ([below](#get-a-trading-day)). Without one, the image serves the
+   [sample day](#the-sample-day): AAPL, AMZN, NVDA and TSLA on 2019-12-30, so the UI opens on real data at once.
 3. Run `docker compose up`. The first run builds the image, a few minutes, and reads each day into the per-symbol
-   store, a few minutes for a real day, before the server listens.
+   store before the server listens: seconds for the sample, a few minutes for a real day.
 4. Open <http://localhost:8080/> and enter the token `chronos`.
 
 Ctrl+C or `docker compose down` stops it; the store, the Lab's runs and your scripts stay in the `chronos-state` volume
@@ -90,36 +90,50 @@ cmake -S . -B build                    # RelWithDebInfo; the first configure fet
 cmake --build build -j                 # simulator, chronos-serve and the tests
 ctest --test-dir build                 # 723 tests; 6 skip without a day file
 (cd web && npm ci && npm run build)    # the UI, into web/dist, which chronos-serve serves
+gunzip -k sample/12302019.NASDAQ_ITCH50.bin.gz   # the sample day, for the UI and the CLI
 ```
+
+### The sample day
+
+The repository carries one day to start with: `sample/12302019.NASDAQ_ITCH50.bin.gz`, 32.7 MB, NASDAQ's 2019-12-30 cut
+to AAPL, AMZN, NVDA and TSLA. It keeps every message of those four (3,057,889, 94 MB unpacked) and every System Event,
+so each symbol's day is the full day's byte for byte, and its backtests give the same fills, PnL and digests
+([how it is cut](docs/market-data.md#the-sample-day)). Docker serves it on its own; from source, unpack it with
+`gunzip -k`, as above.
 
 ### Get a trading day
 
-NASDAQ publishes sample days of TotalView-ITCH 5.0; every number in these docs is from 2019-12-30:
+For every symbol, download a whole day. NASDAQ publishes sample days of TotalView-ITCH 5.0; every number in these docs
+is from 2019-12-30:
 
 ```bash
 mkdir -p data/itch
 curl -fL 'https://emi.nasdaq.com/ITCH/Nasdaq%20ITCH/12302019.NASDAQ_ITCH50.gz' | gunzip > data/itch/12302019.NASDAQ_ITCH50.bin
 ```
 
-Any day from that directory works, named `MMDDYYYY.NASDAQ_ITCH50.bin`. `data/` is in `.gitignore`: market data is never
-committed. [docs/getting-started.md](docs/getting-started.md) also cuts a 256 MiB slice for quick tests.
+Any day from that directory works, named `MMDDYYYY.NASDAQ_ITCH50.bin`. `data/` is in `.gitignore`: no full day is
+committed. [docs/market-data.md](docs/market-data.md#getting-the-data) also cuts a 256 MiB slice for quick tests.
 
 ## Running it
 
-**The UI.** Start the server on the directory of days, then open the address it prints:
+**The UI.** Start the server on a directory of days, then open the address it prints:
 
 ```bash
-./build/chronos-serve --data data/itch          # then open http://127.0.0.1:8080/
+./build/chronos-serve --data sample             # the sample day; then open http://127.0.0.1:8080/
+./build/chronos-serve --data data/itch          # the days you downloaded
 ```
 
-The first start reads each new day into the per-symbol store, about a minute a day; later starts reuse it. `--date`
-picks the starting day (the latest by default) and `--port` the port; `--help` lists every option
+The first start reads each new day into the per-symbol store, about a minute for a full day; later starts reuse it.
+`--date` picks the starting day (the latest by default) and `--port` the port; `--help` lists every option
 ([docs/cli.md](docs/cli.md#chronos-serve)).
 
 **The CLI.**
 
 ```bash
-# every symbol's book over the whole day, with the combined digest: about a minute
+# a backtest of the opening range breakout on the sample day: under a second
+./build/simulator backtest sample/12302019.NASDAQ_ITCH50.bin --symbol AAPL --date 2019-12-30 --strategy orb
+
+# with the downloaded day: every symbol's book over the whole day, with the combined digest, in about a minute
 ./build/simulator replay data/itch/12302019.NASDAQ_ITCH50.bin --all --date 2019-12-30
 
 # a backtest from the day file

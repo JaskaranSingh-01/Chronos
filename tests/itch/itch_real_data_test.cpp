@@ -17,8 +17,8 @@
 namespace simulator {
 namespace {
 
-// Real NASDAQ data, never committed: point CHRONOS_ITCH_FILE at a TotalView-ITCH
-// 5.0 file (e.g. data/itch/12302019.NASDAQ_ITCH50.first-256MiB.bin).
+// Real NASDAQ data: point CHRONOS_ITCH_FILE at a TotalView-ITCH 5.0 file (e.g. the
+// sample day, sample/12302019.NASDAQ_ITCH50.bin once unpacked, as CI does).
 // CHRONOS_ITCH_SYMBOL defaults to AAPL, CHRONOS_ITCH_DATE to 2019-12-30.
 std::string_view env_or(const char* name, std::string_view fallback)
 {

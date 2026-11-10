@@ -195,7 +195,8 @@ Its contract:
   truncated-tail option, and ends there.
 - **Space.** The store takes about a third of the days it holds; building a day needs free space of at least 60 % of
   its file.
-- **Licensing.** Market data is never committed or redistributed with the project.
+- **Licensing.** No full day is committed or redistributed with the project; the one sample is four symbols cut from
+  NASDAQ's public sample day of 2019-12-30 ([market-data.md](../market-data.md#the-sample-day)).
 - **A new format** must provide per-order (L3) events, its own clock conversion and scales, and pass the conformance
   suite. LOBSTER is the planned second real format, with a per-message comparison of the rebuilt book against
   LOBSTER's own book as an independent correctness check.

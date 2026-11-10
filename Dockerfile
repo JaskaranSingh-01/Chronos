@@ -15,11 +15,12 @@ RUN apt-get update \
 WORKDIR /src
 COPY . .
 RUN cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_COMPILER=gcc-14 -DCMAKE_CXX_COMPILER=g++-14 \
- && cmake --build build --parallel --target simulator chronos-serve chronos-e2e-fixture
+ && cmake --build build --parallel --target simulator chronos-serve
 
 FROM ubuntu:24.04
-COPY --from=engine /src/build/simulator /src/build/chronos-serve /src/build/chronos-e2e-fixture /usr/local/bin/
+COPY --from=engine /src/build/simulator /src/build/chronos-serve /usr/local/bin/
 COPY --from=web /src/web/dist /opt/chronos/web
+COPY sample/12302019.NASDAQ_ITCH50.bin.gz /opt/chronos/sample/
 COPY scripts/docker-entrypoint.sh /usr/local/bin/
 # runs/, sessions/ and the per-symbol store live here: mount a volume to keep them.
 WORKDIR /var/lib/chronos

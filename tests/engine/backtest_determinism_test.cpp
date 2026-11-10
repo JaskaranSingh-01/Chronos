@@ -175,7 +175,7 @@ TEST(BacktestDeterminismTest, SyntheticMarketMakerRunsAreIdentical)
     EXPECT_EQ(first.digest, replay_digest(replay_source, 4'096));
 }
 
-// Real NASDAQ data, never committed: see ItchRealDataTest.
+// Real NASDAQ data: see ItchRealDataTest.
 std::string_view env_or(const char* name, std::string_view fallback)
 {
     const char* value = std::getenv(name);

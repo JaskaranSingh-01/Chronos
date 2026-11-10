@@ -71,8 +71,7 @@ gunzip -c data/itch/12302019.NASDAQ_ITCH50.gz > data/itch/12302019.NASDAQ_ITCH50
 ```
 
 The download is 3,524,013,057 bytes (on 2026-10-13), and the `.bin` 8,251,407,909 bytes with 268,744,780 messages.
-Chronos maps the uncompressed file; it does not read gzip. `data/` is in `.gitignore`: market data is never committed
-or redistributed here.
+Chronos maps the uncompressed file; it does not read gzip. `data/` is in `.gitignore`: no full day is committed here.
 
 An optional slice, the first 256 MiB of the 2019-12-30 day file, for quick runs and the real-data tests:
 
@@ -82,6 +81,23 @@ head -c 268435456 data/itch/12302019.NASDAQ_ITCH50.bin > data/itch/12302019.NASD
 
 Its events run from 03:09 ET (the pre-open trading actions; orders from 04:00) to 09:30:10 ET, so it is pre-market
 only, and its last message is cut, so pass `--allow-truncated-tail`.
+
+### The sample day
+
+`sample/12302019.NASDAQ_ITCH50.bin.gz`, 32.7 MB in the repository, is that day cut to four symbols: AAPL, AMZN, NVDA
+and TSLA. Unpacked it is 94,108,374 bytes and 3,057,889 messages (the full day's 268,744,780), SHA-256
+`edcdf2e11cb502900b1736842fb36899fec432febe787ba219387127f91b5cb9`. `scripts/make-sample.py` cut it by the store's
+rule: every System Event, and each symbol's Stock Directory entry and every message on its stock locate from then on,
+in file order. So each symbol's store segment is the full day's byte for byte, with the same XXH3-128 in `index.tsv`,
+and its replays, backtests and digests are the full day's: the market maker on AAPL loses $9,069.00 on both.
+
+Docker serves it when `data/itch` holds no day, and CI runs the real-data tests on it. Natively:
+
+```bash
+gunzip -k sample/12302019.NASDAQ_ITCH50.bin.gz    # git ignores the .bin and the store beside it
+./build/chronos-serve --data sample
+./build/simulator backtest sample/12302019.NASDAQ_ITCH50.bin --symbol AAPL --date 2019-12-30 --strategy orb
+```
 
 ## The per-symbol store
 

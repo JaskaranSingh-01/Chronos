@@ -13,12 +13,14 @@ docker compose up                # first run builds the image: a few minutes
 # then open http://localhost:8080 and enter the token: chronos
 ```
 
-With no market data it serves two small generated sample days (symbols `ACME` and `ZETA`), so the UI works at once.
+With no market data in `data/itch` it serves the sample day in `sample/`: AAPL, AMZN, NVDA and TSLA on 2019-12-30, so
+the UI opens on real data at once.
 Stop with Ctrl+C.
 
 ## 2. Real market data (optional)
 
-NASDAQ's free sample day, 2019-12-30: about 3.5 GB to download, 8.25 GB unpacked; allow about 11 GB of disk.
+Every symbol of NASDAQ's free sample day, 2019-12-30: about 3.5 GB to download, 8.25 GB unpacked; allow about 11 GB of
+disk.
 
 ```bash
 mkdir -p data/itch
@@ -32,9 +34,9 @@ Place day files in `data/itch/`, named `MMDDYYYY.NASDAQ_ITCH50.bin`. Any day fro
 
 Three pages, switched at the top left:
 
-- **Trading Terminal** (`http://localhost:8080/`): type a symbol (`ACME`, or `AAPL` with real data) and press Enter.
-  Use **Play**, **Step** and the speed buttons. Click a price in the order book, then **Place** an order. It joins
-  the real queue, and you see the shares ahead of you until it fills.
+- **Trading Terminal** (`http://localhost:8080/`): type a symbol (`AAPL`, `AMZN`, `NVDA` or `TSLA` on the sample) and
+  press Enter. Use **Play**, **Step** and the speed buttons. Click a price in the order book, then **Place** an order.
+  It joins the real queue, and you see the shares ahead of you until it fills.
 - **Strategy Lab** (`#lab`): pick a strategy, symbol and days, then **Run backtest**. Results show PnL, fills and
   drawdown. **Verify** re-runs a backtest and checks it gives exactly the same result.
 - **Strategies** (`#strategies`): write a strategy in Lua in the browser; it then appears in the Lab.
@@ -47,7 +49,8 @@ Needs CMake 3.20+, a C++20 compiler (Xcode tools on macOS, `build-essential` on 
 cmake -S . -B build && cmake --build build -j                  # engine, server, tests
 ctest --test-dir build                                         # run the test suite
 (cd web && npm ci && npm run build)                            # the UI
-./build/chronos-serve --data data/itch                         # then open http://127.0.0.1:8080
+gunzip -k sample/12302019.NASDAQ_ITCH50.bin.gz                 # the sample day
+./build/chronos-serve --data sample                            # then open http://127.0.0.1:8080
 ./build/simulator --help                                       # the command-line replay and backtest tool
 ```
 

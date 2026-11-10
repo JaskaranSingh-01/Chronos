@@ -186,4 +186,4 @@ A local tool, still defensive:
 ## Running it in Docker
 
 `docker compose up` builds an image with `chronos-serve`, the CLI and the built UI, and serves the days in `data/itch`
-(read-only), or two generated sample days when there are none. See [getting-started.md](getting-started.md#docker).
+(read-only), or the repository's sample day when there are none. See [getting-started.md](getting-started.md#docker).

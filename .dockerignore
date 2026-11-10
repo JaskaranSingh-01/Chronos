@@ -1,5 +1,7 @@
 build
 data
+sample/*.bin
+sample/store
 data_temp
 runs
 sessions

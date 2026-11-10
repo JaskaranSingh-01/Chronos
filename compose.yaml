@@ -1,5 +1,5 @@
 # docker compose up, then open http://localhost:8080 and enter the token: chronos.
-# ITCH days in data/itch are served (read-only); with none, two generated sample days are.
+# ITCH days in data/itch are served (read-only); with none, the repository's sample day is (sample/).
 services:
   chronos:
     build: .
